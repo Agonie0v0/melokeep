@@ -1,0 +1,58 @@
+name: Check
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.kt'
+      - '**.kts'
+      - 'gradle.properties'
+      - '.github/workflows/*.yml'
+      - 'gradle/**'
+      - 'kotlin-js-store/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.kt'
+      - '**.kts'
+      - 'gradle.properties'
+      - '.github/workflows/*.yml'
+      - 'gradle/**'
+      - 'kotlin-js-store/**'
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: "Check"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: Gradle Wrapper Validation
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Cache Konan directory
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/build.gradle.kts') }}
+          restore-keys: "${{ runner.os }}-konan-"
+
+      - name: Check
+        run: ./gradlew check

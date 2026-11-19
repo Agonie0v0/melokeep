@@ -1,0 +1,17 @@
+{
+  "openSubsonicExtensions": [
+    {
+      "name": "template",
+      "versions": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "transcodeOffset",
+      "versions": [
+        1
+      ]
+    }
+  ]
+}

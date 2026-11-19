@@ -1,0 +1,207 @@
+{
+  "canonical_environment": {
+    "MELOKEEP_DATA_DIR": "/old/data",
+    "MELOKEEP_PORT": "9000",
+    "MELOKEEP_USER": "admin"
+  },
+  "default_engine_config": {
+    "clients_threadings": {},
+    "cookies": {},
+    "default_threads": 10,
+    "download_layout": "source",
+    "global_client_cfg": {
+      "auto_set_proxies": false,
+      "enable_download_curl_cffi": false,
+      "enable_parse_curl_cffi": false,
+      "enable_search_curl_cffi": false,
+      "maintain_session": false,
+      "max_retries": 3,
+      "random_update_ua": false,
+      "search_size_per_page": 10,
+      "search_size_per_source": 5,
+      "strict_limit_search_size_per_page": true,
+      "work_dir": "<TEMP_DIR>\\music"
+    },
+    "init_music_clients_cfg": {},
+    "lazy_search": false,
+    "lyrics_mode": "both",
+    "music_sources": [
+      "AudiusMusicClient",
+      "FMAMusicClient",
+      "ITunesMusicClient"
+    ],
+    "proxy_scope": "all",
+    "proxy_sources": [],
+    "proxy_url": "",
+    "request_timeout": 30,
+    "requests_overrides": {},
+    "search_rules": {}
+  },
+  "default_public_config": {
+    "available_sources": [
+      {
+        "capability": {
+          "note": "Audius 开放许可与独立音乐流媒体",
+          "playlist": false,
+          "search": true,
+          "tier": "native"
+        },
+        "category": "开放许可",
+        "description": "Audius 去中心化独立与开放许可音乐流媒体",
+        "engine_name": "AudiusMusicClient",
+        "id": "AudiusMusicClient",
+        "init_error": null,
+        "label": "Audius",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "note": "支持 Free Music Archive 站内搜索与开放许可音频解析",
+          "playlist": false,
+          "search": true,
+          "tier": "partial"
+        },
+        "category": "开放许可",
+        "description": "Free Music Archive 开放许可音乐曲库",
+        "engine_name": "FMAMusicClient",
+        "id": "FMAMusicClient",
+        "init_error": null,
+        "label": "FMA",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "note": "支持 ccMixter XSPF 开放许可搜索与音频解析",
+          "playlist": false,
+          "search": true,
+          "tier": "partial"
+        },
+        "category": "开放许可",
+        "description": "ccMixter 知识共享混音与独立音乐社区",
+        "engine_name": "CCMixterMusicClient",
+        "id": "CCMixterMusicClient",
+        "init_error": null,
+        "label": "ccMixter",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "note": "支持 OpenGameArt 开放许可页面音频附件检索与解析",
+          "playlist": false,
+          "search": true,
+          "tier": "partial"
+        },
+        "category": "开放许可",
+        "description": "OpenGameArt 开源游戏配乐与音频资源",
+        "engine_name": "OpenGameArtMusicClient",
+        "id": "OpenGameArtMusicClient",
+        "init_error": null,
+        "label": "OpenGameArt",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "note": "Wikimedia Commons 公共领域与开放许可音频",
+          "playlist": false,
+          "search": true,
+          "tier": "native"
+        },
+        "category": "开放许可",
+        "description": "Wikimedia Commons 公共领域与开放许可音频库",
+        "engine_name": "WikimediaCommonsMusicClient",
+        "id": "WikimediaCommonsMusicClient",
+        "init_error": null,
+        "label": "Wikimedia Commons",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "note": "开放许可独立音乐；需在音源设置中填入免费申请的 Jamendo client_id",
+          "playlist": true,
+          "search": true,
+          "tier": "partial"
+        },
+        "category": "开放许可",
+        "description": "Jamendo 开放许可独立音乐（需在音源设置填入免费申请的 client_id）",
+        "engine_name": "JamendoMusicClient",
+        "id": "JamendoMusicClient",
+        "init_error": null,
+        "label": "Jamendo",
+        "origin": "builtin",
+        "proxy_recommended": true
+      },
+      {
+        "capability": {
+          "episodes": true,
+          "note": "支持公开播客节目解析与官方 30 秒曲目试听预览（仅试听）",
+          "playlist": false,
+          "search": true,
+          "tier": "native"
+        },
+        "category": "官方试听",
+        "description": "Apple iTunes 公开播客节目与 30 秒官方试听片段",
+        "engine_name": "ITunesMusicClient",
+        "id": "ITunesMusicClient",
+        "init_error": null,
+        "label": "iTunes",
+        "origin": "builtin",
+        "proxy_recommended": false
+      }
+    ],
+    "download_concurrency": 2,
+    "download_layout": "source",
+    "embed_metadata": true,
+    "engine": "MeloKeep engine 1.0.0",
+    "lyrics_mode": "both",
+    "playback_timeout_seconds": 30,
+    "results_per_source": 5,
+    "search_timeout_seconds": 30,
+    "source_settings": {
+      "AudiusMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "CCMixterMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "FMAMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "ITunesMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "JamendoMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "OpenGameArtMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      },
+      "WikimediaCommonsMusicClient": {
+        "cookie": "",
+        "proxy": ""
+      }
+    },
+    "sources": [
+      "AudiusMusicClient",
+      "FMAMusicClient",
+      "ITunesMusicClient"
+    ]
+  },
+  "migrate_paths_sample": {
+    "title": "melokeep_outputs_song",
+    "url": "/api/files/cover?path=melokeep_outputs/a.mp3",
+    "work_dir": "melokeep_outputs"
+  },
+  "migrated_api_url": "/api/files/audio?path=melokeep_outputs/song.mp3",
+  "migrated_path_relative": "melokeep_outputs/.melokeep-history/item.json"
+}

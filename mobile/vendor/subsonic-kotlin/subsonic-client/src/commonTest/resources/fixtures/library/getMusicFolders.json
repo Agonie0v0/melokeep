@@ -1,0 +1,14 @@
+{
+  "musicFolders": {
+    "musicFolder": [
+      {
+        "id": 1,
+        "name": "Music"
+      },
+      {
+        "id": 2,
+        "name": "Test"
+      }
+    ]
+  }
+}

@@ -1,0 +1,974 @@
+{
+  "effective_routes": [
+    {
+      "endpoint": "engine_api.playback_event",
+      "method": "POST",
+      "name": "playback_event",
+      "path": "/api/playback/events",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.index",
+      "method": "GET",
+      "name": "index",
+      "path": "/",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.health",
+      "method": "GET",
+      "name": "health",
+      "path": "/api/health",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.auth_status",
+      "method": "GET",
+      "name": "auth_status",
+      "path": "/api/auth/status",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.read_config",
+      "method": "GET",
+      "name": "read_config",
+      "path": "/api/config",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.read_engine_config",
+      "method": "GET",
+      "name": "read_engine_config",
+      "path": "/api/engine/config",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.write_engine_config",
+      "method": "PUT",
+      "name": "write_engine_config",
+      "path": "/api/engine/config",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.write_config",
+      "method": "PUT",
+      "name": "write_config",
+      "path": "/api/config",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.search_start",
+      "method": "POST",
+      "name": "search_start",
+      "path": "/api/search/jobs",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.search_stop",
+      "method": "DELETE",
+      "name": "search_stop",
+      "path": "/api/search/jobs/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.search_events",
+      "method": "GET",
+      "name": "search_events",
+      "path": "/api/search/jobs/{ident}/events",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.playback",
+      "method": "POST",
+      "name": "playback",
+      "path": "/api/tracks/{sid}/playback",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.versions",
+      "method": "POST",
+      "name": "versions",
+      "path": "/api/tracks/{sid}/versions",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.lyrics",
+      "method": "GET",
+      "name": "lyrics",
+      "path": "/api/tracks/{sid}/lyrics",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.episodes",
+      "method": "GET",
+      "name": "episodes",
+      "path": "/api/tracks/{sid}/episodes",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.stream",
+      "method": "GET",
+      "name": "stream",
+      "path": "/api/stream/{sid}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.favorites",
+      "method": "GET",
+      "name": "favorites",
+      "path": "/api/favorites",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.favorite_add",
+      "method": "PUT",
+      "name": "favorite_add",
+      "path": "/api/favorites/{sid}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.favorite_remove",
+      "method": "DELETE",
+      "name": "favorite_remove",
+      "path": "/api/favorites/{sid}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.playlist_read",
+      "method": "GET",
+      "name": "playlist_read",
+      "path": "/api/playlist",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.playlist_write",
+      "method": "PUT",
+      "name": "playlist_write",
+      "path": "/api/playlist",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.playlist_import",
+      "method": "POST",
+      "name": "playlist_import",
+      "path": "/api/playlist/import",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collections",
+      "method": "GET",
+      "name": "collections",
+      "path": "/api/playlists",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_create",
+      "method": "POST",
+      "name": "collection_create",
+      "path": "/api/playlists",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_read",
+      "method": "GET",
+      "name": "collection_read",
+      "path": "/api/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_add_tracks",
+      "method": "POST",
+      "name": "collection_add_tracks",
+      "path": "/api/playlists/{ident}/tracks",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_rename",
+      "method": "PATCH",
+      "name": "collection_rename",
+      "path": "/api/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_delete",
+      "method": "DELETE",
+      "name": "collection_delete",
+      "path": "/api/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.collection_remove_track",
+      "method": "DELETE",
+      "name": "collection_remove_track",
+      "path": "/api/playlists/{ident}/tracks/{sid}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.downloads",
+      "method": "GET",
+      "name": "downloads",
+      "path": "/api/downloads",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.enqueue",
+      "method": "POST",
+      "name": "enqueue",
+      "path": "/api/downloads",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.control_download",
+      "method": "POST",
+      "name": "control_download",
+      "path": "/api/downloads/{ident}/{action}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.remove_download",
+      "method": "DELETE",
+      "name": "remove_download",
+      "path": "/api/downloads/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.files",
+      "method": "GET",
+      "name": "files",
+      "path": "/api/files",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.local_audio",
+      "method": "GET",
+      "name": "local_audio",
+      "path": "/api/files/audio",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.local_cover",
+      "method": "GET",
+      "name": "local_cover",
+      "path": "/api/files/cover",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.edit_file_tags",
+      "method": "PATCH",
+      "name": "edit_file_tags",
+      "path": "/api/files/tags",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.file_content",
+      "method": "GET",
+      "name": "file_content",
+      "path": "/api/files/content",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.delete_library_file",
+      "method": "DELETE",
+      "name": "delete_library_file",
+      "path": "/api/files",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.navidrome_capabilities",
+      "method": "GET",
+      "name": "navidrome_capabilities",
+      "path": "/api/navidrome/capabilities",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.navidrome_delete_preview",
+      "method": "GET",
+      "name": "navidrome_delete_preview",
+      "path": "/api/navidrome/songs/{ident}/deletion",
+      "summary": null
+    },
+    {
+      "endpoint": "engine_api.navidrome_delete_song",
+      "method": "DELETE",
+      "name": "navidrome_delete_song",
+      "path": "/api/navidrome/songs/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.settings",
+      "method": "GET",
+      "name": "settings",
+      "path": "/api/library/settings",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.save_settings",
+      "method": "PUT",
+      "name": "save_settings",
+      "path": "/api/library/settings",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.save_credentials",
+      "method": "PUT",
+      "name": "save_credentials",
+      "path": "/api/library/credentials",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.watch_status",
+      "method": "GET",
+      "name": "watch_status",
+      "path": "/api/library/watch",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.watch_scan",
+      "method": "POST",
+      "name": "watch_scan",
+      "path": "/api/library/watch/scan",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.save_navidrome",
+      "method": "PUT",
+      "name": "save_navidrome",
+      "path": "/api/library/navidrome",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.jobs",
+      "method": "GET",
+      "name": "jobs",
+      "path": "/api/library/jobs",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.versions",
+      "method": "GET",
+      "name": "versions",
+      "path": "/api/library/versions",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.report",
+      "method": "GET",
+      "name": "report",
+      "path": "/api/library/jobs/{ident}/report",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.job",
+      "method": "GET",
+      "name": "job",
+      "path": "/api/library/jobs/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.process",
+      "method": "POST",
+      "name": "process",
+      "path": "/api/library/jobs",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.apply",
+      "method": "POST",
+      "name": "apply",
+      "path": "/api/library/jobs/{ident}/apply",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.search_candidates",
+      "method": "POST",
+      "name": "search_candidates",
+      "path": "/api/library/jobs/{ident}/search",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.preview",
+      "method": "POST",
+      "name": "preview",
+      "path": "/api/library/jobs/{ident}/preview",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.cancel",
+      "method": "POST",
+      "name": "cancel",
+      "path": "/api/library/jobs/{ident}/cancel",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.retry",
+      "method": "POST",
+      "name": "retry",
+      "path": "/api/library/jobs/{ident}/retry",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.restore",
+      "method": "POST",
+      "name": "restore",
+      "path": "/api/library/jobs/{ident}/restore",
+      "summary": null
+    },
+    {
+      "endpoint": "library_pipeline.unlock",
+      "method": "DELETE",
+      "name": "unlock",
+      "path": "/api/library/files/locks",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.playlists",
+      "method": "GET",
+      "name": "playlists",
+      "path": "/api/navidrome/playlists",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.playlist",
+      "method": "GET",
+      "name": "playlist",
+      "path": "/api/navidrome/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.create_playlist",
+      "method": "POST",
+      "name": "create_playlist",
+      "path": "/api/navidrome/playlists",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.rename_playlist",
+      "method": "PATCH",
+      "name": "rename_playlist",
+      "path": "/api/navidrome/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.delete_playlist",
+      "method": "DELETE",
+      "name": "delete_playlist",
+      "path": "/api/navidrome/playlists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.add_songs",
+      "method": "POST",
+      "name": "add_songs",
+      "path": "/api/navidrome/playlists/{ident}/tracks",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.remove_songs",
+      "method": "POST",
+      "name": "remove_songs",
+      "path": "/api/navidrome/playlists/{ident}/tracks/remove",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.songs",
+      "method": "GET",
+      "name": "songs",
+      "path": "/api/navidrome/songs",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.albums",
+      "method": "GET",
+      "name": "albums",
+      "path": "/api/navidrome/albums",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.album",
+      "method": "GET",
+      "name": "album",
+      "path": "/api/navidrome/albums/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.artists",
+      "method": "GET",
+      "name": "artists",
+      "path": "/api/navidrome/artists",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.artist",
+      "method": "GET",
+      "name": "artist",
+      "path": "/api/navidrome/artists/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.search",
+      "method": "GET",
+      "name": "search",
+      "path": "/api/navidrome/search",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.cover",
+      "method": "GET",
+      "name": "cover",
+      "path": "/api/navidrome/cover/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.stream",
+      "method": "GET",
+      "name": "stream",
+      "path": "/api/navidrome/stream/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.test",
+      "method": "POST",
+      "name": "test",
+      "path": "/api/navidrome/test",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.scan_status",
+      "method": "GET",
+      "name": "scan_status",
+      "path": "/api/navidrome/scan",
+      "summary": null
+    },
+    {
+      "endpoint": "navidrome.scan",
+      "method": "POST",
+      "name": "scan",
+      "path": "/api/navidrome/scan",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.login",
+      "method": "POST",
+      "name": "login",
+      "path": "/api/auth/login",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.logout",
+      "method": "POST",
+      "name": "logout",
+      "path": "/api/auth/logout",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.meta",
+      "method": "GET",
+      "name": "meta",
+      "path": "/api/meta",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.enginelatest",
+      "method": "GET",
+      "name": "enginelatest",
+      "path": "/api/engine/latest",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.engineupdate",
+      "method": "POST",
+      "name": "engineupdate",
+      "path": "/api/engine/update",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.engineupdatestatus",
+      "method": "GET",
+      "name": "engineupdatestatus",
+      "path": "/api/engine/update",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.restartserver",
+      "method": "POST",
+      "name": "restartserver",
+      "path": "/api/restart",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.search",
+      "method": "POST",
+      "name": "search",
+      "path": "/api/search",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.songdetail",
+      "method": "GET",
+      "name": "songdetail",
+      "path": "/api/song/{sid}",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.resolve",
+      "method": "POST",
+      "name": "resolve",
+      "path": "/api/resolve",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.episodes",
+      "method": "GET",
+      "name": "episodes",
+      "path": "/api/song/{sid}/episodes",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.playlist",
+      "method": "POST",
+      "name": "playlist",
+      "path": "/api/playlist",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.validatesongs",
+      "method": "POST",
+      "name": "validatesongs",
+      "path": "/api/songs/validate",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.download",
+      "method": "POST",
+      "name": "download",
+      "path": "/api/download",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.retrytask",
+      "method": "POST",
+      "name": "retrytask",
+      "path": "/api/tasks/{task_id}/retry",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.deletetasks",
+      "method": "POST",
+      "name": "deletetasks",
+      "path": "/api/tasks/delete",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.clearfinishedtasks",
+      "method": "POST",
+      "name": "clearfinishedtasks",
+      "path": "/api/tasks/clear-finished",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.opendir",
+      "method": "POST",
+      "name": "opendir",
+      "path": "/api/open-dir",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.clearcache",
+      "method": "POST",
+      "name": "clearcache",
+      "path": "/api/cache/clear",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.tasks",
+      "method": "GET",
+      "name": "tasks",
+      "path": "/api/tasks",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.getfile",
+      "method": "GET",
+      "name": "getfile",
+      "path": "/api/file",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.deletefile",
+      "method": "DELETE",
+      "name": "deletefile",
+      "path": "/api/file",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.logs",
+      "method": "GET",
+      "name": "logs",
+      "path": "/api/logs",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.clearlogs",
+      "method": "POST",
+      "name": "clearlogs",
+      "path": "/api/logs/clear",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.settings_read",
+      "method": "GET",
+      "name": "settings_read",
+      "path": "/api/agent/settings",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.settings_write",
+      "method": "PUT",
+      "name": "settings_write",
+      "path": "/api/agent/settings",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.sessions",
+      "method": "GET",
+      "name": "sessions",
+      "path": "/api/agent/sessions",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.test",
+      "method": "POST",
+      "name": "test",
+      "path": "/api/agent/settings/test",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.test_capability",
+      "method": "POST",
+      "name": "test_capability",
+      "path": "/api/agent/settings/test-capability/{capability}",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.models",
+      "method": "POST",
+      "name": "models",
+      "path": "/api/agent/settings/models",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.create",
+      "method": "POST",
+      "name": "create",
+      "path": "/api/agent/sessions",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.read",
+      "method": "GET",
+      "name": "read",
+      "path": "/api/agent/sessions/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.delete",
+      "method": "DELETE",
+      "name": "delete",
+      "path": "/api/agent/sessions/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.send",
+      "method": "POST",
+      "name": "send",
+      "path": "/api/agent/sessions/{ident}/messages",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.stop",
+      "method": "POST",
+      "name": "stop",
+      "path": "/api/agent/sessions/{ident}/stop",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.resume",
+      "method": "POST",
+      "name": "resume",
+      "path": "/api/agent/sessions/{ident}/resume",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.delete_events",
+      "method": "POST",
+      "name": "delete_events",
+      "path": "/api/agent/sessions/{ident}/events/delete",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.import_search",
+      "method": "POST",
+      "name": "import_search",
+      "path": "/api/agent/sessions/{ident}/import/search",
+      "summary": null
+    },
+    {
+      "endpoint": "ai_agent.import_execute",
+      "method": "POST",
+      "name": "import_execute",
+      "path": "/api/agent/sessions/{ident}/import/execute",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.read_config",
+      "method": "GET",
+      "name": "read_config",
+      "path": "/api/bots/config",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.write_config",
+      "method": "PUT",
+      "name": "write_config",
+      "path": "/api/bots/config",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.test_connection",
+      "method": "POST",
+      "name": "test_connection",
+      "path": "/api/bots/test",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.download",
+      "method": "GET",
+      "name": "download",
+      "path": "/downloads/{ident}",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.verify_wecom",
+      "method": "GET",
+      "name": "verify_wecom",
+      "path": "/bot/wecom",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_notifications.receive_wecom",
+      "method": "POST",
+      "name": "receive_wecom",
+      "path": "/bot/wecom",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_channels.feishu",
+      "method": "POST",
+      "name": "feishu",
+      "path": "/bot/feishu",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_channels.dingtalk",
+      "method": "POST",
+      "name": "dingtalk",
+      "path": "/bot/dingtalk",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_channels.discord",
+      "method": "POST",
+      "name": "discord",
+      "path": "/bot/discord",
+      "summary": null
+    },
+    {
+      "endpoint": "bot_channels.register_discord",
+      "method": "POST",
+      "name": "register_discord",
+      "path": "/api/bots/discord/commands",
+      "summary": null
+    }
+  ],
+  "framework_routes": [],
+  "mounts": [
+    {
+      "name": "openapi",
+      "path": "/openapi.json"
+    },
+    {
+      "name": "swagger_ui_html",
+      "path": "/docs"
+    },
+    {
+      "name": "swagger_ui_redirect",
+      "path": "/docs/oauth2-redirect"
+    },
+    {
+      "name": "redoc_html",
+      "path": "/redoc"
+    },
+    {
+      "name": "assets",
+      "path": "/assets"
+    },
+    {
+      "name": "",
+      "path": ""
+    },
+    {
+      "name": "",
+      "path": ""
+    }
+  ],
+  "shadowed_routes": [
+    {
+      "endpoint": "legacy.app.health",
+      "method": "GET",
+      "name": "health",
+      "path": "/api/health",
+      "shadowed_by": "engine_api.health",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.getconfig",
+      "method": "GET",
+      "name": "getconfig",
+      "path": "/api/config",
+      "shadowed_by": "engine_api.read_config",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.putconfig",
+      "method": "PUT",
+      "name": "putconfig",
+      "path": "/api/config",
+      "shadowed_by": "engine_api.write_config",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.stream",
+      "method": "GET",
+      "name": "stream",
+      "path": "/api/stream/{sid}",
+      "shadowed_by": "engine_api.stream",
+      "summary": null
+    },
+    {
+      "endpoint": "legacy.app.files",
+      "method": "GET",
+      "name": "files",
+      "path": "/api/files",
+      "shadowed_by": "engine_api.files",
+      "summary": null
+    }
+  ],
+  "summary": {
+    "api_route_declarations": 132,
+    "csv_static_declarations": 131,
+    "csv_static_unique": 126,
+    "discrepancy_note": "Runtime includes GET /downloads/{ident} (bot_notifications.py:1741 @router.api_route methods=GET,HEAD), missed by static AST scan matching .get/.post/.put/.patch/.delete.",
+    "effective_unique_routes": 127,
+    "shadowed_legacy_routes": 5
+  }
+}

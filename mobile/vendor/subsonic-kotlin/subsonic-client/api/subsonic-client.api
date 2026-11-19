@@ -1,0 +1,148 @@
+public abstract interface class dev/zt64/subsonic/client/SubsonicAuth {
+}
+
+public final class dev/zt64/subsonic/client/SubsonicAuth$Key : dev/zt64/subsonic/client/SubsonicAuth {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/zt64/subsonic/client/SubsonicAuth$Key;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/client/SubsonicAuth$Key;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/client/SubsonicAuth$Key;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApiKey ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/client/SubsonicAuth$None : dev/zt64/subsonic/client/SubsonicAuth {
+	public static final field INSTANCE Ldev/zt64/subsonic/client/SubsonicAuth$None;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/client/SubsonicAuth$Token : dev/zt64/subsonic/client/SubsonicAuth {
+	public static final field Companion Ldev/zt64/subsonic/client/SubsonicAuth$Token$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ldev/zt64/subsonic/client/SubsonicAuth$Token;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/client/SubsonicAuth$Token;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/client/SubsonicAuth$Token;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSalt ()Ljava/lang/String;
+	public final fun getToken ()Ljava/lang/String;
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/client/SubsonicAuth$Token$Companion {
+	public final fun invoke (Ljava/lang/String;Ljava/lang/String;)Ldev/zt64/subsonic/client/SubsonicAuth$Token;
+}
+
+public final class dev/zt64/subsonic/client/SubsonicClient : dev/zt64/subsonic/api/SubsonicApi, java/lang/AutoCloseable {
+	public static final field Companion Ldev/zt64/subsonic/client/SubsonicClient$Companion;
+	public fun <init> (Lio/ktor/client/HttpClient;Lkotlinx/serialization/json/Json;Ljava/lang/String;Ljava/util/Map;)V
+	public fun addChatMessage (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun changePassword (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun close ()V
+	public fun createBookmark (Ljava/lang/String;JLjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createInternetRadioStation (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createPlaylist (Ljava/lang/String;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createPlaylistFromSongs (Ljava/lang/String;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createPodcastChannel (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createShare (Ljava/util/List;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun createUser (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deleteBookmark (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deleteInternetRadioStation (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deletePlaylist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deletePodcastChannel (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deletePodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deleteShare (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun deleteUser (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun download (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun downloadPodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun findSonicPath (Ldev/zt64/subsonic/api/model/Song;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun findSonicPath (Ljava/lang/String;Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAlbum (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAlbumInfo (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAlbumInfoID3 (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAlbums (Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAlbumsID3 (Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getArtist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getArtistInfo (Ldev/zt64/subsonic/api/model/Artist;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getArtistInfo (Ljava/lang/String;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getArtistInfoID3 (Ljava/lang/String;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getArtists (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAvatar (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAvatarUrl (Ljava/lang/String;Z)Ljava/lang/String;
+	public fun getBookmarks (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getCaptions (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getChatMessages (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getCoverArt (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getCoverArtUrl (Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;
+	public fun getDirectories (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getDirectory (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getGenres (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getIndexes (Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getInternetRadioStations (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getLicense (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getLyrics (Ldev/zt64/subsonic/api/model/Song;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getLyrics (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getLyrics (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getNewestPodcasts (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getNowPlaying (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getOpenSubsonicExtensions (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPlayQueue (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPlayQueueByIndex (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPlaylist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPlaylists (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getPodcasts (ZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getRandomSongs (ILjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getScanStatus (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getShares (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSimilarSongs (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSimilarSongsID3 (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSong (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSongs (Ljava/lang/String;IILjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSonicSimilarTracks (Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getSonicSimilarTracks (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getStarred (Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getStarredID3 (Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getStreamUrl (Ljava/lang/String;ILjava/lang/String;Ljava/lang/Integer;Z)Ljava/lang/String;
+	public fun getTopSongs (Ldev/zt64/subsonic/api/model/Artist;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getTopSongs (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getTranscodeDecision (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;Ldev/zt64/subsonic/api/model/ClientInfo;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getTranscodeStream (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getTranscodeStream (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getTranscodeStreamUrl (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;)Ljava/lang/String;
+	public fun getUser (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getUsers (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun hls (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun jukeboxControl (Ldev/zt64/subsonic/api/model/JukeboxAction;FLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun ping (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun refreshPodcasts (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun reportPlayback (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;JLdev/zt64/subsonic/api/model/PlaybackState;FLjava/lang/Boolean;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun savePlayQueue (Ljava/lang/Long;JILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun savePlayQueue (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Long;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun scrobble (Ljava/lang/String;Lkotlin/time/Instant;ZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun search (Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun searchID3 (Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun setRating (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun star ([Ldev/zt64/subsonic/api/model/SubsonicResource;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun star ([Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun startScan (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun tokenInfo (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun unstar ([Ldev/zt64/subsonic/api/model/SubsonicResource;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun unstar ([Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun updateInternetRadioStation (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun updatePlaylist (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun updateShare (Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun updateUser (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class dev/zt64/subsonic/client/SubsonicClient$Companion {
+	public final fun invoke (Ljava/lang/String;Ldev/zt64/subsonic/client/SubsonicAuth;Ljava/lang/String;Ljava/lang/String;Lio/ktor/client/engine/HttpClientEngine;Lkotlin/jvm/functions/Function1;)Ldev/zt64/subsonic/client/SubsonicClient;
+	public static synthetic fun invoke$default (Ldev/zt64/subsonic/client/SubsonicClient$Companion;Ljava/lang/String;Ldev/zt64/subsonic/client/SubsonicAuth;Ljava/lang/String;Ljava/lang/String;Lio/ktor/client/engine/HttpClientEngine;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/zt64/subsonic/client/SubsonicClient;
+}
+

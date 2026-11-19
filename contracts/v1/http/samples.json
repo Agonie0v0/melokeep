@@ -1,0 +1,1051 @@
+{
+  "anonymous_mode": [
+    {
+      "body": {
+        "backend": "melokeep",
+        "engine": "melokeep-native",
+        "ok": true,
+        "sources": 7,
+        "version": "1.0.0"
+      },
+      "headers": {
+        "content-length": "90",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "health",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "body": {
+        "auth_enabled": false,
+        "categories": {
+          "官方试听": [
+            "ITunesMusicClient"
+          ],
+          "开放许可": [
+            "AudiusMusicClient",
+            "FMAMusicClient",
+            "CCMixterMusicClient",
+            "OpenGameArtMusicClient",
+            "WikimediaCommonsMusicClient",
+            "JamendoMusicClient"
+          ]
+        },
+        "cookie_secure": false,
+        "default_sources": [
+          "AudiusMusicClient",
+          "FMAMusicClient",
+          "ITunesMusicClient"
+        ],
+        "is_windows": true,
+        "platform": "win32",
+        "version": "1.0.0"
+      },
+      "headers": {
+        "content-length": "1506",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "meta",
+      "path": "/api/meta",
+      "status": 200
+    },
+    {
+      "body": {
+        "authenticated": true,
+        "required": false
+      },
+      "headers": {
+        "content-length": "39",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "auth_status_anon",
+      "path": "/api/auth/status",
+      "status": 200
+    },
+    {
+      "body": {
+        "available_sources": [
+          {
+            "capability": {
+              "note": "Audius 开放许可与独立音乐流媒体",
+              "playlist": false,
+              "search": true,
+              "tier": "native"
+            },
+            "category": "开放许可",
+            "description": "Audius 去中心化独立与开放许可音乐流媒体",
+            "engine_name": "AudiusMusicClient",
+            "id": "AudiusMusicClient",
+            "init_error": null,
+            "label": "Audius",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "note": "支持 Free Music Archive 站内搜索与开放许可音频解析",
+              "playlist": false,
+              "search": true,
+              "tier": "partial"
+            },
+            "category": "开放许可",
+            "description": "Free Music Archive 开放许可音乐曲库",
+            "engine_name": "FMAMusicClient",
+            "id": "FMAMusicClient",
+            "init_error": null,
+            "label": "FMA",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "note": "支持 ccMixter XSPF 开放许可搜索与音频解析",
+              "playlist": false,
+              "search": true,
+              "tier": "partial"
+            },
+            "category": "开放许可",
+            "description": "ccMixter 知识共享混音与独立音乐社区",
+            "engine_name": "CCMixterMusicClient",
+            "id": "CCMixterMusicClient",
+            "init_error": null,
+            "label": "ccMixter",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "note": "支持 OpenGameArt 开放许可页面音频附件检索与解析",
+              "playlist": false,
+              "search": true,
+              "tier": "partial"
+            },
+            "category": "开放许可",
+            "description": "OpenGameArt 开源游戏配乐与音频资源",
+            "engine_name": "OpenGameArtMusicClient",
+            "id": "OpenGameArtMusicClient",
+            "init_error": null,
+            "label": "OpenGameArt",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "note": "Wikimedia Commons 公共领域与开放许可音频",
+              "playlist": false,
+              "search": true,
+              "tier": "native"
+            },
+            "category": "开放许可",
+            "description": "Wikimedia Commons 公共领域与开放许可音频库",
+            "engine_name": "WikimediaCommonsMusicClient",
+            "id": "WikimediaCommonsMusicClient",
+            "init_error": null,
+            "label": "Wikimedia Commons",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "note": "开放许可独立音乐；需在音源设置中填入免费申请的 Jamendo client_id",
+              "playlist": true,
+              "search": true,
+              "tier": "partial"
+            },
+            "category": "开放许可",
+            "description": "Jamendo 开放许可独立音乐（需在音源设置填入免费申请的 client_id）",
+            "engine_name": "JamendoMusicClient",
+            "id": "JamendoMusicClient",
+            "init_error": null,
+            "label": "Jamendo",
+            "origin": "builtin",
+            "proxy_recommended": true
+          },
+          {
+            "capability": {
+              "episodes": true,
+              "note": "支持公开播客节目解析与官方 30 秒曲目试听预览（仅试听）",
+              "playlist": false,
+              "search": true,
+              "tier": "native"
+            },
+            "category": "官方试听",
+            "description": "Apple iTunes 公开播客节目与 30 秒官方试听片段",
+            "engine_name": "ITunesMusicClient",
+            "id": "ITunesMusicClient",
+            "init_error": null,
+            "label": "iTunes",
+            "origin": "builtin",
+            "proxy_recommended": false
+          }
+        ],
+        "download_concurrency": 2,
+        "download_layout": "source",
+        "embed_metadata": true,
+        "engine": "MeloKeep engine 1.0.0",
+        "lyrics_mode": "both",
+        "playback_timeout_seconds": 30,
+        "results_per_source": 5,
+        "search_timeout_seconds": 30,
+        "source_settings": {
+          "AudiusMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "CCMixterMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "FMAMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "ITunesMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "JamendoMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "OpenGameArtMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          },
+          "WikimediaCommonsMusicClient": {
+            "cookie": "",
+            "proxy": ""
+          }
+        },
+        "sources": [
+          "AudiusMusicClient",
+          "FMAMusicClient",
+          "ITunesMusicClient"
+        ]
+      },
+      "headers": {
+        "content-length": "21227",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "config_get",
+      "path": "/api/config",
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "请求来源校验失败"
+      },
+      "headers": {
+        "content-length": "37",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "config_put_missing_csrf",
+      "path": "/api/config",
+      "status": 403
+    },
+    {
+      "body": {
+        "detail": "请选择已注册的音源"
+      },
+      "headers": {
+        "content-length": "40",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "config_put_invalid_source",
+      "path": "/api/config",
+      "status": 400
+    },
+    {
+      "body": {
+        "restart_required": false,
+        "saved": true,
+        "source_errors": {}
+      },
+      "headers": {
+        "content-length": "58",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "config_put_valid",
+      "path": "/api/config",
+      "status": 200
+    },
+    {
+      "body": [
+        {
+          "editable": true,
+          "folder": ".",
+          "locked_fields": [],
+          "metadata": {
+            "album": "",
+            "album_artist": "",
+            "artist": "",
+            "bpm": "",
+            "comment": "",
+            "composer": "",
+            "copyright": "",
+            "date": "",
+            "disc_number": "",
+            "genre": "",
+            "grouping": "",
+            "isrc": "",
+            "language": "",
+            "lyricist": "",
+            "publisher": "",
+            "title": "sample_track",
+            "track_number": ""
+          },
+          "name": "sample_track.wav",
+          "path": "asset:local-<ID_01>",
+          "root": "<TEMP_DIR>\\music",
+          "size": 1644,
+          "track": {
+            "album": "",
+            "artist": "",
+            "cover": null,
+            "duration": 0.1,
+            "id": "local-<ID_01>",
+            "playback": {
+              "bitrate": 128,
+              "codec": "wav",
+              "detail": "音乐库文件",
+              "preview_only": false,
+              "state": "ready",
+              "url": "/api/files/audio?path=asset%3Alocal-<ID_01>"
+            },
+            "qualities": [],
+            "size_bytes": 1644,
+            "source": "local",
+            "source_id": "local",
+            "title": "sample_track"
+          }
+        }
+      ],
+      "headers": {
+        "content-length": "839",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "files_list",
+      "path": "/api/files",
+      "status": 200
+    },
+    {
+      "body": {
+        "binary_len": 1644
+      },
+      "headers": {
+        "accept-ranges": "bytes",
+        "content-length": "1644",
+        "content-type": "audio/wav"
+      },
+      "method": "GET",
+      "name": "files_audio_200",
+      "path": "/api/files/audio?path=...",
+      "status": 200
+    },
+    {
+      "body": {
+        "binary_len": 0
+      },
+      "headers": {
+        "content-length": "31",
+        "content-type": "application/json"
+      },
+      "method": "HEAD",
+      "name": "files_audio_head",
+      "path": "/api/files/audio?path=...",
+      "status": 405
+    },
+    {
+      "body": {
+        "binary_len": 16
+      },
+      "headers": {
+        "accept-ranges": "bytes",
+        "content-length": "16",
+        "content-range": "bytes 0-15/1644",
+        "content-type": "audio/wav"
+      },
+      "method": "GET",
+      "name": "files_audio_range_206",
+      "path": "/api/files/audio?path=...",
+      "status": 206
+    },
+    {
+      "body": {
+        "binary_len": 0
+      },
+      "headers": {
+        "content-length": "0",
+        "content-range": "bytes */1644",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "method": "GET",
+      "name": "files_audio_range_416",
+      "path": "/api/files/audio?path=...",
+      "status": 416
+    },
+    {
+      "body": {
+        "detail": "非法路径"
+      },
+      "headers": {
+        "content-length": "25",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "files_audio_traversal_403",
+      "path": "/api/files/audio?path=../secret.mp3",
+      "status": 403
+    },
+    {
+      "body": {
+        "saved": true
+      },
+      "headers": {
+        "content-length": "14",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "favorites_put",
+      "path": "/api/favorites/<ID_02>",
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "曲目不存在"
+      },
+      "headers": {
+        "content-length": "28",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "favorites_put_404",
+      "path": "/api/favorites/missing_id",
+      "status": 404
+    },
+    {
+      "body": [
+        {
+          "album": "Open Air Sessions",
+          "artist": "Open Horizon",
+          "cover": "https://example.test/cover.jpg",
+          "duration": 223,
+          "episodes": 0,
+          "id": "<ID_02>",
+          "playback": {
+            "bitrate": 999,
+            "codec": "flac",
+            "detail": "该解析结果需要原音源下载器处理，可直接下载",
+            "preview_only": false,
+            "state": "download_only",
+            "url": null
+          },
+          "qualities": [
+            {
+              "availability": "resolved",
+              "bitrate": 999,
+              "codec": "flac",
+              "evidence": "engine",
+              "id": "engine:flac:999",
+              "label": "FLAC 无损",
+              "lossless": true
+            }
+          ],
+          "root_source": "AudiusMusicClient",
+          "size_bytes": 2048000,
+          "size_label": "1.95 MB",
+          "source": "AudiusMusicClient",
+          "source_id": "audius-demo-01",
+          "title": "Solar Wind"
+        }
+      ],
+      "headers": {
+        "content-length": "599",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "favorites_get",
+      "path": "/api/favorites",
+      "status": 200
+    },
+    {
+      "body": {
+        "saved": true
+      },
+      "headers": {
+        "content-length": "14",
+        "content-type": "application/json"
+      },
+      "method": "DELETE",
+      "name": "favorites_delete",
+      "path": "/api/favorites/<ID_02>",
+      "status": 200
+    },
+    {
+      "body": {
+        "saved": true
+      },
+      "headers": {
+        "content-length": "14",
+        "content-type": "application/json"
+      },
+      "method": "PUT",
+      "name": "play_queue_put",
+      "path": "/api/playlist",
+      "status": 200
+    },
+    {
+      "body": [
+        {
+          "album": "Open Air Sessions",
+          "artist": "Open Horizon",
+          "cover": "https://example.test/cover.jpg",
+          "duration": 223,
+          "episodes": 0,
+          "id": "<ID_02>",
+          "playback": {
+            "bitrate": 999,
+            "codec": "flac",
+            "detail": "该解析结果需要原音源下载器处理，可直接下载",
+            "preview_only": false,
+            "state": "download_only",
+            "url": null
+          },
+          "qualities": [
+            {
+              "availability": "resolved",
+              "bitrate": 999,
+              "codec": "flac",
+              "evidence": "engine",
+              "id": "engine:flac:999",
+              "label": "FLAC 无损",
+              "lossless": true
+            }
+          ],
+          "root_source": "AudiusMusicClient",
+          "size_bytes": 2048000,
+          "size_label": "1.95 MB",
+          "source": "AudiusMusicClient",
+          "source_id": "audius-demo-01",
+          "title": "Solar Wind"
+        }
+      ],
+      "headers": {
+        "content-length": "599",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "play_queue_get",
+      "path": "/api/playlist",
+      "status": 200
+    },
+    {
+      "body": {
+        "created_at": 1700000000,
+        "detail": "已创建歌单“测试歌单”，共 1 首曲目。",
+        "id": "<ID_03>",
+        "issues": [],
+        "name": "测试歌单",
+        "source": "AudiusMusicClient",
+        "source_url": "",
+        "task_id": "<ID_03>",
+        "tracks": [
+          {
+            "album": "Open Air Sessions",
+            "artist": "Open Horizon",
+            "cover": "https://example.test/cover.jpg",
+            "duration": 223,
+            "episodes": 0,
+            "id": "<ID_02>",
+            "playback": {
+              "bitrate": 999,
+              "codec": "flac",
+              "detail": "该解析结果需要原音源下载器处理，可直接下载",
+              "preview_only": false,
+              "state": "download_only",
+              "url": null
+            },
+            "qualities": [
+              {
+                "availability": "resolved",
+                "bitrate": 999,
+                "codec": "flac",
+                "evidence": "engine",
+                "id": "engine:flac:999",
+                "label": "FLAC 无损",
+                "lossless": true
+              }
+            ],
+            "root_source": "AudiusMusicClient",
+            "size_bytes": 2048000,
+            "size_label": "1.95 MB",
+            "source": "AudiusMusicClient",
+            "source_id": "audius-demo-01",
+            "title": "Solar Wind"
+          }
+        ]
+      },
+      "headers": {
+        "content-length": "849",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "playlists_create",
+      "path": "/api/playlists",
+      "status": 200
+    },
+    {
+      "body": [
+        {
+          "cover": "https://example.test/cover.jpg",
+          "created_at": 1700000000,
+          "detail": "已创建歌单“测试歌单”，共 1 首曲目。",
+          "id": "<ID_03>",
+          "issue_count": 0,
+          "name": "测试歌单",
+          "source": "AudiusMusicClient",
+          "source_url": "",
+          "task_id": "<ID_03>",
+          "track_count": 1
+        }
+      ],
+      "headers": {
+        "content-length": "303",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "playlists_list",
+      "path": "/api/playlists",
+      "status": 200
+    },
+    {
+      "body": {
+        "created_at": 1700000000,
+        "detail": "已创建歌单“测试歌单”，共 1 首曲目。",
+        "id": "<ID_03>",
+        "issues": [],
+        "name": "测试歌单",
+        "source": "AudiusMusicClient",
+        "source_url": "",
+        "task_id": "<ID_03>",
+        "tracks": [
+          {
+            "album": "Open Air Sessions",
+            "artist": "Open Horizon",
+            "cover": "https://example.test/cover.jpg",
+            "duration": 223,
+            "episodes": 0,
+            "id": "<ID_02>",
+            "playback": {
+              "bitrate": 999,
+              "codec": "flac",
+              "detail": "该解析结果需要原音源下载器处理，可直接下载",
+              "preview_only": false,
+              "state": "download_only",
+              "url": null
+            },
+            "qualities": [
+              {
+                "availability": "resolved",
+                "bitrate": 999,
+                "codec": "flac",
+                "evidence": "engine",
+                "id": "engine:flac:999",
+                "label": "FLAC 无损",
+                "lossless": true
+              }
+            ],
+            "root_source": "AudiusMusicClient",
+            "size_bytes": 2048000,
+            "size_label": "1.95 MB",
+            "source": "AudiusMusicClient",
+            "source_id": "audius-demo-01",
+            "title": "Solar Wind"
+          }
+        ]
+      },
+      "headers": {
+        "content-length": "849",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "playlists_get",
+      "path": "/api/playlists/<ID_03>",
+      "status": 200
+    },
+    {
+      "body": {
+        "created_at": 1700000000,
+        "detail": "已创建歌单“测试歌单”，共 1 首曲目。",
+        "id": "<ID_03>",
+        "issues": [],
+        "name": "更新歌单",
+        "source": "AudiusMusicClient",
+        "source_url": "",
+        "task_id": "<ID_03>",
+        "tracks": [
+          {
+            "album": "Open Air Sessions",
+            "artist": "Open Horizon",
+            "cover": "https://example.test/cover.jpg",
+            "duration": 223,
+            "episodes": 0,
+            "id": "<ID_02>",
+            "playback": {
+              "bitrate": 999,
+              "codec": "flac",
+              "detail": "该解析结果需要原音源下载器处理，可直接下载",
+              "preview_only": false,
+              "state": "download_only",
+              "url": null
+            },
+            "qualities": [
+              {
+                "availability": "resolved",
+                "bitrate": 999,
+                "codec": "flac",
+                "evidence": "engine",
+                "id": "engine:flac:999",
+                "label": "FLAC 无损",
+                "lossless": true
+              }
+            ],
+            "root_source": "AudiusMusicClient",
+            "size_bytes": 2048000,
+            "size_label": "1.95 MB",
+            "source": "AudiusMusicClient",
+            "source_id": "audius-demo-01",
+            "title": "Solar Wind"
+          }
+        ]
+      },
+      "headers": {
+        "content-length": "849",
+        "content-type": "application/json"
+      },
+      "method": "PATCH",
+      "name": "playlists_patch",
+      "path": "/api/playlists/<ID_03>",
+      "status": 200
+    },
+    {
+      "body": {
+        "created_at": 1700000000,
+        "detail": "已创建歌单“测试歌单”，共 1 首曲目。",
+        "id": "<ID_03>",
+        "issues": [],
+        "name": "更新歌单",
+        "source": "AudiusMusicClient",
+        "source_url": "",
+        "task_id": "<ID_03>",
+        "tracks": []
+      },
+      "headers": {
+        "content-length": "252",
+        "content-type": "application/json"
+      },
+      "method": "DELETE",
+      "name": "playlists_remove_track",
+      "path": "/api/playlists/<ID_03>/tracks/<ID_02>",
+      "status": 200
+    },
+    {
+      "body": {
+        "created_at": 1700000000,
+        "detail": "已向歌单“更新歌单”加入 1 首曲目，共 1 首。",
+        "id": "<ID_03>",
+        "issues": [],
+        "name": "更新歌单",
+        "source": "AudiusMusicClient",
+        "source_url": "",
+        "task_id": "<ID_03>",
+        "tracks": [
+          {
+            "album": "Open Air Sessions",
+            "artist": "Open Horizon",
+            "cover": "https://example.test/cover.jpg",
+            "duration": 223,
+            "episodes": 0,
+            "id": "<ID_02>",
+            "playback": {
+              "bitrate": 999,
+              "codec": "flac",
+              "detail": "该解析结果需要原音源下载器处理，可直接下载",
+              "preview_only": false,
+              "state": "download_only",
+              "url": null
+            },
+            "qualities": [
+              {
+                "availability": "resolved",
+                "bitrate": 999,
+                "codec": "flac",
+                "evidence": "engine",
+                "id": "engine:flac:999",
+                "label": "FLAC 无损",
+                "lossless": true
+              }
+            ],
+            "root_source": "AudiusMusicClient",
+            "size_bytes": 2048000,
+            "size_label": "1.95 MB",
+            "source": "AudiusMusicClient",
+            "source_id": "audius-demo-01",
+            "title": "Solar Wind"
+          }
+        ]
+      },
+      "headers": {
+        "content-length": "858",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "playlists_add_track",
+      "path": "/api/playlists/<ID_03>/tracks",
+      "status": 200
+    },
+    {
+      "body": {
+        "deleted": true
+      },
+      "headers": {
+        "content-length": "16",
+        "content-type": "application/json"
+      },
+      "method": "DELETE",
+      "name": "playlists_delete",
+      "path": "/api/playlists/<ID_03>",
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "歌单不存在"
+      },
+      "headers": {
+        "content-length": "28",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "playlists_get_404",
+      "path": "/api/playlists/missing_pl",
+      "status": 404
+    },
+    {
+      "body": {
+        "detail": "每批请选择 1–200 首"
+      },
+      "headers": {
+        "content-length": "40",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "downloads_empty_400",
+      "path": "/api/downloads",
+      "status": 400
+    },
+    {
+      "body": {
+        "detail": "曲目不存在"
+      },
+      "headers": {
+        "content-length": "28",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "downloads_missing_track_404",
+      "path": "/api/downloads",
+      "status": 404
+    },
+    {
+      "body": {
+        "detail": "原解析结果的音质已变化，请重新打开音质选择"
+      },
+      "headers": {
+        "content-length": "76",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "downloads_quality_conflict_409",
+      "path": "/api/downloads",
+      "status": 409
+    },
+    {
+      "body": {
+        "detail": "任务不存在"
+      },
+      "headers": {
+        "content-length": "28",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "downloads_control_404",
+      "path": "/api/downloads/missing/pause",
+      "status": 404
+    },
+    {
+      "body": {
+        "detail": "任务不存在"
+      },
+      "headers": {
+        "content-length": "28",
+        "content-type": "application/json"
+      },
+      "method": "DELETE",
+      "name": "downloads_delete_404",
+      "path": "/api/downloads/missing",
+      "status": 404
+    },
+    {
+      "body": {
+        "detail": [
+          {
+            "ctx": {
+              "error": "Expecting property name enclosed in double quotes"
+            },
+            "input": {},
+            "loc": [
+              "body",
+              1
+            ],
+            "msg": "JSON decode error",
+            "type": "json_invalid"
+          }
+        ]
+      },
+      "headers": {
+        "content-length": "158",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "corrupt_json_422",
+      "path": "/api/playlists",
+      "status": 422
+    }
+  ],
+  "authenticated_mode": [
+    {
+      "body": {
+        "authenticated": false,
+        "required": true
+      },
+      "headers": {
+        "content-length": "39",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "auth_status_unauth",
+      "path": "/api/auth/status",
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "登录已失效，请重新登录"
+      },
+      "headers": {
+        "content-length": "46",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "config_unauth_401",
+      "path": "/api/config",
+      "status": 401
+    },
+    {
+      "body": {
+        "detail": "请求来源校验失败"
+      },
+      "headers": {
+        "content-length": "37",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "login_missing_csrf_403",
+      "path": "/api/auth/login",
+      "status": 403
+    },
+    {
+      "body": {
+        "detail": "用户名或密码错误"
+      },
+      "headers": {
+        "content-length": "37",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "name": "login_fail_401",
+      "path": "/api/auth/login",
+      "status": 401
+    },
+    {
+      "body": {
+        "success": true
+      },
+      "headers": {
+        "content-length": "16",
+        "content-type": "application/json",
+        "set-cookie": [
+          "melokeep_session=<REDACTED>; expires=<EXPIRES>; HttpOnly; Max-Age=0; Path=/; SameSite=strict",
+          "melokeep_session=<REDACTED>; HttpOnly; Max-Age=43200; Path=/api; SameSite=strict"
+        ]
+      },
+      "method": "POST",
+      "name": "login_success_200",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "body": {
+        "authenticated": true,
+        "required": true
+      },
+      "headers": {
+        "content-length": "38",
+        "content-type": "application/json"
+      },
+      "method": "GET",
+      "name": "auth_status_authenticated",
+      "path": "/api/auth/status",
+      "status": 200
+    },
+    {
+      "body": {
+        "success": true
+      },
+      "headers": {
+        "content-length": "16",
+        "content-type": "application/json",
+        "set-cookie": [
+          "melokeep_session=<REDACTED>; expires=<EXPIRES>; HttpOnly; Max-Age=0; Path=/api; SameSite=strict",
+          "melokeep_session=<REDACTED>; expires=<EXPIRES>; HttpOnly; Max-Age=0; Path=/; SameSite=strict"
+        ]
+      },
+      "method": "POST",
+      "name": "logout_200",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "登录失败次数过多，请 5 分钟后再试"
+      },
+      "headers": {
+        "content-length": "61",
+        "content-type": "application/json",
+        "retry-after": "300"
+      },
+      "method": "POST",
+      "name": "login_rate_limited_429",
+      "path": "/api/auth/login",
+      "status": 429
+    }
+  ]
+}

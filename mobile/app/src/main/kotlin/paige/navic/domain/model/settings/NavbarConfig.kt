@@ -1,0 +1,39 @@
+/*
+ * Navic, a Subsonic music streaming app for Android
+ * Copyright (c) 2026 paige
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+package paige.navic.domain.model.settings
+
+import androidx.compose.runtime.Immutable
+import kotlinx.serialization.Serializable
+
+@Immutable
+@Serializable
+data class NavbarConfig(
+	val tabs: List<NavbarTab>,
+	val version: Int
+) {
+	companion object {
+		const val KEY = "navbarConfig"
+		const val VERSION = 9
+		val default = NavbarConfig(
+			tabs = listOf(
+				NavbarTab(NavbarTab.Id.LIBRARY, true),
+				NavbarTab(NavbarTab.Id.ALBUMS, true),
+				NavbarTab(NavbarTab.Id.MELO_DISCOVER, true),
+				NavbarTab(NavbarTab.Id.MELO_STUDIO, true),
+				NavbarTab(NavbarTab.Id.MELO_AI, true),
+				NavbarTab(NavbarTab.Id.PLAYLISTS, false),
+				NavbarTab(NavbarTab.Id.ARTISTS, false),
+				NavbarTab(NavbarTab.Id.SEARCH, false),
+				NavbarTab(NavbarTab.Id.GENRES, false),
+				NavbarTab(NavbarTab.Id.SONGS, false),
+				NavbarTab(NavbarTab.Id.RADIOS, false),
+				NavbarTab(NavbarTab.Id.STATISTICS, false)
+			),
+			version = VERSION
+		)
+	}
+}

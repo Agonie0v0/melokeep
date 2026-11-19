@@ -1,0 +1,63 @@
+name: Publish snapshot
+run-name: ${{ github.event.workflow_run.head_commit.message || github.event.head_commit.message || format('Snapshot {0}', github.ref_name) }}
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [ Check ]
+    types: [ completed ]
+
+concurrency:
+  group: snapshot-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    concurrency:
+      group: maven-central-publish
+      cancel-in-progress: false
+    name: "Publish snapshot"
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
+    timeout-minutes: 60
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache konan directory
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/build.gradle.kts') }}
+          restore-keys: "${{ runner.os }}-konan-"
+
+      - name: Compute snapshot version
+        run: |
+          base="$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)"
+          base="${base%-SNAPSHOT}"
+          echo "ORG_GRADLE_PROJECT_VERSION_NAME=${base}-SNAPSHOT" >> "$GITHUB_ENV"
+
+      - name: Build and publish to Maven
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+        run: ./gradlew publishAllPublicationsToMavenCentral --no-configuration-cache --stacktrace

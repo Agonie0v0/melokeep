@@ -1,0 +1,240 @@
+{
+  "cancel_existing": {
+    "body": {
+      "cancelled": true
+    },
+    "headers": {
+      "content-length": "18",
+      "content-type": "application/json"
+    },
+    "method": "DELETE",
+    "name": "search_cancel",
+    "path": "/api/search/jobs/{id}",
+    "status": 200
+  },
+  "cancel_missing": {
+    "body": {
+      "cancelled": true
+    },
+    "headers": {
+      "content-length": "18",
+      "content-type": "application/json"
+    },
+    "method": "DELETE",
+    "name": "search_cancel_missing",
+    "path": "/api/search/jobs/unknown_job",
+    "status": 200
+  },
+  "contract_timings": {
+    "keepalive_seconds": 10,
+    "last_subscriber_grace_seconds": 10,
+    "max_active_jobs": 6,
+    "no_subscriber_cancel_seconds": 30
+  },
+  "empty_search": {
+    "body": {
+      "detail": "关键词或启用音源无效"
+    },
+    "headers": {
+      "content-length": "43",
+      "content-type": "application/json"
+    },
+    "method": "POST",
+    "name": "search_empty_400",
+    "path": "/api/search/jobs",
+    "status": 400
+  },
+  "events_full": {
+    "events": [
+      {
+        "data": {
+          "album": "Open Air Sessions",
+          "artist": "Open Horizon",
+          "cover": null,
+          "duration": 210.0,
+          "episodes": 0,
+          "id": "<ID_02>",
+          "playback": {
+            "bitrate": null,
+            "codec": "",
+            "detail": "播放或下载时解析音质与音频地址",
+            "preview_only": false,
+            "state": "pending",
+            "url": null
+          },
+          "qualities": [],
+          "root_source": "AudiusMusicClient",
+          "size_bytes": null,
+          "size_label": null,
+          "source": "AudiusMusicClient",
+          "source_id": "AudiusMusicClient_01",
+          "title": "Solar Wind"
+        },
+        "event": "track",
+        "id": 1
+      },
+      {
+        "data": {
+          "album": "Open Air Sessions",
+          "artist": "Open Horizon",
+          "cover": null,
+          "duration": 210.0,
+          "episodes": 0,
+          "id": "<ID_03>",
+          "playback": {
+            "bitrate": null,
+            "codec": "",
+            "detail": "播放或下载时解析音质与音频地址",
+            "preview_only": false,
+            "state": "pending",
+            "url": null
+          },
+          "qualities": [],
+          "root_source": "FMAMusicClient",
+          "size_bytes": null,
+          "size_label": null,
+          "source": "FMAMusicClient",
+          "source_id": "FMAMusicClient_01",
+          "title": "Solar Wind"
+        },
+        "event": "track",
+        "id": 2
+      },
+      {
+        "data": {
+          "id": "AudiusMusicClient",
+          "status": {
+            "count": 1,
+            "state": "complete"
+          }
+        },
+        "event": "source",
+        "id": 3
+      },
+      {
+        "data": {
+          "id": "FMAMusicClient",
+          "status": {
+            "count": 1,
+            "state": "complete"
+          }
+        },
+        "event": "source",
+        "id": 4
+      },
+      {
+        "data": {
+          "cancelled": false
+        },
+        "event": "done",
+        "id": 5
+      }
+    ],
+    "headers": {
+      "cache-control": "no-cache",
+      "content-type": "text/event-stream; charset=utf-8",
+      "x-accel-buffering": "no"
+    },
+    "status": 200
+  },
+  "events_invalid_last_event_id": {
+    "body": {
+      "detail": "事件序号无效"
+    },
+    "headers": {
+      "content-length": "31",
+      "content-type": "application/json"
+    },
+    "method": "GET",
+    "name": "search_bad_last_event_id",
+    "path": "/api/search/jobs/{id}/events",
+    "status": 400
+  },
+  "events_replay_after_1": {
+    "events": [
+      {
+        "data": {
+          "album": "Open Air Sessions",
+          "artist": "Open Horizon",
+          "cover": null,
+          "duration": 210.0,
+          "episodes": 0,
+          "id": "<ID_03>",
+          "playback": {
+            "bitrate": null,
+            "codec": "",
+            "detail": "播放或下载时解析音质与音频地址",
+            "preview_only": false,
+            "state": "pending",
+            "url": null
+          },
+          "qualities": [],
+          "root_source": "FMAMusicClient",
+          "size_bytes": null,
+          "size_label": null,
+          "source": "FMAMusicClient",
+          "source_id": "FMAMusicClient_01",
+          "title": "Solar Wind"
+        },
+        "event": "track",
+        "id": 2
+      },
+      {
+        "data": {
+          "id": "AudiusMusicClient",
+          "status": {
+            "count": 1,
+            "state": "complete"
+          }
+        },
+        "event": "source",
+        "id": 3
+      },
+      {
+        "data": {
+          "id": "FMAMusicClient",
+          "status": {
+            "count": 1,
+            "state": "complete"
+          }
+        },
+        "event": "source",
+        "id": 4
+      },
+      {
+        "data": {
+          "cancelled": false
+        },
+        "event": "done",
+        "id": 5
+      }
+    ],
+    "status": 200
+  },
+  "events_unknown_404": {
+    "body": {
+      "detail": "搜索已过期，请重新搜索"
+    },
+    "headers": {
+      "content-length": "46",
+      "content-type": "application/json"
+    },
+    "method": "GET",
+    "name": "search_unknown_404",
+    "path": "/api/search/jobs/unknown_job/events",
+    "status": 404
+  },
+  "start_job": {
+    "body": {
+      "id": "<ID_01>"
+    },
+    "headers": {
+      "content-length": "41",
+      "content-type": "application/json"
+    },
+    "method": "POST",
+    "name": "search_start",
+    "path": "/api/search/jobs",
+    "status": 200
+  }
+}

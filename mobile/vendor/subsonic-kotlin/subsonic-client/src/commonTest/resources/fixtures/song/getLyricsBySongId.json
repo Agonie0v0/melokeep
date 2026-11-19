@@ -1,0 +1,23 @@
+{
+  "lyricsList": {
+    "structuredLyrics": [
+      {
+        "lang": "eng",
+        "synced": true,
+        "displayArtist": "Metallica",
+        "displayTitle": "Blitzkrieg",
+        "offset": 0,
+        "line": [
+          {
+            "start": 0,
+            "value": "Let us have peace, let us have life"
+          },
+          {
+            "start": 5000,
+            "value": "Let us escape the cruel night"
+          }
+        ]
+      }
+    ]
+  }
+}

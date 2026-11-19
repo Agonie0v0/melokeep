@@ -1,0 +1,31 @@
+# 从当前源码构建，避免依赖尚未发布此功能的 latest 镜像。
+services:
+  melokeep-webui:
+    build: .
+    image: melokeep-local:library
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8765:8765"
+    volumes:
+      # 可选曲库删除：此挂载可写，对应 Navidrome 的 /music 为 /music/library。
+      # 不启用删除时无需额外配置，Navidrome 自己仍可保持只读挂载。
+      - ./music:/music
+      - ./data:/data
+    environment:
+      MELOKEEP_USER: admin
+      MELOKEEP_PASS: '请改成你自己的强密码'
+      # PUID: '1000'
+      # PGID: '1000'
+
+  navidrome:
+    image: deluan/navidrome:latest
+    restart: unless-stopped
+    ports:
+      - "4533:4533"
+    volumes:
+      - ./music/library:/music:ro
+      - ./navidrome-data:/data
+    environment:
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data

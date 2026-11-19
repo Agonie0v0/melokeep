@@ -1,0 +1,64 @@
+name: Publish release
+run-name: Publish release ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ prereleased, released ]
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    concurrency:
+      group: maven-central-publish
+      cancel-in-progress: false
+    name: "Publish release"
+    timeout-minutes: 60
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate release version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)"
+
+          if [[ "$version" == *-SNAPSHOT ]]; then
+            echo "Release build requires VERSION_NAME without -SNAPSHOT, got: $version"
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "release" && "$version" != "$RELEASE_TAG" ]]; then
+            echo "VERSION_NAME ($version) must match release tag ($RELEASE_TAG)"
+            exit 1
+          fi
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache konan directory
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('**/build.gradle.kts') }}
+          restore-keys: "${{ runner.os }}-konan-"
+
+      - name: Build and Maven publish
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+        run: ./gradlew publishAllPublicationsToMavenCentral --no-configuration-cache --stacktrace

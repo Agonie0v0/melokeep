@@ -1,0 +1,47 @@
+[versions]
+kotlin = "2.4.20"
+ktor = "3.6.0"
+serialization = "1.11.0"
+datetime = "0.8.0"
+kotlincrypto-hash = "0.8.0"
+coroutines = "1.11.0"
+kotlinx-resources = "0.16.2"
+
+# Maintenance
+compatibility = "0.18.2"
+kover = "0.9.11"
+publish = "0.37.0"
+ktlintPlugin = "14.2.0"
+ktlint = "1.8.0"
+
+[libraries]
+# Ktor
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-contentNegotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-curl = { module = "io.ktor:ktor-client-curl", version.ref = "ktor" }
+ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
+ktor-serialization = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+
+datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
+hash-md5 = { module = "org.kotlincrypto.hash:md", version.ref = "kotlincrypto-hash" }
+
+# Testing
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test" }
+ktor-test = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+kotlinx-resources = { module = "com.goncalossilva:resources", version.ref = "kotlinx-resources" }
+
+[plugins]
+# Kotlin
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin"}
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlinx-resources = { id = "com.goncalossilva.resources", version.ref = "kotlinx-resources" }
+
+# Maintenance
+compatibility = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "compatibility" }
+kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+publish = { id = "com.vanniktech.maven.publish", version.ref = "publish" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintPlugin" }

@@ -1,0 +1,26 @@
+{
+  "users": {
+    "user": [
+      {
+        "folder": [
+          1,
+          3
+        ],
+        "username": "sindre",
+        "email": "sindre@activeobjects.no",
+        "scrobblingEnabled": "true",
+        "adminRole": "false",
+        "settingsRole": "true",
+        "downloadRole": "true",
+        "uploadRole": "false",
+        "playlistRole": "true",
+        "coverArtRole": "true",
+        "commentRole": "true",
+        "podcastRole": "true",
+        "streamRole": "true",
+        "jukeboxRole": "true",
+        "shareRole": "false"
+      }
+    ]
+  }
+}

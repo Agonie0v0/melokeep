@@ -1,0 +1,11 @@
+{
+  "chatMessages": {
+    "chatMessage": [
+      {
+        "username": "admin",
+        "time": 1678943707000,
+        "message": "Hello World"
+      }
+    ]
+  }
+}

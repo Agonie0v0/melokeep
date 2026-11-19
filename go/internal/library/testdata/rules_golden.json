@@ -1,0 +1,381 @@
+{
+  "expressions": [
+    {
+      "expr": "title",
+      "expected": "晨风序曲"
+    },
+    {
+      "expr": "album_artist or artist or '未知歌手'",
+      "expected": "自由乐手"
+    },
+    {
+      "expr": "artist.split(',')[0].strip() if artist else '未知'",
+      "expected": "自由乐手"
+    },
+    {
+      "expr": "track_number.zfill(3)",
+      "expected": "001"
+    },
+    {
+      "expr": "title + ' - ' + first_artist",
+      "expected": "晨风序曲 - 自由乐手"
+    },
+    {
+      "expr": "first_artist_letter",
+      "expected": "Z"
+    },
+    {
+      "expr": "date[0] + date[1] + date[2] + date[3]",
+      "expected": "2008"
+    },
+    {
+      "expr": "date[99]",
+      "expected": ""
+    },
+    {
+      "expr": "date[-1]",
+      "expected": "5"
+    },
+    {
+      "expr": "artist.replace(',', ' / ', 1)",
+      "expected": "自由乐手 /  合声乐手"
+    },
+    {
+      "expr": "title.upper().lower().title()",
+      "expected": "晨风序曲"
+    },
+    {
+      "expr": "'  abc  '.strip() + ':' + '  abc  '.lstrip() + ':' + '  abc  '.rstrip()",
+      "expected": "abc:abc  :  abc"
+    },
+    {
+      "expr": "str(int(track_number) + 5)",
+      "expected": "6"
+    },
+    {
+      "expr": "str(-10)",
+      "expected": "-10"
+    },
+    {
+      "expr": "not '' and 'ok' or 'no'",
+      "expected": "ok"
+    },
+    {
+      "expr": "('a' if not comment else comment) + '!'",
+      "expected": "live!"
+    },
+    {
+      "expr": "albumartist + '/' + tracknumber + '/' + discnumber",
+      "expected": "自由乐手/01/1"
+    }
+  ],
+  "renders": [
+    {
+      "template": "{album_artist}/{album}",
+      "expected": "自由乐手/晨风集"
+    },
+    {
+      "template": "{track_number} - {title}",
+      "expected": "01 - 晨风序曲"
+    },
+    {
+      "template": "${first_artist_letter}/${first_artist}/${album} (${year})",
+      "expected": "Z/自由乐手/晨风集 (2008)"
+    },
+    {
+      "template": "${track_number.zfill(3)} - ${title.strip()} [${counter}]",
+      "expected": "001 - 晨风序曲 [3]"
+    },
+    {
+      "template": "{{literal}}/{title}/{null}",
+      "expected": "{literal}/晨风序曲/"
+    }
+  ],
+  "extracts": [
+    {
+      "template": "{artist} - {title}",
+      "stem": "自由乐手 - 晨风序曲",
+      "expected": {
+        "artist": "自由乐手",
+        "title": "晨风序曲"
+      }
+    },
+    {
+      "template": "{track_number}. {artist} - {title}",
+      "stem": "01. 自由乐手 - 晨风序曲",
+      "expected": {
+        "track_number": "01",
+        "artist": "自由乐手",
+        "title": "晨风序曲"
+      }
+    },
+    {
+      "template": "{artist} - {title} ({album})",
+      "stem": "Indie - Breeze (Dawn)",
+      "expected": {
+        "artist": "Indie",
+        "title": "Breeze",
+        "album": "Dawn"
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "value": "  自由乐手   晨风序曲  ",
+      "find": "",
+      "replacement": "",
+      "chinese": "none",
+      "repair": false,
+      "expected": "自由乐手 晨风序曲"
+    },
+    {
+      "value": "\u00e8\u0087\u00aa\u00e7\u0094\u00b1\u00e4\u00b9\u0090\u00e6\u0089\u008b",
+      "find": "",
+      "replacement": "",
+      "chinese": "none",
+      "repair": true,
+      "expected": "自由乐手"
+    },
+    {
+      "value": "invalid￿",
+      "find": "",
+      "replacement": "",
+      "chinese": "none",
+      "repair": true,
+      "expected": "invalid￿"
+    },
+    {
+      "value": "樂團 風景 髮 裡",
+      "find": "",
+      "replacement": "",
+      "chinese": "simplified",
+      "repair": false,
+      "expected": "乐团 风景 发 里"
+    },
+    {
+      "value": "乐团 风景 发 里",
+      "find": "",
+      "replacement": "",
+      "chinese": "traditional",
+      "repair": false,
+      "expected": "樂團 風景 發 裏"
+    },
+    {
+      "value": "foo bar foo",
+      "find": "foo",
+      "replacement": "baz",
+      "chinese": "none",
+      "repair": false,
+      "expected": "baz bar baz"
+    },
+    {
+      "value": "é",
+      "find": "",
+      "replacement": "",
+      "chinese": "none",
+      "repair": false,
+      "expected": "é"
+    }
+  ],
+  "variables": [
+    {
+      "path": "root/ArtistA/AlbumB/01 - Song.flac",
+      "artist": "自由乐手, 合声乐手",
+      "date": "2008-10-15",
+      "expected": {
+        "first_artist": "自由乐手",
+        "first_artist_letter": "Z",
+        "year": "2008",
+        "counter": "2",
+        "filename": "01 - Song.flac",
+        "file_song_name": "01 - Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "flac",
+        "lyrics": "lrc"
+      }
+    },
+    {
+      "path": "root/ArtistA/AlbumB/Song.mp3",
+      "artist": "東風樂團",
+      "date": "1990",
+      "expected": {
+        "first_artist": "東風樂團",
+        "first_artist_letter": "D",
+        "year": "1990",
+        "counter": "2",
+        "filename": "Song.mp3",
+        "file_song_name": "Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "mp3",
+        "lyrics": "lrc"
+      }
+    },
+    {
+      "path": "root/ArtistA/AlbumB/Song.mp3",
+      "artist": "Echo Band / Nova",
+      "date": "",
+      "expected": {
+        "first_artist": "Echo Band",
+        "first_artist_letter": "E",
+        "year": "",
+        "counter": "2",
+        "filename": "Song.mp3",
+        "file_song_name": "Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "mp3",
+        "lyrics": "lrc"
+      }
+    },
+    {
+      "path": "root/ArtistA/AlbumB/Song.mp3",
+      "artist": "",
+      "date": "",
+      "expected": {
+        "first_artist": "",
+        "first_artist_letter": "#",
+        "year": "",
+        "counter": "2",
+        "filename": "Song.mp3",
+        "file_song_name": "Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "mp3",
+        "lyrics": "lrc"
+      }
+    },
+    {
+      "path": "root/ArtistA/AlbumB/Song.mp3",
+      "artist": "123Band",
+      "date": "",
+      "expected": {
+        "first_artist": "123Band",
+        "first_artist_letter": "1",
+        "year": "",
+        "counter": "2",
+        "filename": "Song.mp3",
+        "file_song_name": "Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "mp3",
+        "lyrics": "lrc"
+      }
+    },
+    {
+      "path": "root/ArtistA/AlbumB/Song.mp3",
+      "artist": "!!!",
+      "date": "",
+      "expected": {
+        "first_artist": "!!!",
+        "first_artist_letter": "!",
+        "year": "",
+        "counter": "2",
+        "filename": "Song.mp3",
+        "file_song_name": "Song",
+        "parent_path": "AlbumB",
+        "parent_parent_path": "ArtistA",
+        "ext": "mp3",
+        "lyrics": "lrc"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "kind": "expr",
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": "变量表达式过长"
+    },
+    {
+      "kind": "expr",
+      "input": "title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title + title",
+      "error": "变量表达式过于复杂"
+    },
+    {
+      "kind": "expr",
+      "input": "1001",
+      "error": "表达式数字应在 -1000 到 1000 内"
+    },
+    {
+      "kind": "expr",
+      "input": "-1001",
+      "error": "表达式数字应在 -1000 到 1000 内"
+    },
+    {
+      "kind": "expr",
+      "input": "unknown_var",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "expr",
+      "input": "title.replace('a', 'b', count=1)",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "expr",
+      "input": "title.strip('a', 'b')",
+      "error": "变量表达式的类型或参数无效"
+    },
+    {
+      "kind": "expr",
+      "input": "title.unknown()",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "expr",
+      "input": "__import__('os')",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "expr",
+      "input": "1 * 2",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "expr",
+      "input": "title.replace('', 'x' * 500)",
+      "error": "不支持的表达式；可使用标签变量、条件、拼接和常用字符串方法"
+    },
+    {
+      "kind": "render",
+      "input": "${title",
+      "error": "变量表达式括号未闭合或包含嵌套括号"
+    },
+    {
+      "kind": "render",
+      "input": "${title} ${",
+      "error": "变量表达式括号未闭合或包含嵌套括号"
+    },
+    {
+      "kind": "render",
+      "input": "{unknown}",
+      "error": "模板格式无效或包含不支持的变量"
+    },
+    {
+      "kind": "render",
+      "input": "{title!r}",
+      "error": "模板格式无效或包含不支持的变量"
+    },
+    {
+      "kind": "render",
+      "input": "{title:02d}",
+      "error": "模板格式无效或包含不支持的变量"
+    },
+    {
+      "kind": "extract",
+      "input": "{artist}{title}|abc",
+      "error": "提取变量之间必须有固定分隔符"
+    },
+    {
+      "kind": "extract",
+      "input": "{artist} - {artist}|a - b",
+      "error": "提取模板应使用不重复的标签变量"
+    },
+    {
+      "kind": "extract",
+      "input": "{artist} - {title}|no_sep",
+      "error": "文件名不符合提取模板"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+/*
+ * Navic, a Subsonic music streaming app for Android
+ * Copyright (c) 2026 paige
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+package paige.navic.ui.component.common
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import org.koin.compose.koinInject
+import paige.navic.domain.manager.runtime.PreferenceManager
+import paige.navic.domain.manager.session.SessionManager
+import coil3.compose.LocalPlatformContext as LocalCoilPlatformContext
+
+@Composable
+fun CoverArt(
+	modifier: Modifier = Modifier,
+	coverArtId: String?,
+	contentScale: ContentScale = if (coverArtId?.startsWith("ar-") == true) ContentScale.Crop else ContentScale.Fit,
+	contentDescription: String? = null,
+	onClick: (() -> Unit)? = null,
+	onLongClick: (() -> Unit)? = null,
+	square: Boolean = true,
+	crossfadeMs: Int = 120,
+	shadowElevation: Dp = 0.dp,
+	interactionSource: MutableInteractionSource? = null,
+	shape: Shape? = null
+) {
+	val coilPlatformContext = LocalCoilPlatformContext.current
+
+	val imageLoader = koinInject<ImageLoader>()
+	val sessionManager = koinInject<SessionManager>()
+	val preferenceManager = koinInject<PreferenceManager>()
+
+	val resolvedShape = shape ?: if (!coverArtId.orEmpty().startsWith("ar-")) {
+		preferenceManager.coverArtShape.shape
+	} else {
+		preferenceManager.artistImageShape.shape
+	}
+
+	val model = remember(coverArtId, crossfadeMs, coilPlatformContext) {
+		coverArtId?.let { id ->
+			ImageRequest.Builder(coilPlatformContext)
+				.data(sessionManager.getCoverArtUrl(id))
+				.memoryCacheKey(id)
+				.diskCacheKey(id)
+				.diskCachePolicy(CachePolicy.ENABLED)
+				.memoryCachePolicy(CachePolicy.ENABLED)
+				.crossfade(crossfadeMs)
+				.build()
+		}
+	}
+
+	val commonModifier = modifier
+		.then(if (square) Modifier.aspectRatio(1f) else Modifier)
+		.then(if (shadowElevation > 0.dp) Modifier.shadow(shadowElevation, resolvedShape) else Modifier)
+		.clip(resolvedShape)
+		.background(MaterialTheme.colorScheme.surfaceContainer)
+		.then(
+			if (onClick != null)
+				Modifier.combinedClickable(
+					onClick = onClick,
+					onLongClick = onLongClick,
+					interactionSource = interactionSource
+				)
+			else Modifier
+		)
+		.then(
+			if (interactionSource != null)
+				Modifier.indication(interactionSource, ripple())
+			else Modifier
+		)
+
+	if (model == null) return Box(commonModifier)
+	AsyncImage(
+		model = model,
+		imageLoader = imageLoader,
+		contentDescription = contentDescription,
+		modifier = commonModifier,
+		contentScale = contentScale
+	)
+}

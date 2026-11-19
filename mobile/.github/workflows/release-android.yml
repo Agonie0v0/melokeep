@@ -1,0 +1,124 @@
+name: Build and release Android
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Agonie0v0/Navic' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Initialize dependencies
+        run: |
+          git config --global url."https://github.com/FFmpeg/FFmpeg.git".insteadOf https://git.ffmpeg.org/ffmpeg.git
+          git submodule sync --recursive
+          git submodule update --init --recursive --jobs 4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Verify Simplified Chinese coverage
+        run: python3 .github/scripts/check-zh-coverage.py
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build unsigned release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleRelease --stacktrace
+          apk=$(find app/build/outputs/apk/release -name '*.apk' -print -quit)
+          test -n "$apk"
+          cp "$apk" Navic-unsigned.apk
+
+      - name: Check queue search and selection order
+        run: python3 checks/check_queue_search.py --variant release
+
+      - name: Upload unsigned APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: navic-unsigned
+          path: Navic-unsigned.apk
+          retention-days: 1
+          if-no-files-found: error
+
+  sign-and-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download unsigned APK
+        uses: actions/download-artifact@v7
+        with:
+          name: navic-unsigned
+
+      - name: Sign APK
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+          test -n "$KEYSTORE_PASSWORD"
+
+          printf '%s' "$KEYSTORE" | base64 --decode > release.keystore
+          apksigner=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -n "$apksigner"
+
+          "$apksigner" sign \
+            --ks release.keystore \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out Navic-statusbar.apk \
+            Navic-unsigned.apk
+          "$apksigner" verify --verbose Navic-statusbar.apk
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f release.keystore
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="android-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:8}"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" Navic-statusbar.apk \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" Navic-statusbar.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --latest \
+              --notes "Built from commit $GITHUB_SHA on master. Download Navic-statusbar.apk to install or update."
+          fi

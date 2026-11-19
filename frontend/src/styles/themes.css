@@ -1,0 +1,225 @@
+/* MeloKeep 设计系统 Token 与 8 套深浅主题色板 */
+:root {
+  --radius-card: 14px;
+  --radius-panel: 12px;
+  --radius-control: 9px;
+  --row-py: 10px;
+  --container-max: 1480px;
+  --on-accent: #ffffff;
+  --glass-bg: color-mix(in srgb, var(--surface) 84%, transparent);
+  --glass-heavy: color-mix(in srgb, var(--surface) 92%, transparent);
+  --glass-border: color-mix(in srgb, var(--ink) 8%, transparent);
+  --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --player-surface: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+:root[data-theme="dark"] {
+  --on-accent: #071324;
+  --glass-bg: color-mix(in srgb, var(--surface) 84%, transparent);
+  --glass-heavy: color-mix(in srgb, var(--surface) 93%, transparent);
+  --glass-border: rgba(255, 255, 255, 0.085);
+  --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --player-surface: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+:root[data-density="compact"] {
+  --radius-card: 14px;
+  --radius-panel: 12px;
+  --radius-control: 8px;
+  --row-py: 7px;
+  --container-max: 1600px;
+}
+
+/* ==================== 浅色预设 1：纯净晨雾（默认浅色） ==================== */
+:root,
+:root[data-preset="pure-light"] {
+  color-scheme: light;
+  --ink: #0f172a;
+  --muted: #52637a;
+  --line: #dbe3ee;
+  --line-soft: rgba(15, 23, 42, 0.075);
+  --accent: #2563eb;
+  --soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --subtle: #ebeff6;
+  --sidebar: #ffffff;
+  --hover: #e4eaf3;
+  --emerald: #047857;
+  --emerald-bg: #ecfdf5;
+  --amber: #b45309;
+  --danger: #dc2626;
+  --shadow:
+    0 12px 32px -10px rgba(15, 23, 42, 0.07), 0 2px 6px rgba(15, 23, 42, 0.035);
+  --shadow-pill:
+    0 2px 6px rgba(15, 23, 42, 0.09), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --ambient-glow: rgba(37, 99, 235, 0.09);
+}
+
+/* ==================== 浅色预设 2：暖调黑胶纸 ==================== */
+:root[data-preset="warm-vinyl"] {
+  color-scheme: light;
+  --ink: #292018;
+  --muted: #6e5d4f;
+  --line: #e4d8c8;
+  --line-soft: rgba(41, 32, 24, 0.085);
+  --accent: #c2591b;
+  --soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --bg: #f5efe6;
+  --surface: #fffcf7;
+  --subtle: #ede4d6;
+  --sidebar: #fffcf7;
+  --hover: #e5d9c6;
+  --emerald: #15803d;
+  --emerald-bg: #dcfce7;
+  --amber: #b45309;
+  --danger: #c81e1e;
+  --shadow:
+    0 12px 30px -10px rgba(67, 44, 24, 0.08), 0 2px 6px rgba(67, 44, 24, 0.04);
+  --shadow-pill:
+    0 2px 6px rgba(67, 44, 24, 0.1), 0 1px 2px rgba(67, 44, 24, 0.04);
+  --ambient-glow: rgba(194, 89, 27, 0.1);
+}
+
+/* ==================== 浅色预设 3：北欧冰川 ==================== */
+:root[data-preset="nordic-frost"] {
+  color-scheme: light;
+  --ink: #0c1e2c;
+  --muted: #4b677d;
+  --line: #cfe0ea;
+  --line-soft: rgba(12, 30, 44, 0.075);
+  --accent: #0284c7;
+  --soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --bg: #edf4f7;
+  --surface: #fafdff;
+  --subtle: #e1edf3;
+  --sidebar: #fafdff;
+  --hover: #d5e6ef;
+  --emerald: #047857;
+  --emerald-bg: #d1fae5;
+  --amber: #b45309;
+  --danger: #dc2626;
+  --shadow:
+    0 12px 32px -10px rgba(8, 47, 73, 0.075), 0 2px 6px rgba(8, 47, 73, 0.035);
+  --shadow-pill:
+    0 2px 6px rgba(8, 47, 73, 0.09), 0 1px 2px rgba(8, 47, 73, 0.04);
+  --ambient-glow: rgba(2, 132, 199, 0.1);
+}
+
+/* ==================== 浅色预设 4：雾樱漫音 ==================== */
+:root[data-preset="rose-mist"] {
+  color-scheme: light;
+  --ink: #2a121e;
+  --muted: #765164;
+  --line: #ecd7e0;
+  --line-soft: rgba(42, 18, 30, 0.08);
+  --accent: #db2777;
+  --soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --bg: #f9f1f4;
+  --surface: #fffbfc;
+  --subtle: #f3e4eb;
+  --sidebar: #fffbfc;
+  --hover: #ebd6e0;
+  --emerald: #059669;
+  --emerald-bg: #d1fae5;
+  --amber: #c2410c;
+  --danger: #dc2626;
+  --shadow:
+    0 12px 32px -10px rgba(80, 7, 36, 0.07), 0 2px 6px rgba(80, 7, 36, 0.035);
+  --shadow-pill:
+    0 2px 6px rgba(80, 7, 36, 0.09), 0 1px 2px rgba(80, 7, 36, 0.04);
+  --ambient-glow: rgba(219, 39, 119, 0.09);
+}
+
+/* ==================== 深色预设 1：曜石录音室（默认深色） ==================== */
+:root[data-theme="dark"],
+:root[data-preset="obsidian"] {
+  color-scheme: dark;
+  --ink: #f8fafc;
+  --muted: #94a3b8;
+  --line: #232a3c;
+  --line-soft: rgba(255, 255, 255, 0.07);
+  --accent: #60a5fa;
+  --soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --bg: #090b10;
+  --surface: #12151e;
+  --subtle: #1a1f2d;
+  --sidebar: #12151e;
+  --hover: #242a3d;
+  --emerald: #34d399;
+  --emerald-bg: rgba(16, 185, 129, 0.16);
+  --amber: #fbbf24;
+  --danger: #f87171;
+  --shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.62);
+  --shadow-pill: 0 2px 8px rgba(0, 0, 0, 0.48);
+  --ambient-glow: rgba(96, 165, 250, 0.14);
+}
+
+/* ==================== 深色预设 2：流金黑胶（OLED 纯黑 + 香槟金） ==================== */
+:root[data-preset="vinyl-gold"] {
+  color-scheme: dark;
+  --ink: #fafaf9;
+  --muted: #a8a29e;
+  --line: #292524;
+  --line-soft: rgba(250, 250, 249, 0.075);
+  --accent: #eab308;
+  --soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --bg: #060608;
+  --surface: #121216;
+  --subtle: #1c1b20;
+  --sidebar: #121216;
+  --hover: #27252c;
+  --emerald: #4ade80;
+  --emerald-bg: rgba(74, 222, 128, 0.16);
+  --amber: #facc15;
+  --danger: #f87171;
+  --shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.78);
+  --shadow-pill: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --ambient-glow: rgba(234, 179, 8, 0.14);
+}
+
+/* ==================== 深色预设 3：午夜极光 ==================== */
+:root[data-preset="midnight-aurora"] {
+  color-scheme: dark;
+  --ink: #ecfdf5;
+  --muted: #86a9a2;
+  --line: #173439;
+  --line-soft: rgba(204, 251, 241, 0.075);
+  --accent: #10b981;
+  --soft: color-mix(in srgb, var(--accent) 17%, transparent);
+  --bg: #061114;
+  --surface: #0c1b1f;
+  --subtle: #13282e;
+  --sidebar: #0c1b1f;
+  --hover: #1b363d;
+  --emerald: #34d399;
+  --emerald-bg: rgba(16, 185, 129, 0.18);
+  --amber: #fbbf24;
+  --danger: #fb7185;
+  --shadow: 0 18px 46px -10px rgba(0, 0, 0, 0.7);
+  --shadow-pill: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --ambient-glow: rgba(16, 185, 129, 0.16);
+}
+
+/* ==================== 深色预设 4：暗紫霓虹 ==================== */
+:root[data-preset="cyber-amethyst"] {
+  color-scheme: dark;
+  --ink: #f5f3ff;
+  --muted: #a197c2;
+  --line: #292246;
+  --line-soft: rgba(245, 243, 255, 0.08);
+  --accent: #a78bfa;
+  --soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --bg: #0b0816;
+  --surface: #141026;
+  --subtle: #1e1836;
+  --sidebar: #141026;
+  --hover: #2a2249;
+  --emerald: #34d399;
+  --emerald-bg: rgba(16, 185, 129, 0.16);
+  --amber: #fbbf24;
+  --danger: #fb7185;
+  --shadow: 0 18px 48px -10px rgba(4, 2, 16, 0.75);
+  --shadow-pill: 0 2px 8px rgba(4, 2, 16, 0.55);
+  --ambient-glow: rgba(167, 139, 250, 0.18);
+}

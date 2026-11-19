@@ -1,0 +1,374 @@
+name: 发布 Docker 镜像
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "可选：手动指定本次发布版本号（如 v1.1.0），留空则自动递增补丁号"
+        required: false
+        default: ""
+        type: string
+      build_mobile:
+        description: "是否构建并附带移动端安装包（auto 表示仅 mobile/ 变更时构建）"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - "true"
+          - "false"
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: 计算发布版本号
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      prev_version: ${{ steps.ver.outputs.prev_version }}
+      should_release: ${{ steps.ver.outputs.should_release }}
+      should_build_mobile: ${{ steps.ver.outputs.should_build_mobile }}
+    steps:
+      - name: 检出仓库标签
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 生成版本号
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUILD_MOBILE: ${{ inputs.build_mobile }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          latest="$(git tag --list "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          prev_version="$latest"
+          manual="$(printf '%s' "${INPUT_VERSION:-}" | tr -d '[:space:]')"
+          if [ -n "$manual" ]; then
+            if ! printf '%s' "$manual" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+              echo "Invalid version format: $manual" >&2
+              exit 1
+            fi
+            case "$manual" in
+              v*) version="$manual" ;;
+              *) version="v$manual" ;;
+            esac
+          else
+            existing="$(git tag --points-at HEAD "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+            if [ -n "$existing" ]; then
+              version="$existing"
+              prev_version="$(git tag --list "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fxv "$existing" | head -n 1 || true)"
+            else
+              if [ -z "$latest" ]; then
+                version="v1.0.0"
+              else
+                base="${latest#v}"
+                major="${base%%.*}"
+                rest="${base#*.}"
+                minor="${rest%%.*}"
+                patch="${rest#*.}"
+                version="v${major}.${minor}.$((patch + 1))"
+              fi
+            fi
+          fi
+          should_release="false"
+          if [ "${REF_NAME}" = "main" ] || [ -n "$manual" ]; then
+            should_release="true"
+          fi
+          should_build_mobile="false"
+          if [ "$should_release" = "true" ]; then
+            mode="${INPUT_BUILD_MOBILE:-auto}"
+            if [ "$mode" = "true" ]; then
+              should_build_mobile="true"
+            elif [ "$mode" = "false" ]; then
+              should_build_mobile="false"
+            else
+              if [ -z "$prev_version" ]; then
+                should_build_mobile="true"
+              elif git diff --name-only "${prev_version}..HEAD" | grep -Eq '^(mobile/|\.github/workflows/build-mobile\.yml$)'; then
+                should_build_mobile="true"
+              fi
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prev_version=$prev_version" >> "$GITHUB_OUTPUT"
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+          echo "should_build_mobile=$should_build_mobile" >> "$GITHUB_OUTPUT"
+          echo "Computed version: $version (prev=$prev_version, should_release=$should_release, should_build_mobile=$should_build_mobile)"
+
+  build:
+    name: 构建 ${{ matrix.arch }} 镜像
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送平台镜像
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          platforms: ${{ matrix.platform }}
+          tags: |
+            ghcr.io/agonie0v0/melokeep:sha-${{ github.sha }}-${{ matrix.arch }}
+          build-args: |
+            TELEGRAM_BUILD_JOBS=4
+            BUILD_VERSION=${{ needs.prepare.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_REF=${{ github.ref_name }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha,scope=melokeep-${{ matrix.arch }}
+          cache-to: type=gha,scope=melokeep-${{ matrix.arch }},mode=max
+          provenance: mode=max
+          sbom: true
+
+  mobile:
+    name: 构建移动端安装包
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.should_build_mobile == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-mobile.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  publish:
+    name: 合并并发布多架构 manifest
+    needs: [prepare, build, mobile]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.build.result == 'success' && (needs.mobile.result == 'success' || needs.mobile.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 合并多架构 manifest
+        env:
+          COMPUTED_VERSION: ${{ needs.prepare.outputs.version }}
+          SHOULD_RELEASE: ${{ needs.prepare.outputs.should_release }}
+        run: |
+          set -eu
+          image=ghcr.io/agonie0v0/melokeep
+          source_amd64="$image:sha-${GITHUB_SHA}-amd64"
+          source_arm64="$image:sha-${GITHUB_SHA}-arm64"
+          # Docker tags cannot contain '/', and branch builds must never move
+          # the stable latest tag. Keep a readable, deterministic branch tag.
+          ref_tag="$(printf '%s' "$GITHUB_REF_NAME" | tr '/:' '--' | sed 's/[^A-Za-z0-9_.-]/-/g')"
+          ref_tag="${ref_tag:0:120}"
+          [ -n "$ref_tag" ] || ref_tag="branch-${GITHUB_SHA:0:12}"
+          tags=("$image:sha-${GITHUB_SHA}" "$image:$ref_tag")
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            tags+=("$image:latest")
+          fi
+          version="${COMPUTED_VERSION:-}"
+          should_release="${SHOULD_RELEASE:-false}"
+          if [ "$should_release" = "true" ] && [ -n "$version" ]; then
+            tags+=("$image:$version")
+          fi
+          args=()
+          for tag in "${tags[@]}"; do
+            args+=(--tag "$tag")
+          done
+          docker buildx imagetools create "${args[@]}" \
+            "$source_amd64" "$source_arm64"
+
+      - name: 验证已发布镜像可启动
+        run: |
+          for identity in 10001:10001 1026:100; do
+            runtime_uid=${identity%:*}
+            runtime_gid=${identity#*:}
+            storage=/tmp/melokeep-smoke/${runtime_uid}
+            sudo mkdir -p "$storage/data/engine" "$storage/music"
+            # Reproduce root-owned, non-writable NAS directories and old state.
+            sudo touch "$storage/data/engine/old-state"
+            sudo chmod 400 "$storage/data/engine/old-state"
+            sudo chmod 500 "$storage/data" "$storage/data/engine" "$storage/music"
+            identity_args=()
+            if [ "$runtime_uid" != 10001 ]; then
+              identity_args=(-e PUID="$runtime_uid" -e PGID="$runtime_gid")
+            fi
+            docker run -d --name melokeep-smoke -p 127.0.0.1:18765:8765 \
+              -v "$storage/data:/data" -v "$storage/music:/music" \
+              -e MELOKEEP_USER=smoke -e MELOKEEP_PASS=smoke-test-password \
+              "${identity_args[@]}" ghcr.io/agonie0v0/melokeep:sha-${GITHUB_SHA}
+            ready=0
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent http://127.0.0.1:18765/api/health | grep -q '"backend":"melokeep"'; then
+                ready=1
+                break
+              fi
+              sleep 2
+            done
+            docker logs melokeep-smoke --tail 30
+            [ "$ready" = 1 ] || exit 1
+            docker exec --user "$identity" melokeep-smoke python -c "import importlib.util, os; from pathlib import Path; assert importlib.util.find_spec('yt_dlp') is None; s=Path('/proc/1/status').read_text(); assert 'Uid:\t' + '\t'.join(['$runtime_uid'] * 4) in s; assert Path('/data/go/melokeep.db').exists(); Path('/data/engine/old-state').write_text('repaired'); Path('/music/write-check').write_text('ok'); (Path.home() / '.cache').mkdir(parents=True, exist_ok=True); assert os.stat('/data/engine').st_mode & 0o777 == 0o700"
+            docker rm -f melokeep-smoke
+          done
+
+      - name: 检出提交历史以生成更新日志
+        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 下载移动端安装包资产
+        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != '' && needs.mobile.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: MeloKeep-*
+          path: /tmp/release-assets
+          merge-multiple: true
+
+      - name: 生成中文更新日志并发布 GitHub Release
+        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PREV_VERSION: ${{ needs.prepare.outputs.prev_version }}
+          MOBILE_BUILT: ${{ needs.mobile.result == 'success' && 'true' || 'false' }}
+          SIGNING_MODE: ${{ needs.mobile.outputs.signing_mode }}
+          ANDROID_ASSET: ${{ needs.mobile.outputs.android_asset_name }}
+          IOS_ASSET: ${{ needs.mobile.outputs.ios_asset_name }}
+        run: |
+          set -eu
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists, skipping."
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/release-notes.md
+          import os
+          import re
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          version = os.environ["VERSION"]
+          prev = os.environ.get("PREV_VERSION", "").strip()
+          sha = os.environ["GITHUB_SHA"]
+
+          rev_range = f"{prev}..{sha}" if prev else sha
+          cmd = ["git", "log", "--no-merges", "--format=%H\x1f%s\x1f%an", rev_range]
+          if not prev:
+              cmd.insert(3, "-n")
+              cmd.insert(4, "15")
+          raw = subprocess.check_output(cmd, text=True).splitlines()
+
+          feats, fixes, others = [], [], []
+          for line in raw:
+              if not line.strip():
+                  continue
+              parts = line.split("\x1f", 2)
+              if len(parts) < 2:
+                  continue
+              commit_sha, subject = parts[0], parts[1].strip()
+              short = commit_sha[:7]
+              m_feat = re.match(r"^feat(?:\(([^)]+)\))?!?:\s*(.+)$", subject, re.I)
+              m_fix = re.match(r"^fix(?:\(([^)]+)\))?!?:\s*(.+)$", subject, re.I)
+              m_other = re.match(r"^(?:ci|chore|refactor|docs|perf|style|test|build)(?:\(([^)]+)\))?!?:\s*(.+)$", subject, re.I)
+              if m_feat:
+                  feats.append(f"- {m_feat.group(2).strip()} (`{short}`)")
+              elif m_fix:
+                  fixes.append(f"- {m_fix.group(2).strip()} (`{short}`)")
+              elif m_other:
+                  others.append(f"- {m_other.group(2).strip()} (`{short}`)")
+              else:
+                  others.append(f"- {subject} (`{short}`)")
+
+          lines = ["## 更新内容", ""]
+          if feats:
+              lines += ["### ✨ 新增功能", *feats, ""]
+          if fixes:
+              lines += ["### 🐛 问题修复", *fixes, ""]
+          if others:
+              lines += ["### 🔧 优化与维护", *others, ""]
+          if not (feats or fixes or others):
+              lines += ["- 常规构建与维护更新", ""]
+
+          image_repo = f"ghcr.io/{repo.lower()}"
+          lines += [
+              "### 🐳 Docker 镜像与升级",
+              "",
+              f"- **镜像标签**：`{image_repo}:{version}`（同步更新 `:latest`）",
+              "- **升级命令**：`docker compose pull && docker compose up -d`",
+          ]
+          if os.environ.get("MOBILE_BUILT") == "true":
+              android_asset = os.environ.get("ANDROID_ASSET") or f"MeloKeep-{version}-android.apk"
+              ios_asset = os.environ.get("IOS_ASSET") or f"MeloKeep-{version}-ios-unsigned.ipa"
+              signing_mode = os.environ.get("SIGNING_MODE", "")
+              sign_note = (
+                  "正式固定签名，支持直接覆盖升级"
+                  if signing_mode == "release"
+                  else "临时回退签名（配置仓库 KEYSTORE Secret 后可无缝覆盖升级）"
+              )
+              lines += [
+                  "",
+                  "### 📱 移动端客户端安装包",
+                  "",
+                  f"- **Android 客户端**：`{android_asset}`（{sign_note}）",
+                  f"- **iOS 客户端（未签名）**：`{ios_asset}`（使用 SideStore / AltStore / TrollStore 自签安装）",
+              ]
+          if prev:
+              lines += [
+                  "",
+                  f"- **完整提交对比**：[{prev}...{version}](https://github.com/{repo}/compare/{prev}...{version})",
+              ]
+          print("\n".join(lines))
+          PY
+          asset_files=()
+          if [ -d /tmp/release-assets ]; then
+            while IFS= read -r -d '' f; do
+              asset_files+=("$f")
+            done < <(find /tmp/release-assets -type f -print0 | sort -z)
+          fi
+          gh release create "$VERSION" ${asset_files[@]+"${asset_files[@]}"} \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file /tmp/release-notes.md

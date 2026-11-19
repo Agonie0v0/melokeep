@@ -1,0 +1,169 @@
+/* 视图切换、弹窗、歌词与微动效定义（遵循 prefers-reduced-motion） */
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes shimmer-sweep {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.view {
+  animation: view-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-backdrop {
+  animation: modal-backdrop-in 180ms ease-out;
+}
+
+.modal-dialog {
+  animation: modal-pop-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#toast {
+  animation: toast-slide-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[popover]:popover-open {
+  animation: modal-pop-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 正在播放的三柱声波指示器 */
+.eq-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 14px;
+  width: 16px;
+}
+
+.eq-bars span {
+  display: block;
+  width: 2.5px;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: bottom center;
+  animation: eq-bounce 760ms ease-in-out infinite;
+}
+
+.eq-bars span:nth-child(2) {
+  animation-delay: -260ms;
+  animation-duration: 620ms;
+}
+
+.eq-bars span:nth-child(3) {
+  animation-delay: -520ms;
+  animation-duration: 840ms;
+}
+
+/* 柔和图片淡入 */
+.cover img,
+.album-art img {
+  opacity: 0;
+  transition:
+    opacity 260ms ease,
+    transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cover img.loaded,
+.album-art img.loaded {
+  opacity: 1;
+}
+
+.song-cover-play:hover img.loaded {
+  transform: scale(1.06);
+}
+
+/* View Transitions API 渐进增强 */
+::view-transition-old(root) {
+  animation: modal-backdrop-in 140ms ease reverse;
+}
+
+::view-transition-new(root) {
+  animation: modal-backdrop-in 180ms ease;
+}
+
+/* 骨架构闪烁 */
+.shimmer-row {
+  height: 54px;
+  border-radius: 12px;
+  background: linear-gradient(
+    90deg,
+    var(--subtle) 25%,
+    var(--hover) 50%,
+    var(--subtle) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view,
+  .modal-backdrop,
+  .modal-dialog,
+  #toast,
+  [popover]:popover-open,
+  .eq-bars span,
+  .shimmer-row {
+    animation: none !important;
+    transition: none !important;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}

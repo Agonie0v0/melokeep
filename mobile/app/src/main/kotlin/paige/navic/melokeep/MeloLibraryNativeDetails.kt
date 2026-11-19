@@ -1,0 +1,3191 @@
+@file:OptIn(
+	ExperimentalMaterial3Api::class,
+	ExperimentalMaterial3ExpressiveApi::class,
+	ExperimentalLayoutApi::class
+)
+
+package paige.navic.melokeep
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
+import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import kotlinx.collections.immutable.toPersistentList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
+import paige.navic.database.dao.SongDao
+import paige.navic.database.entity.DownloadEntity
+import paige.navic.database.entity.DownloadStatus
+import paige.navic.database.entity.SongEntity
+import paige.navic.database.mapper.toDomainModel
+import paige.navic.di.LocalNavStack
+import paige.navic.di.LocalSizeClass
+import paige.navic.di.LocalSnackBarState
+import paige.navic.domain.manager.runtime.PreferenceManager
+import paige.navic.domain.manager.session.DownloadManager
+import paige.navic.domain.model.DomainAlbum
+import paige.navic.domain.model.DomainAlbumListType
+import paige.navic.domain.model.DomainArtistListType
+import paige.navic.domain.model.DomainFilter
+import paige.navic.domain.model.DomainPlaylist
+import paige.navic.domain.model.DomainSong
+import paige.navic.domain.model.DomainSongListType
+import paige.navic.domain.model.settings.BottomBarVisibilityMode
+import paige.navic.domain.repository.SongRepository
+import paige.navic.playback.MediaPlayer
+import paige.navic.ui.component.common.CoverArt
+import paige.navic.ui.core.UiState
+import paige.navic.ui.icons.Icons
+import paige.navic.ui.icons.filled.Play
+import paige.navic.ui.icons.filled.Star
+import paige.navic.ui.icons.outlined.Album
+import paige.navic.ui.icons.outlined.Artist
+import paige.navic.ui.icons.outlined.ArrowBack
+import paige.navic.ui.icons.outlined.Check
+import paige.navic.ui.icons.outlined.Checklist
+import paige.navic.ui.icons.outlined.ChevronForward
+import paige.navic.ui.icons.outlined.Close
+import paige.navic.ui.icons.outlined.Delete
+import paige.navic.ui.icons.outlined.Download
+import paige.navic.ui.icons.outlined.LibraryMusic
+import paige.navic.ui.icons.outlined.MoreVert
+import paige.navic.ui.icons.outlined.PlaylistAdd
+import paige.navic.ui.icons.outlined.Queue
+import paige.navic.ui.icons.outlined.QueuePlayNext
+import paige.navic.ui.icons.outlined.Refresh
+import paige.navic.ui.icons.outlined.Shuffle
+import paige.navic.ui.icons.outlined.Star
+import paige.navic.ui.navigation.PersistentViewModelStoreOwner
+import paige.navic.ui.navigation.Screen
+import paige.navic.ui.screen.album.viewmodel.AlbumListViewModel
+import paige.navic.ui.screen.artist.viewmodel.ArtistDetailViewModel
+import paige.navic.ui.screen.artist.viewmodel.ArtistListViewModel
+import paige.navic.ui.screen.collection.viewmodel.CollectionDetailViewModel
+import paige.navic.ui.screen.playlist.dialog.PlaylistUpdateDialog
+import paige.navic.ui.screen.song.viewmodel.SongListViewModel
+import paige.navic.ui.theme.MeloBottomChromeClearance
+import paige.navic.ui.theme.meloGlassSurface
+import paige.navic.ui.theme.meloGoldContainer
+import paige.navic.ui.theme.meloGoldText
+import paige.navic.ui.theme.tabularNums
+import paige.navic.util.toHoursMinutesSeconds
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/* =========================================================================================
+ * 1. MeloCollectionDetailScreen (原生 Studio 专辑 / 歌单详情)
+ * ========================================================================================= */
+
+@Composable
+fun MeloCollectionDetailScreen(
+	collectionId: String,
+	tab: String
+) {
+	val viewModel = koinViewModel<CollectionDetailViewModel> { parametersOf(collectionId) }
+	val downloadManager = koinInject<DownloadManager>()
+	val player = koinInject<MediaPlayer>()
+	val backStack = LocalNavStack.current
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val collection = uiState.data?.collection
+	val songs = collection?.songs.orEmpty()
+	val otherAlbums by viewModel.otherAlbums.collectAsStateWithLifecycle()
+
+	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
+	val downloadsMap = remember(allDownloads) { allDownloads.associateBy { it.songId } }
+
+	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
+	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	var activeMenuSong by remember { mutableStateOf<DomainSong?>(null) }
+	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
+
+	val isAlbum = collection is DomainAlbum
+	val isStarred = if (isAlbum) (collection as DomainAlbum).starredAt != null else false
+
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
+	) {
+		if (collection == null && uiState is UiState.Loading) {
+			Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+				CircularProgressIndicator()
+			}
+		} else if (collection == null) {
+			Box(
+				modifier = Modifier
+					.fillMaxSize()
+					.statusBarsPadding(),
+				contentAlignment = Alignment.Center
+			) {
+				MeloQuietEmptyState(
+					message = "未找到专辑或歌单",
+					icon = Icons.Outlined.LibraryMusic,
+					actionLabel = "返回",
+					onAction = { backStack.removeLastOrNull() }
+				)
+			}
+		} else {
+			LazyColumn(
+				modifier = Modifier.fillMaxSize(),
+				contentPadding = PaddingValues(
+					top = 0.dp,
+					bottom = MeloBottomChromeClearance + if (isMultiSelecting) 128.dp else 0.dp
+				)
+			) {
+				// 1. 顶部大封面 + 流光毛玻璃头部
+				item(key = "collection-header", contentType = "header") {
+					val headerTopColor = MaterialTheme.colorScheme.surfaceContainerHigh
+					val headerBgColor = MaterialTheme.colorScheme.background
+					val headerBrush = remember(headerTopColor, headerBgColor) {
+						Brush.verticalGradient(
+							colors = listOf(
+								headerTopColor.copy(alpha = 0.88f),
+								headerBgColor
+							)
+						)
+					}
+					Box(
+						modifier = Modifier
+							.fillMaxWidth()
+							.background(headerBrush)
+							.statusBarsPadding()
+							.padding(horizontal = 16.dp, vertical = 12.dp)
+					) {
+						Column(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalAlignment = Alignment.CenterHorizontally,
+							verticalArrangement = Arrangement.spacedBy(14.dp)
+						) {
+							// 顶端导航栏
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween
+							) {
+								Surface(
+									onClick = { backStack.removeLastOrNull() },
+									shape = CircleShape,
+									color = MaterialTheme.colorScheme.surfaceContainer,
+									border = libraryHairlineBorder(),
+									modifier = Modifier.size(38.dp)
+								) {
+									Box(contentAlignment = Alignment.Center) {
+										Icon(
+											imageVector = Icons.Outlined.ArrowBack,
+											contentDescription = "返回",
+											modifier = Modifier.size(20.dp)
+										)
+									}
+								}
+
+								Text(
+									text = if (isAlbum) "专辑" else "歌单",
+									style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+									color = MaterialTheme.colorScheme.onSurface
+								)
+
+								if (isAlbum) {
+									Surface(
+										onClick = { viewModel.starAlbum(!isStarred) },
+										shape = CircleShape,
+										color = if (isStarred) MaterialTheme.colorScheme.meloGoldContainer else MaterialTheme.colorScheme.surfaceContainer,
+										border = libraryHairlineBorder(),
+										modifier = Modifier.size(38.dp)
+									) {
+										Box(contentAlignment = Alignment.Center) {
+											Icon(
+												imageVector = if (isStarred) Icons.Filled.Star else Icons.Outlined.Star,
+												contentDescription = "收藏专辑",
+												tint = if (isStarred) MaterialTheme.colorScheme.meloGoldText else MaterialTheme.colorScheme.onSurfaceVariant,
+												modifier = Modifier.size(20.dp)
+											)
+										}
+									}
+								} else {
+									Spacer(Modifier.size(38.dp))
+								}
+							}
+
+							// 封面卡
+							Surface(
+								shape = RoundedCornerShape(18.dp),
+								color = MaterialTheme.colorScheme.surfaceContainerHighest,
+								border = libraryHairlineBorder(),
+								shadowElevation = 4.dp,
+								modifier = Modifier.size(172.dp)
+							) {
+								CoverArt(
+									coverArtId = collection.coverArtId,
+									contentDescription = collection.name,
+									modifier = Modifier.fillMaxSize()
+								)
+							}
+
+							// 标题与副标题信息
+							Column(
+								horizontalAlignment = Alignment.CenterHorizontally,
+								verticalArrangement = Arrangement.spacedBy(4.dp),
+								modifier = Modifier.padding(horizontal = 12.dp)
+							) {
+								Text(
+									text = collection.name ?: "未命名",
+									style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+									color = MaterialTheme.colorScheme.onSurface,
+									textAlign = TextAlign.Center,
+									maxLines = 2,
+									overflow = TextOverflow.Ellipsis
+								)
+
+								if (isAlbum) {
+									val album = collection as DomainAlbum
+									Row(
+										horizontalArrangement = Arrangement.spacedBy(6.dp),
+										verticalAlignment = Alignment.CenterVertically
+									) {
+										Text(
+											text = album.artistName ?: "未知艺人",
+											style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+											color = MaterialTheme.colorScheme.primary,
+											modifier = Modifier.clickable {
+												backStack.add(Screen.ArtistDetail(album.artistId))
+											}
+										)
+										if (album.year != null && album.year > 0) {
+											Text("·", color = MaterialTheme.colorScheme.outline)
+											Text(
+												text = "${album.year}",
+												style = MaterialTheme.typography.bodyMedium.tabularNums(),
+												color = MaterialTheme.colorScheme.onSurfaceVariant
+											)
+										}
+									}
+								} else {
+									val pl = collection as? DomainPlaylist
+									if (!pl?.owner.isNullOrBlank()) {
+										Text(
+											text = pl?.owner.orEmpty(),
+											style = MaterialTheme.typography.bodyMedium,
+											color = MaterialTheme.colorScheme.onSurfaceVariant
+										)
+									}
+								}
+
+								// 曲目与时长统计
+								val durationStr = collection.duration?.toHoursMinutesSeconds().orEmpty()
+								Text(
+									text = "共 ${songs.size} 首" + if (durationStr.isNotBlank()) " · $durationStr" else "",
+									style = MaterialTheme.typography.labelMedium.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+							}
+
+							// 操作按钮胶囊条（播放全部 + 离线全辑 + 随机播放圆钮 + 多选开关圆钮）
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								Button(
+									onClick = { if (songs.isNotEmpty()) player.playNow(songs, 0) },
+									modifier = Modifier
+										.weight(1f)
+										.height(42.dp),
+									shape = CircleShape,
+									contentPadding = PaddingValues(horizontal = 10.dp)
+								) {
+									Icon(MeloIcons.PlayArrow, null, modifier = Modifier.size(16.dp))
+									Spacer(Modifier.width(4.dp))
+									Text("播放全部", maxLines = 1, softWrap = false)
+								}
+
+								Surface(
+									onClick = {
+										if (songs.isNotEmpty()) {
+											scope.launch {
+												queueSongsOffline(downloadManager, songs)
+												snackBarState.showSnackbar("已将全部 ${songs.size} 首歌曲加入手机下载队列")
+											}
+										}
+									},
+									shape = CircleShape,
+									color = MaterialTheme.colorScheme.surfaceContainer,
+									border = libraryHairlineBorder(),
+									modifier = Modifier
+										.weight(1f)
+										.height(42.dp)
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 10.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.Center
+									) {
+										Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+										Spacer(Modifier.width(4.dp))
+										Text("离线全辑", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+									}
+								}
+
+								Surface(
+									onClick = { if (songs.isNotEmpty()) player.playNow(songs.shuffled(), 0) },
+									shape = CircleShape,
+									color = MaterialTheme.colorScheme.surfaceContainer,
+									border = libraryHairlineBorder(),
+									modifier = Modifier.size(42.dp)
+								) {
+									Box(contentAlignment = Alignment.Center) {
+										Icon(Icons.Outlined.Shuffle, contentDescription = "随机播放", modifier = Modifier.size(18.dp))
+									}
+								}
+
+								Surface(
+									onClick = {
+										isMultiSelecting = !isMultiSelecting
+										if (!isMultiSelecting) selectedSongIds.clear()
+									},
+									shape = CircleShape,
+									color = if (isMultiSelecting) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+									border = libraryHairlineBorder(),
+									modifier = Modifier.size(42.dp)
+								) {
+									Box(contentAlignment = Alignment.Center) {
+										Icon(
+											imageVector = if (isMultiSelecting) Icons.Outlined.Close else Icons.Outlined.Checklist,
+											contentDescription = "多选",
+											modifier = Modifier.size(18.dp)
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// 2. 歌曲列表项
+				itemsIndexed(
+					items = songs,
+					key = { idx, song -> "${song.id}-$idx" },
+					contentType = { _, _ -> "track" }
+				) { index, song ->
+					val isSelected = selectedSongIds[song.id] == true
+					val dlStatus = downloadsMap[song.id]?.status
+					val isFirst = index == 0
+					val isLast = index == songs.lastIndex
+					val qualityTag = remember(song.id, song.bitDepth, song.fileExtension, song.bitRate) {
+						libraryFormatQuietQuality(song.bitDepth, song.fileExtension, song.bitRate)
+					}
+					val subtitleText = remember(song.id, song.artistName, song.duration, qualityTag) {
+						listOfNotNull(
+							song.artistName?.takeIf { it.isNotBlank() },
+							song.duration.takeIf { it.inWholeSeconds > 0 }?.toHoursMinutesSeconds(),
+							qualityTag
+						).joinToString(" · ")
+					}
+
+					Surface(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp)
+							.combinedClickable(
+								onClick = {
+									if (isMultiSelecting) {
+										selectedSongIds[song.id] = !isSelected
+									} else {
+										player.playNow(songs, index)
+									}
+								},
+								onLongClick = {
+									isMultiSelecting = true
+									selectedSongIds[song.id] = true
+								}
+							),
+						shape = libraryGroupedItemShape(isFirst, isLast),
+						color = if (isMultiSelecting && isSelected) {
+							MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainer
+						}
+					) {
+						Column {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 12.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(10.dp)
+							) {
+								if (isMultiSelecting) {
+									Checkbox(
+										checked = isSelected,
+										onCheckedChange = { selectedSongIds[song.id] = it }
+									)
+								} else {
+									Text(
+										text = "${index + 1}",
+										style = MaterialTheme.typography.labelMedium.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+										modifier = Modifier.width(24.dp),
+										textAlign = TextAlign.Center
+									)
+								}
+
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp)
+								) {
+									Text(
+										text = song.title.ifBlank { "未知歌曲" },
+										style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis
+									)
+									if (subtitleText.isNotBlank()) {
+										Text(
+											text = subtitleText,
+											style = MaterialTheme.typography.bodySmall.tabularNums(),
+											color = MaterialTheme.colorScheme.onSurfaceVariant,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis
+										)
+									}
+								}
+
+								OfflineSongStatusIcon(
+									status = dlStatus,
+									onDownloadClick = {
+										scope.launch {
+											queueSongsOffline(downloadManager, listOf(song))
+											snackBarState.showSnackbar("已加入手机下载：${song.title}")
+										}
+									},
+									onCancelDownloadingClick = {
+										downloadManager.cancelDownload(song.id)
+										scope.launch { snackBarState.showSnackbar("已取消下载") }
+									},
+									onDeleteClick = {
+										downloadManager.deleteDownload(song.id)
+										scope.launch { snackBarState.showSnackbar("已移除手机离线文件") }
+									}
+								)
+
+								IconButton(
+									onClick = { activeMenuSong = song },
+									modifier = Modifier.size(32.dp)
+								) {
+									Icon(
+										imageVector = Icons.Outlined.MoreVert,
+										contentDescription = "更多",
+										tint = MaterialTheme.colorScheme.onSurfaceVariant,
+										modifier = Modifier.size(18.dp)
+									)
+								}
+							}
+							if (!isLast) {
+								MeloHairlineDivider(startIndent = if (isMultiSelecting) 56.dp else 46.dp)
+							}
+						}
+					}
+				}
+
+				// 3. 其它相关专辑 (如果是专辑)
+				if (isAlbum && otherAlbums.isNotEmpty()) {
+					item(key = "other-albums-section", contentType = "carousel") {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(top = 24.dp, bottom = 8.dp)
+								.padding(horizontal = 16.dp),
+							verticalArrangement = Arrangement.spacedBy(12.dp)
+						) {
+							Text(
+								text = "其它专辑",
+								style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+							)
+							LazyRow(
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
+								contentPadding = PaddingValues(bottom = 8.dp)
+							) {
+								items(
+									items = otherAlbums,
+									key = { it.id },
+									contentType = { "album-card" }
+								) { itemAlbum ->
+									Surface(
+										onClick = { backStack.add(Screen.CollectionDetail(itemAlbum.id, "album")) },
+										shape = RoundedCornerShape(14.dp),
+										color = MaterialTheme.colorScheme.surfaceContainer,
+										border = libraryHairlineBorder(),
+										modifier = Modifier.width(128.dp)
+									) {
+										Column(modifier = Modifier.padding(8.dp)) {
+											CoverArt(
+												coverArtId = itemAlbum.coverArtId,
+												contentDescription = itemAlbum.name,
+												modifier = Modifier
+													.fillMaxWidth()
+													.aspectRatio(1f)
+													.clip(RoundedCornerShape(10.dp))
+											)
+											Spacer(Modifier.height(6.dp))
+											Text(
+												text = itemAlbum.name ?: "专辑",
+												style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis
+											)
+											Text(
+												text = itemAlbum.year?.let { "$it" } ?: "专辑",
+												style = MaterialTheme.typography.labelSmall.tabularNums(),
+												color = MaterialTheme.colorScheme.onSurfaceVariant
+											)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 多选 Studio 批控悬浮条
+		AnimatedVisibility(
+			visible = isMultiSelecting && songs.isNotEmpty(),
+			enter = slideInVertically { it } + fadeIn(),
+			exit = slideOutVertically { it } + fadeOut(),
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.navigationBarsPadding()
+				.padding(bottom = rememberBatchDockBottomClearance(), start = 16.dp, end = 16.dp)
+		) {
+			val pickedSongs by remember(songs) {
+				derivedStateOf { songs.filter { selectedSongIds[it.id] == true } }
+			}
+			val hasRemovableOffline = remember(pickedSongs, downloadsMap) {
+				pickedSongs.any {
+					val st = downloadsMap[it.id]?.status
+					st == DownloadStatus.DOWNLOADED || st == DownloadStatus.DOWNLOADING
+				}
+			}
+			StudioBatchSelectionDock(
+				selectedCount = pickedSongs.size,
+				totalCount = songs.size,
+				hasOfflineRemovable = hasRemovableOffline,
+				onSelectAll = {
+					if (pickedSongs.size == songs.size) {
+						selectedSongIds.clear()
+					} else {
+						songs.forEach { selectedSongIds[it.id] = true }
+					}
+				},
+				onClear = {
+					selectedSongIds.clear()
+				},
+				onExit = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDownloadSelected = {
+					if (pickedSongs.isNotEmpty()) {
+						scope.launch {
+							queueSongsOffline(downloadManager, pickedSongs)
+							snackBarState.showSnackbar("已将 ${pickedSongs.size} 首加入手机离线下载队列")
+							isMultiSelecting = false
+							selectedSongIds.clear()
+						}
+					}
+				},
+				onAddToPlaylist = {
+					if (pickedSongs.isNotEmpty()) {
+						playlistDialogSongIds = pickedSongs.map { it.id }
+					}
+				},
+				onPlaySelected = {
+					if (pickedSongs.isNotEmpty()) {
+						player.playNow(pickedSongs, 0)
+						isMultiSelecting = false
+						selectedSongIds.clear()
+					}
+				},
+				onDeleteOfflineSelected = {
+					removeSongsOffline(downloadManager, downloadsMap, pickedSongs)
+					scope.launch { snackBarState.showSnackbar("已移除所选曲目的手机离线缓存") }
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				}
+			)
+		}
+
+		// 单曲更多菜单 BottomSheet
+		activeMenuSong?.let { song ->
+			NativeDetailSongActionSheet(
+				song = song,
+				downloadStatus = downloadsMap[song.id]?.status,
+				onDismiss = { activeMenuSong = null },
+				onPlayNext = {
+					player.playNextSingle(song)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("下一首播放：${song.title}") }
+				},
+				onAddToQueue = {
+					player.addToQueue(listOf(song))
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已添加到播放队列尾部") }
+				},
+				onAddToPlaylist = {
+					playlistDialogSongIds = listOf(song.id)
+					activeMenuSong = null
+				},
+				onDownload = {
+					activeMenuSong = null
+					scope.launch {
+						queueSongsOffline(downloadManager, listOf(song))
+						snackBarState.showSnackbar("已加入手机下载：${song.title}")
+					}
+				},
+				onCancelDownload = {
+					downloadManager.cancelDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已取消下载") }
+				},
+				onDeleteDownload = {
+					downloadManager.deleteDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已从手机删除离线文件") }
+				}
+			)
+		}
+
+		playlistDialogSongIds?.let { ids ->
+			PlaylistUpdateDialog(
+				songIds = ids.toPersistentList(),
+				onSuccess = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDismissRequest = { playlistDialogSongIds = null }
+			)
+		}
+	}
+}
+
+/* =========================================================================================
+ * 2. MeloArtistDetailScreen (原生 Studio 歌手详情)
+ * ========================================================================================= */
+
+@Composable
+fun MeloArtistDetailScreen(artistId: String) {
+	val viewModel = koinViewModel<ArtistDetailViewModel> { parametersOf(artistId) }
+	val downloadManager = koinInject<DownloadManager>()
+	val player = koinInject<MediaPlayer>()
+	val backStack = LocalNavStack.current
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	val uiState by viewModel.artistState.collectAsStateWithLifecycle()
+	val isStarred by viewModel.starred.collectAsStateWithLifecycle()
+
+	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
+	val downloadsMap = remember(allDownloads) { allDownloads.associateBy { it.songId } }
+
+	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
+	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	var activeMenuSong by remember { mutableStateOf<DomainSong?>(null) }
+	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
+
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
+	) {
+		when (val state = uiState) {
+			is UiState.Loading -> {
+				Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+					CircularProgressIndicator()
+				}
+			}
+			is UiState.Error -> {
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.statusBarsPadding(),
+					contentAlignment = Alignment.Center
+				) {
+					MeloQuietEmptyState(
+						message = state.error.message ?: "加载歌手失败",
+						icon = Icons.Outlined.Artist,
+						actionLabel = "返回",
+						onAction = { backStack.removeLastOrNull() }
+					)
+				}
+			}
+			is UiState.Success -> {
+				val artistData = state.data
+				val artist = artistData.artist
+				val topSongs = artistData.topSongs
+				val albums = artistData.albums
+				val similarArtists = artistData.similarArtists
+
+				LazyColumn(
+					modifier = Modifier.fillMaxSize(),
+					contentPadding = PaddingValues(
+						top = 0.dp,
+						bottom = MeloBottomChromeClearance + if (isMultiSelecting) 128.dp else 0.dp
+					)
+				) {
+					// 1. 歌手大头像头部
+					item(key = "artist-header", contentType = "header") {
+						val headerTopColor = MaterialTheme.colorScheme.surfaceContainerHigh
+						val headerBgColor = MaterialTheme.colorScheme.background
+						val headerBrush = remember(headerTopColor, headerBgColor) {
+							Brush.verticalGradient(
+								colors = listOf(
+									headerTopColor.copy(alpha = 0.88f),
+									headerBgColor
+								)
+							)
+						}
+						Box(
+							modifier = Modifier
+								.fillMaxWidth()
+								.background(headerBrush)
+								.statusBarsPadding()
+								.padding(horizontal = 16.dp, vertical = 12.dp)
+						) {
+							Column(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalAlignment = Alignment.CenterHorizontally,
+								verticalArrangement = Arrangement.spacedBy(14.dp)
+							) {
+								// 顶栏返回与关注
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween
+								) {
+									Surface(
+										onClick = { backStack.removeLastOrNull() },
+										shape = CircleShape,
+										color = MaterialTheme.colorScheme.surfaceContainer,
+										border = libraryHairlineBorder(),
+										modifier = Modifier.size(38.dp)
+									) {
+										Box(contentAlignment = Alignment.Center) {
+											Icon(Icons.Outlined.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+										}
+									}
+
+									Text(
+										text = "歌手",
+										style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+									)
+
+									Surface(
+										onClick = { viewModel.starArtist(!isStarred) },
+										shape = CircleShape,
+										color = if (isStarred) MaterialTheme.colorScheme.meloGoldContainer else MaterialTheme.colorScheme.surfaceContainer,
+										border = libraryHairlineBorder(),
+										modifier = Modifier.size(38.dp)
+									) {
+										Box(contentAlignment = Alignment.Center) {
+											Icon(
+												imageVector = if (isStarred) Icons.Filled.Star else Icons.Outlined.Star,
+												contentDescription = "关注歌手",
+												tint = if (isStarred) MaterialTheme.colorScheme.meloGoldText else MaterialTheme.colorScheme.onSurfaceVariant,
+												modifier = Modifier.size(20.dp)
+											)
+										}
+									}
+								}
+
+								// 圆形大头像
+								Surface(
+									shape = CircleShape,
+									color = MaterialTheme.colorScheme.surfaceContainerHighest,
+									border = libraryHairlineBorder(),
+									shadowElevation = 4.dp,
+									modifier = Modifier.size(144.dp)
+								) {
+									CoverArt(
+										coverArtId = artist.coverArtId,
+										contentDescription = artist.name,
+										modifier = Modifier.fillMaxSize()
+									)
+								}
+
+								// 艺人名字与作品概览
+								Column(
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(4.dp)
+								) {
+									Text(
+										text = artist.name,
+										style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+										textAlign = TextAlign.Center
+									)
+									Text(
+										text = "${albums.size} 专辑 · ${topSongs.size} 首热门",
+										style = MaterialTheme.typography.labelMedium.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+								}
+
+								// 快捷动作栏：播放热门 + 离线热门
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(10.dp)
+								) {
+									Button(
+										onClick = { if (topSongs.isNotEmpty()) player.playNow(topSongs, 0) },
+										modifier = Modifier
+											.weight(1f)
+											.height(42.dp),
+										shape = CircleShape,
+										contentPadding = PaddingValues(horizontal = 12.dp)
+									) {
+										Icon(MeloIcons.PlayArrow, null, modifier = Modifier.size(16.dp))
+										Spacer(Modifier.width(4.dp))
+										Text("播放热门", maxLines = 1, softWrap = false)
+									}
+
+									FilledTonalButton(
+										onClick = {
+											if (topSongs.isNotEmpty()) {
+												scope.launch {
+													queueSongsOffline(downloadManager, topSongs)
+													snackBarState.showSnackbar("已将 ${topSongs.size} 首热门曲目加入手机下载队列")
+												}
+											}
+										},
+										modifier = Modifier
+											.weight(1f)
+											.height(42.dp),
+										shape = CircleShape,
+										contentPadding = PaddingValues(horizontal = 12.dp)
+									) {
+										Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp))
+										Spacer(Modifier.width(4.dp))
+										Text("离线热门", maxLines = 1, softWrap = false)
+									}
+								}
+							}
+						}
+					}
+
+					// 2. 热门单曲榜
+					if (topSongs.isNotEmpty()) {
+						item(key = "top-songs-header", contentType = "section-header") {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 16.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween
+							) {
+								Text(
+									text = "热门作品 · ${topSongs.size}",
+									style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+								)
+								Surface(
+									onClick = {
+										isMultiSelecting = !isMultiSelecting
+										if (!isMultiSelecting) selectedSongIds.clear()
+									},
+									shape = CircleShape,
+									color = if (isMultiSelecting) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+									border = libraryHairlineBorder()
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(4.dp)
+									) {
+										Icon(
+											imageVector = if (isMultiSelecting) Icons.Outlined.Close else Icons.Outlined.Checklist,
+											contentDescription = null,
+											modifier = Modifier.size(14.dp)
+										)
+										Text(
+											text = if (isMultiSelecting) "退出" else "多选",
+											style = MaterialTheme.typography.labelMedium,
+											maxLines = 1,
+											softWrap = false
+										)
+									}
+								}
+							}
+						}
+
+						itemsIndexed(
+							items = topSongs,
+							key = { _, s -> "top-${s.id}" },
+							contentType = { _, _ -> "track" }
+						) { idx, song ->
+							val isSelected = selectedSongIds[song.id] == true
+							val dlStatus = downloadsMap[song.id]?.status
+							val isFirst = idx == 0
+							val isLast = idx == topSongs.lastIndex
+							val qualityTag = remember(song.id, song.bitDepth, song.fileExtension, song.bitRate) {
+								libraryFormatQuietQuality(song.bitDepth, song.fileExtension, song.bitRate)
+							}
+							val topSubText = remember(song.id, song.albumTitle, artist.name, qualityTag) {
+								listOfNotNull(
+									(song.albumTitle ?: artist.name).takeIf { it.isNotBlank() },
+									qualityTag
+								).joinToString(" · ")
+							}
+							Surface(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 16.dp)
+									.combinedClickable(
+										onClick = {
+											if (isMultiSelecting) {
+												selectedSongIds[song.id] = !isSelected
+											} else {
+												player.playNow(topSongs, idx)
+											}
+										},
+										onLongClick = {
+											isMultiSelecting = true
+											selectedSongIds[song.id] = true
+										}
+									),
+								shape = libraryGroupedItemShape(isFirst, isLast),
+								color = if (isMultiSelecting && isSelected) {
+									MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+								} else {
+									MaterialTheme.colorScheme.surfaceContainer
+								}
+							) {
+								Column {
+									Row(
+										modifier = Modifier
+											.fillMaxWidth()
+											.padding(horizontal = 12.dp, vertical = 10.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(10.dp)
+									) {
+										if (isMultiSelecting) {
+											Checkbox(
+												checked = isSelected,
+												onCheckedChange = { selectedSongIds[song.id] = it }
+											)
+										} else {
+											Text(
+												text = "${idx + 1}",
+												style = MaterialTheme.typography.labelMedium.tabularNums(),
+												color = if (idx < 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+												fontWeight = if (idx < 3) FontWeight.SemiBold else FontWeight.Normal,
+												modifier = Modifier.width(22.dp),
+												textAlign = TextAlign.Center
+											)
+										}
+
+										CoverArt(
+											coverArtId = song.coverArtId,
+											contentDescription = song.title,
+											modifier = Modifier
+												.size(44.dp)
+												.clip(RoundedCornerShape(9.dp))
+										)
+
+										Column(
+											modifier = Modifier.weight(1f),
+											verticalArrangement = Arrangement.spacedBy(2.dp)
+										) {
+											Text(
+												text = song.title.ifBlank { "未知歌曲" },
+												style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis
+											)
+											Text(
+												text = topSubText,
+												style = MaterialTheme.typography.bodySmall,
+												color = MaterialTheme.colorScheme.onSurfaceVariant,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis
+											)
+										}
+
+										OfflineSongStatusIcon(
+											status = dlStatus,
+											onDownloadClick = {
+												scope.launch {
+													queueSongsOffline(downloadManager, listOf(song))
+													snackBarState.showSnackbar("已加入手机下载：${song.title}")
+												}
+											},
+											onCancelDownloadingClick = {
+												downloadManager.cancelDownload(song.id)
+												scope.launch { snackBarState.showSnackbar("已取消下载") }
+											},
+											onDeleteClick = {
+												downloadManager.deleteDownload(song.id)
+												scope.launch { snackBarState.showSnackbar("已移除手机离线文件") }
+											}
+										)
+
+										IconButton(
+											onClick = { activeMenuSong = song },
+											modifier = Modifier.size(32.dp)
+										) {
+											Icon(
+												imageVector = Icons.Outlined.MoreVert,
+												contentDescription = "更多",
+												tint = MaterialTheme.colorScheme.onSurfaceVariant,
+												modifier = Modifier.size(18.dp)
+											)
+										}
+									}
+									if (!isLast) {
+										MeloHairlineDivider(startIndent = if (isMultiSelecting) 108.dp else 94.dp)
+									}
+								}
+							}
+						}
+					}
+
+					// 3. 全部专辑网格
+					if (albums.isNotEmpty()) {
+						item(key = "albums-header", contentType = "section-header") {
+							Text(
+								text = "全部专辑 · ${albums.size}",
+								style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+								modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 10.dp)
+							)
+						}
+
+						val rowCount = (albums.size + 1) / 2
+						items(
+							count = rowCount,
+							key = { rowIdx -> "album-row-${albums[rowIdx * 2].id}" },
+							contentType = { "album-grid-row" }
+						) { rowIdx ->
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 16.dp, vertical = 6.dp),
+								horizontalArrangement = Arrangement.spacedBy(12.dp)
+							) {
+								val first = albums[rowIdx * 2]
+								val second = albums.getOrNull(rowIdx * 2 + 1)
+
+								ArtistAlbumGridCard(
+									album = first,
+									modifier = Modifier.weight(1f),
+									onClick = { backStack.add(Screen.CollectionDetail(first.id, "album")) }
+								)
+
+								if (second != null) {
+									ArtistAlbumGridCard(
+										album = second,
+										modifier = Modifier.weight(1f),
+										onClick = { backStack.add(Screen.CollectionDetail(second.id, "album")) }
+									)
+								} else {
+									Spacer(Modifier.weight(1f))
+								}
+							}
+						}
+					}
+
+					// 4. 相似歌手横滑推荐
+					if (similarArtists.isNotEmpty()) {
+						item(key = "similar-artists-section", contentType = "carousel") {
+							Column(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(top = 24.dp, bottom = 12.dp)
+									.padding(horizontal = 16.dp),
+								verticalArrangement = Arrangement.spacedBy(10.dp)
+							) {
+								Text(
+									text = "相似歌手",
+									style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+								)
+								LazyRow(
+									horizontalArrangement = Arrangement.spacedBy(14.dp),
+									contentPadding = PaddingValues(vertical = 4.dp)
+								) {
+									items(
+										items = similarArtists,
+										key = { it.id },
+										contentType = { "artist-card" }
+									) { sim ->
+										Column(
+											horizontalAlignment = Alignment.CenterHorizontally,
+											verticalArrangement = Arrangement.spacedBy(6.dp),
+											modifier = Modifier
+												.width(80.dp)
+												.clickable { backStack.add(Screen.ArtistDetail(sim.id)) }
+										) {
+											Surface(
+												shape = CircleShape,
+												color = MaterialTheme.colorScheme.surfaceContainer,
+												border = libraryHairlineBorder(),
+												modifier = Modifier.size(68.dp)
+											) {
+												CoverArt(
+													coverArtId = sim.coverArtId,
+													contentDescription = sim.name,
+													modifier = Modifier.fillMaxSize()
+												)
+											}
+											Text(
+												text = sim.name,
+												style = MaterialTheme.typography.labelSmall,
+												textAlign = TextAlign.Center,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis
+											)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				AnimatedVisibility(
+					visible = isMultiSelecting && topSongs.isNotEmpty(),
+					enter = slideInVertically { it } + fadeIn(),
+					exit = slideOutVertically { it } + fadeOut(),
+					modifier = Modifier
+						.align(Alignment.BottomCenter)
+						.navigationBarsPadding()
+						.padding(bottom = rememberBatchDockBottomClearance(), start = 16.dp, end = 16.dp)
+				) {
+					val pickedSongs by remember(topSongs) {
+						derivedStateOf { topSongs.filter { selectedSongIds[it.id] == true } }
+					}
+					val hasRemovableOffline = remember(pickedSongs, downloadsMap) {
+						pickedSongs.any {
+							val st = downloadsMap[it.id]?.status
+							st == DownloadStatus.DOWNLOADED || st == DownloadStatus.DOWNLOADING
+						}
+					}
+					StudioBatchSelectionDock(
+						selectedCount = pickedSongs.size,
+						totalCount = topSongs.size,
+						hasOfflineRemovable = hasRemovableOffline,
+						onSelectAll = {
+							if (pickedSongs.size == topSongs.size) {
+								selectedSongIds.clear()
+							} else {
+								topSongs.forEach { selectedSongIds[it.id] = true }
+							}
+						},
+						onClear = { selectedSongIds.clear() },
+						onExit = {
+							isMultiSelecting = false
+							selectedSongIds.clear()
+						},
+						onDownloadSelected = {
+							if (pickedSongs.isNotEmpty()) {
+								scope.launch {
+									queueSongsOffline(downloadManager, pickedSongs)
+									snackBarState.showSnackbar("已将 ${pickedSongs.size} 首加入手机离线下载队列")
+									isMultiSelecting = false
+									selectedSongIds.clear()
+								}
+							}
+						},
+						onAddToPlaylist = {
+							if (pickedSongs.isNotEmpty()) {
+								playlistDialogSongIds = pickedSongs.map { it.id }
+							}
+						},
+						onPlaySelected = {
+							if (pickedSongs.isNotEmpty()) {
+								player.playNow(pickedSongs, 0)
+								isMultiSelecting = false
+								selectedSongIds.clear()
+							}
+						},
+						onDeleteOfflineSelected = {
+							removeSongsOffline(downloadManager, downloadsMap, pickedSongs)
+							scope.launch { snackBarState.showSnackbar("已移除所选曲目的手机离线缓存") }
+							isMultiSelecting = false
+							selectedSongIds.clear()
+						}
+					)
+				}
+			}
+		}
+
+		activeMenuSong?.let { song ->
+			NativeDetailSongActionSheet(
+				song = song,
+				downloadStatus = downloadsMap[song.id]?.status,
+				onDismiss = { activeMenuSong = null },
+				onPlayNext = {
+					player.playNextSingle(song)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("下一首播放：${song.title}") }
+				},
+				onAddToQueue = {
+					player.addToQueue(listOf(song))
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已添加到播放队列尾部") }
+				},
+				onAddToPlaylist = {
+					playlistDialogSongIds = listOf(song.id)
+					activeMenuSong = null
+				},
+				onDownload = {
+					activeMenuSong = null
+					scope.launch {
+						queueSongsOffline(downloadManager, listOf(song))
+						snackBarState.showSnackbar("已加入手机下载：${song.title}")
+					}
+				},
+				onCancelDownload = {
+					downloadManager.cancelDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已取消下载") }
+				},
+				onDeleteDownload = {
+					downloadManager.deleteDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已从手机删除离线文件") }
+				}
+			)
+		}
+
+		playlistDialogSongIds?.let { ids ->
+			PlaylistUpdateDialog(
+				songIds = ids.toPersistentList(),
+				onSuccess = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDismissRequest = { playlistDialogSongIds = null }
+			)
+		}
+	}
+}
+
+@Composable
+private fun ArtistAlbumGridCard(
+	album: DomainAlbum,
+	modifier: Modifier = Modifier,
+	onClick: () -> Unit
+) {
+	Surface(
+		onClick = onClick,
+		shape = RoundedCornerShape(14.dp),
+		color = MaterialTheme.colorScheme.surfaceContainer,
+		border = libraryHairlineBorder(),
+		modifier = modifier
+	) {
+		Column(modifier = Modifier.padding(9.dp)) {
+			CoverArt(
+				coverArtId = album.coverArtId,
+				contentDescription = album.name,
+				modifier = Modifier
+					.fillMaxWidth()
+					.aspectRatio(1f)
+					.clip(RoundedCornerShape(10.dp))
+			)
+			Spacer(Modifier.height(8.dp))
+			Text(
+				text = album.name ?: "未知专辑",
+				style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			val metaText = remember(album.id, album.year, album.songCount) {
+				listOfNotNull(album.year?.let { "$it" }, "${album.songCount} 首").joinToString(" · ")
+			}
+			Text(
+				text = metaText,
+				style = MaterialTheme.typography.labelSmall.tabularNums(),
+				color = MaterialTheme.colorScheme.onSurfaceVariant
+			)
+		}
+	}
+}
+
+/* =========================================================================================
+ * 3. MeloLikedSongsScreen (原生 Studio「我喜欢」主页)
+ * ========================================================================================= */
+
+private enum class LikedSubTab(val label: String) {
+	SONGS("歌曲"),
+	ALBUMS("专辑"),
+	ARTISTS("歌手")
+}
+
+@Composable
+fun MeloLikedSongsScreen() {
+	val persistentViewModelStoreOwner = koinInject<PersistentViewModelStoreOwner>()
+	val songsVm = koinViewModel<SongListViewModel>(
+		key = "meloLikedSongs",
+		parameters = { parametersOf(DomainSongListType.FrequentlyPlayed, setOf(DomainFilter.Starred)) },
+		viewModelStoreOwner = persistentViewModelStoreOwner
+	)
+	val albumsVm = koinViewModel<AlbumListViewModel>(
+		key = "meloLikedAlbums",
+		parameters = { parametersOf(DomainAlbumListType.AlphabeticalByName, setOf(DomainFilter.Starred)) },
+		viewModelStoreOwner = persistentViewModelStoreOwner
+	)
+	val artistsVm = koinViewModel<ArtistListViewModel>(
+		key = "meloLikedArtists",
+		parameters = { parametersOf(DomainArtistListType.AlphabeticalByName, setOf(DomainFilter.Starred)) },
+		viewModelStoreOwner = persistentViewModelStoreOwner
+	)
+
+	val downloadManager = koinInject<DownloadManager>()
+	val songRepository = koinInject<SongRepository>()
+	val player = koinInject<MediaPlayer>()
+	val backStack = LocalNavStack.current
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	var subTab by rememberSaveable { mutableStateOf(LikedSubTab.SONGS) }
+
+	val songsState by songsVm.uiState.collectAsStateWithLifecycle()
+	val songsLazyItems = songsState.data?.items?.collectAsLazyPagingItems()
+	val snapshotSongs = remember(songsLazyItems?.itemSnapshotList) {
+		songsLazyItems?.itemSnapshotList?.items.orEmpty()
+	}
+	val likedItemCount = songsLazyItems?.itemCount ?: 0
+	val albumsState by albumsVm.uiState.collectAsStateWithLifecycle()
+	val albumsLazyItems = albumsState.data?.items?.collectAsLazyPagingItems()
+	val artistsState by artistsVm.uiState.collectAsStateWithLifecycle()
+	val artistsLazyItems = artistsState.data?.items?.collectAsLazyPagingItems()
+
+	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
+	val downloadsMap = remember(allDownloads) { allDownloads.associateBy { it.songId } }
+
+	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
+	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	var allLikedSongIds by remember { mutableStateOf<List<String>>(emptyList()) }
+	var isLoadingLikedIds by remember { mutableStateOf(false) }
+	var activeMenuSong by remember { mutableStateOf<DomainSong?>(null) }
+	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
+
+	LaunchedEffect(isMultiSelecting, subTab, likedItemCount, songsState) {
+		if (!isMultiSelecting || subTab != LikedSubTab.SONGS) {
+			allLikedSongIds = emptyList()
+			isLoadingLikedIds = false
+			return@LaunchedEffect
+		}
+		isLoadingLikedIds = true
+		try {
+			val ids = withContext(Dispatchers.IO) { songsVm.getSelectionOrder() }
+			allLikedSongIds = ids
+			if (ids.isNotEmpty() && selectedSongIds.isNotEmpty()) {
+				val validIds = ids.toHashSet()
+				val staleIds = selectedSongIds.keys.filter { it !in validIds }
+				staleIds.forEach { selectedSongIds.remove(it) }
+			}
+		} finally {
+			isLoadingLikedIds = false
+		}
+	}
+
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
+	) {
+		Column(modifier = Modifier.fillMaxSize()) {
+			// 顶栏与分段胶囊
+			Surface(
+				color = MaterialTheme.colorScheme.background,
+				modifier = Modifier.fillMaxWidth()
+			) {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.statusBarsPadding()
+						.padding(horizontal = 16.dp, vertical = 8.dp),
+					verticalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween
+					) {
+						Surface(
+							onClick = { backStack.removeLastOrNull() },
+							shape = CircleShape,
+							color = MaterialTheme.colorScheme.surfaceContainer,
+							border = libraryHairlineBorder(),
+							modifier = Modifier.size(38.dp)
+						) {
+							Box(contentAlignment = Alignment.Center) {
+								Icon(Icons.Outlined.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+							}
+						}
+
+						Text(
+							text = "我喜欢",
+							style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+						)
+
+						Spacer(Modifier.size(38.dp))
+					}
+
+					// 三栏切换胶囊
+					Surface(
+						shape = CircleShape,
+						color = MaterialTheme.colorScheme.surfaceContainerHigh,
+						border = libraryHairlineBorder(),
+						modifier = Modifier.fillMaxWidth()
+					) {
+						Row(
+							modifier = Modifier.padding(3.dp),
+							horizontalArrangement = Arrangement.spacedBy(4.dp)
+						) {
+							LikedSubTab.entries.forEach { entry ->
+								val selected = subTab == entry
+								Box(
+									modifier = Modifier
+										.weight(1f)
+										.clip(CircleShape)
+										.background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+										.clickable {
+											subTab = entry
+											isMultiSelecting = false
+											selectedSongIds.clear()
+										}
+										.padding(vertical = 8.dp),
+									contentAlignment = Alignment.Center
+								) {
+									Text(
+										text = entry.label,
+										style = MaterialTheme.typography.labelMedium.copy(
+											fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+										),
+										color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// 内容主体
+			when (subTab) {
+				LikedSubTab.SONGS -> {
+					val itemCount = likedItemCount
+
+					LazyColumn(
+						modifier = Modifier.fillMaxSize(),
+						contentPadding = PaddingValues(
+							start = 16.dp,
+							end = 16.dp,
+							top = 8.dp,
+							bottom = MeloBottomChromeClearance + if (isMultiSelecting) 128.dp else 0.dp
+						),
+						verticalArrangement = Arrangement.spacedBy(0.dp)
+					) {
+						item(key = "liked-songs-bar", contentType = "toolbar") {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(bottom = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween
+							) {
+								Text(
+									text = when {
+										isMultiSelecting && isLoadingLikedIds -> "加载中…"
+										isMultiSelecting && allLikedSongIds.isNotEmpty() -> "共 ${allLikedSongIds.size} 首"
+										else -> "共 $itemCount 首"
+									},
+									style = MaterialTheme.typography.labelLarge.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									maxLines = 1,
+									softWrap = false
+								)
+
+								Row(
+									horizontalArrangement = Arrangement.spacedBy(6.dp),
+									verticalAlignment = Alignment.CenterVertically
+								) {
+									if (itemCount > 0) {
+										Button(
+											onClick = {
+												scope.launch {
+													val allSongs = withContext(Dispatchers.IO) {
+														val allIds = songsVm.getSelectionOrder()
+														if (allIds.isNotEmpty()) songsVm.getSelectedSongs(allIds) else emptyList()
+													}
+													if (allSongs.isNotEmpty()) {
+														player.playNow(allSongs, 0)
+													} else if (snapshotSongs.isNotEmpty()) {
+														player.playNow(snapshotSongs, 0)
+													}
+												}
+											},
+											shape = CircleShape,
+											contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+										) {
+											Icon(MeloIcons.PlayArrow, null, modifier = Modifier.size(16.dp))
+											Spacer(Modifier.width(4.dp))
+											Text("播放全部", maxLines = 1, softWrap = false)
+										}
+
+										FilledTonalButton(
+											onClick = {
+												scope.launch {
+													val allIds = withContext(Dispatchers.IO) { songsVm.getSelectionOrder() }
+													if (allIds.isNotEmpty()) {
+														withContext(Dispatchers.IO) {
+															downloadManager.downloadCollection(allIds)
+														}
+														snackBarState.currentSnackbarData?.dismiss()
+														snackBarState.showSnackbar("已将全部 ${allIds.size} 首歌曲加入手机离线队列（可在工坊 → 下载到手机查看）")
+													}
+												}
+											},
+											shape = CircleShape,
+											contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+										) {
+											Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp))
+											Spacer(Modifier.width(4.dp))
+											Text("全部离线", maxLines = 1, softWrap = false)
+										}
+
+										IconButton(
+											onClick = {
+												isMultiSelecting = !isMultiSelecting
+												if (!isMultiSelecting) selectedSongIds.clear()
+											}
+										) {
+											Icon(
+												imageVector = if (isMultiSelecting) Icons.Outlined.Close else Icons.Outlined.Checklist,
+												contentDescription = "多选"
+											)
+										}
+									}
+								}
+							}
+						}
+
+						if (itemCount == 0) {
+							item(key = "empty-liked-songs", contentType = "empty") {
+								MeloQuietEmptyState(
+									message = "暂无喜欢的歌曲",
+									icon = Icons.Outlined.Star
+								)
+							}
+						} else {
+							items(
+								count = itemCount,
+								key = { idx -> songsLazyItems?.peek(idx)?.id ?: "liked-song-$idx" },
+								contentType = { "track" }
+							) { idx ->
+								val song = songsLazyItems?.get(idx)
+								if (song != null) {
+									val isSelected = selectedSongIds[song.id] == true
+									val dlStatus = downloadsMap[song.id]?.status
+									val isFirst = idx == 0
+									val isLast = idx == itemCount - 1
+									val qualityTag = remember(song.id, song.bitDepth, song.fileExtension, song.bitRate) {
+										libraryFormatQuietQuality(song.bitDepth, song.fileExtension, song.bitRate)
+									}
+									val subText = remember(song.id, song.artistName, song.albumTitle, qualityTag) {
+										listOfNotNull(
+											song.artistName?.takeIf { it.isNotBlank() },
+											song.albumTitle?.takeIf { it.isNotBlank() },
+											qualityTag
+										).joinToString(" · ")
+									}
+
+									Surface(
+										shape = libraryGroupedItemShape(isFirst, isLast),
+										color = if (isMultiSelecting && isSelected) {
+											MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+										} else {
+											MaterialTheme.colorScheme.surfaceContainer
+										},
+										modifier = Modifier
+											.fillMaxWidth()
+											.combinedClickable(
+												onClick = {
+													if (isMultiSelecting) {
+														selectedSongIds[song.id] = !isSelected
+													} else {
+														val snapIdx = snapshotSongs.indexOfFirst { it.id == song.id }
+														if (snapIdx >= 0) {
+															player.playNow(snapshotSongs, snapIdx)
+														} else {
+															player.playNow(song)
+														}
+													}
+												},
+												onLongClick = {
+													isMultiSelecting = true
+													selectedSongIds[song.id] = true
+												}
+											)
+									) {
+										Column {
+											Row(
+												modifier = Modifier
+													.fillMaxWidth()
+													.padding(horizontal = 12.dp, vertical = 10.dp),
+												verticalAlignment = Alignment.CenterVertically,
+												horizontalArrangement = Arrangement.spacedBy(10.dp)
+											) {
+												if (isMultiSelecting) {
+													Checkbox(
+														checked = isSelected,
+														onCheckedChange = { selectedSongIds[song.id] = it }
+													)
+												} else {
+													CoverArt(
+														coverArtId = song.coverArtId,
+														contentDescription = song.title,
+														modifier = Modifier
+															.size(44.dp)
+															.clip(RoundedCornerShape(9.dp))
+													)
+												}
+
+												Column(
+													modifier = Modifier.weight(1f),
+													verticalArrangement = Arrangement.spacedBy(2.dp)
+												) {
+													Text(
+														text = song.title.ifBlank { "未知歌曲" },
+														style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+														maxLines = 1,
+														overflow = TextOverflow.Ellipsis
+													)
+													if (subText.isNotBlank()) {
+														Text(
+															text = subText,
+															style = MaterialTheme.typography.bodySmall,
+															color = MaterialTheme.colorScheme.onSurfaceVariant,
+															maxLines = 1,
+															overflow = TextOverflow.Ellipsis
+														)
+													}
+												}
+
+												OfflineSongStatusIcon(
+													status = dlStatus,
+													onDownloadClick = {
+														scope.launch {
+															queueSongsOffline(downloadManager, listOf(song))
+															snackBarState.showSnackbar("已加入手机下载：${song.title}")
+														}
+													},
+													onCancelDownloadingClick = {
+														downloadManager.cancelDownload(song.id)
+														scope.launch { snackBarState.showSnackbar("已取消下载") }
+													},
+													onDeleteClick = {
+														downloadManager.deleteDownload(song.id)
+														scope.launch { snackBarState.showSnackbar("已移除手机离线文件") }
+													}
+												)
+
+												IconButton(
+													onClick = { activeMenuSong = song },
+													modifier = Modifier.size(32.dp)
+												) {
+													Icon(
+														imageVector = Icons.Outlined.MoreVert,
+														contentDescription = "更多",
+														tint = MaterialTheme.colorScheme.onSurfaceVariant,
+														modifier = Modifier.size(18.dp)
+													)
+												}
+											}
+											if (!isLast) {
+												MeloHairlineDivider(startIndent = if (isMultiSelecting) 60.dp else 66.dp)
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				LikedSubTab.ALBUMS -> {
+					val albumCount = albumsLazyItems?.itemCount ?: 0
+					if (albumCount == 0) {
+						Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+							MeloQuietEmptyState(
+								message = "暂无收藏专辑",
+								icon = Icons.Outlined.Album
+							)
+						}
+					} else {
+						val rowCount = (albumCount + 1) / 2
+						LazyColumn(
+							modifier = Modifier.fillMaxSize(),
+							contentPadding = PaddingValues(
+								start = 16.dp,
+								end = 16.dp,
+								top = 8.dp,
+								bottom = MeloBottomChromeClearance
+							)
+						) {
+							items(
+								count = rowCount,
+								key = { rowIdx ->
+									albumsLazyItems?.peek(rowIdx * 2)?.id?.let { "liked-album-row-$it" }
+										?: "liked-album-row-$rowIdx"
+								},
+								contentType = { "album-grid-row" }
+							) { rowIdx ->
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(vertical = 6.dp),
+									horizontalArrangement = Arrangement.spacedBy(12.dp)
+								) {
+									val first = albumsLazyItems?.get(rowIdx * 2)
+									val second = albumsLazyItems?.get(rowIdx * 2 + 1)
+									if (first != null) {
+										ArtistAlbumGridCard(
+											album = first,
+											modifier = Modifier.weight(1f),
+											onClick = { backStack.add(Screen.CollectionDetail(first.id, "album")) }
+										)
+									}
+									if (second != null) {
+										ArtistAlbumGridCard(
+											album = second,
+											modifier = Modifier.weight(1f),
+											onClick = { backStack.add(Screen.CollectionDetail(second.id, "album")) }
+										)
+									} else {
+										Spacer(Modifier.weight(1f))
+									}
+								}
+							}
+						}
+					}
+				}
+
+				LikedSubTab.ARTISTS -> {
+					val artistCount = artistsLazyItems?.itemCount ?: 0
+					if (artistCount == 0) {
+						Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+							MeloQuietEmptyState(
+								message = "暂无关注歌手",
+								icon = Icons.Outlined.Artist
+							)
+						}
+					} else {
+						LazyColumn(
+							modifier = Modifier.fillMaxSize(),
+							contentPadding = PaddingValues(
+								start = 16.dp,
+								end = 16.dp,
+								top = 8.dp,
+								bottom = MeloBottomChromeClearance
+							),
+							verticalArrangement = Arrangement.spacedBy(0.dp)
+						) {
+							items(
+								count = artistCount,
+								key = { idx -> artistsLazyItems?.peek(idx)?.id ?: "liked-artist-$idx" },
+								contentType = { "artist" }
+							) { idx ->
+								val artist = artistsLazyItems?.get(idx)
+								if (artist != null) {
+									val isFirst = idx == 0
+									val isLast = idx == artistCount - 1
+									Surface(
+										onClick = { backStack.add(Screen.ArtistDetail(artist.id)) },
+										shape = libraryGroupedItemShape(isFirst, isLast),
+										color = MaterialTheme.colorScheme.surfaceContainer,
+										modifier = Modifier.fillMaxWidth()
+									) {
+										Column {
+											Row(
+												modifier = Modifier
+													.fillMaxWidth()
+													.padding(horizontal = 12.dp, vertical = 10.dp),
+												verticalAlignment = Alignment.CenterVertically,
+												horizontalArrangement = Arrangement.spacedBy(12.dp)
+											) {
+												Surface(
+													shape = CircleShape,
+													color = MaterialTheme.colorScheme.surfaceContainerHighest,
+													modifier = Modifier.size(46.dp)
+												) {
+													CoverArt(
+														coverArtId = artist.coverArtId,
+														contentDescription = artist.name,
+														modifier = Modifier.fillMaxSize()
+													)
+												}
+												Column(modifier = Modifier.weight(1f)) {
+													Text(
+														text = artist.name,
+														style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium)
+													)
+													Text(
+														text = "${artist.albumCount} 张专辑",
+														style = MaterialTheme.typography.bodySmall.tabularNums(),
+														color = MaterialTheme.colorScheme.onSurfaceVariant
+													)
+												}
+												Icon(
+													imageVector = Icons.Outlined.ChevronForward,
+													contentDescription = null,
+													tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+													modifier = Modifier.size(16.dp)
+												)
+											}
+											if (!isLast) {
+												MeloHairlineDivider(startIndent = 70.dp)
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 多选批处理 Studio 悬浮坞
+		AnimatedVisibility(
+			visible = isMultiSelecting && subTab == LikedSubTab.SONGS && (allLikedSongIds.isNotEmpty() || likedItemCount > 0),
+			enter = slideInVertically { it } + fadeIn(),
+			exit = slideOutVertically { it } + fadeOut(),
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.navigationBarsPadding()
+				.padding(bottom = rememberBatchDockBottomClearance(), start = 16.dp, end = 16.dp)
+		) {
+			val selectedOrderedIds by remember(allLikedSongIds) {
+				derivedStateOf {
+					if (allLikedSongIds.isNotEmpty()) {
+						allLikedSongIds.filter { selectedSongIds[it] == true }
+					} else {
+						selectedSongIds.entries.filter { it.value }.map { it.key }
+					}
+				}
+			}
+			val totalCount = if (allLikedSongIds.isNotEmpty()) allLikedSongIds.size else likedItemCount
+			val hasRemovableOffline = remember(selectedOrderedIds, downloadsMap) {
+				selectedOrderedIds.any { id ->
+					val st = downloadsMap[id]?.status
+					st == DownloadStatus.DOWNLOADED || st == DownloadStatus.DOWNLOADING
+				}
+			}
+			StudioBatchSelectionDock(
+				selectedCount = selectedOrderedIds.size,
+				totalCount = totalCount,
+				hasOfflineRemovable = hasRemovableOffline,
+				onSelectAll = {
+					when {
+						allLikedSongIds.isNotEmpty() && selectedOrderedIds.size >= allLikedSongIds.size -> {
+							selectedSongIds.clear()
+						}
+						allLikedSongIds.isNotEmpty() -> {
+							selectedSongIds.putAll(allLikedSongIds.associateWith { true })
+						}
+						else -> {
+							scope.launch {
+								isLoadingLikedIds = true
+								try {
+									val ids = withContext(Dispatchers.IO) { songsVm.getSelectionOrder() }
+									allLikedSongIds = ids
+									if (ids.isNotEmpty()) {
+										val allSelected = ids.all { selectedSongIds[it] == true }
+										if (allSelected) {
+											selectedSongIds.clear()
+										} else {
+											selectedSongIds.putAll(ids.associateWith { true })
+										}
+									}
+								} finally {
+									isLoadingLikedIds = false
+								}
+							}
+						}
+					}
+				},
+				onClear = { selectedSongIds.clear() },
+				onExit = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDownloadSelected = {
+					val pickedIds = selectedOrderedIds
+					if (pickedIds.isNotEmpty()) {
+						scope.launch {
+							withContext(Dispatchers.IO) {
+								downloadManager.downloadCollection(pickedIds)
+							}
+							snackBarState.currentSnackbarData?.dismiss()
+							snackBarState.showSnackbar("已将 ${pickedIds.size} 首歌曲加入手机离线队列（可在工坊 → 下载到手机查看）")
+						}
+						isMultiSelecting = false
+						selectedSongIds.clear()
+					}
+				},
+				onAddToPlaylist = {
+					val ids = selectedOrderedIds
+					if (ids.isNotEmpty()) {
+						playlistDialogSongIds = ids
+					}
+				},
+				onPlaySelected = {
+					val pickedIds = selectedOrderedIds
+					if (pickedIds.isNotEmpty()) {
+						scope.launch {
+							val picked = withContext(Dispatchers.IO) {
+								songsVm.getSelectedSongs(pickedIds)
+							}
+							if (picked.isNotEmpty()) {
+								player.playNow(picked, 0)
+							}
+						}
+						isMultiSelecting = false
+						selectedSongIds.clear()
+					}
+				},
+				onDeleteOfflineSelected = {
+					val pickedIds = selectedOrderedIds
+					removeSongIdsOffline(downloadManager, downloadsMap, pickedIds)
+					if (pickedIds.isNotEmpty()) {
+						scope.launch {
+							snackBarState.currentSnackbarData?.dismiss()
+							snackBarState.showSnackbar("已移除所选曲目的手机离线缓存")
+						}
+					}
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				}
+			)
+		}
+
+		activeMenuSong?.let { song ->
+			NativeDetailSongActionSheet(
+				song = song,
+				downloadStatus = downloadsMap[song.id]?.status,
+				extraActionLabel = "取消喜欢",
+				onExtraAction = {
+					activeMenuSong = null
+					scope.launch {
+						runCatching { songRepository.unstarSong(song.id) }
+							.onSuccess {
+								songsVm.refreshSongs(false)
+								snackBarState.showSnackbar("已移出我喜欢：${song.title}")
+							}
+					}
+				},
+				onDismiss = { activeMenuSong = null },
+				onPlayNext = {
+					player.playNextSingle(song)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("下一首播放：${song.title}") }
+				},
+				onAddToQueue = {
+					player.addToQueue(listOf(song))
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已添加到播放队列尾部") }
+				},
+				onAddToPlaylist = {
+					playlistDialogSongIds = listOf(song.id)
+					activeMenuSong = null
+				},
+				onDownload = {
+					activeMenuSong = null
+					scope.launch {
+						queueSongsOffline(downloadManager, listOf(song))
+						snackBarState.showSnackbar("已加入手机下载：${song.title}")
+					}
+				},
+				onCancelDownload = {
+					downloadManager.cancelDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已取消下载") }
+				},
+				onDeleteDownload = {
+					downloadManager.deleteDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已从手机删除离线文件") }
+				}
+			)
+		}
+
+		playlistDialogSongIds?.let { ids ->
+			PlaylistUpdateDialog(
+				songIds = ids.toPersistentList(),
+				onSuccess = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDismissRequest = { playlistDialogSongIds = null }
+			)
+		}
+	}
+}
+
+/* =========================================================================================
+ * 4. MeloDailyMixScreen & MeloDailyMixSheet (「猜你喜欢」每日私人歌单 · AI 口味策展)
+ * ========================================================================================= */
+
+@Composable
+fun MeloDailyMixScreen() {
+	val backStack = LocalNavStack.current
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
+	) {
+		MeloDailyMixContent(
+			onBack = { backStack.removeLastOrNull() },
+			nestedInSheet = false
+		)
+	}
+}
+
+@Composable
+fun MeloDailyMixSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+
+	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	ModalBottomSheet(
+		onDismissRequest = onDismissRequest,
+		sheetState = sheetState,
+		shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+		containerColor = MaterialTheme.colorScheme.surfaceContainer
+	) {
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.navigationBarsPadding()
+				.imePadding()
+		) {
+			MeloDailyMixContent(
+				onBack = onDismissRequest,
+				nestedInSheet = true
+			)
+		}
+	}
+}
+
+@Composable
+private fun MeloDailyMixContent(
+	onBack: () -> Unit,
+	nestedInSheet: Boolean
+) {
+	val songDao = koinInject<SongDao>()
+	val downloadManager = koinInject<DownloadManager>()
+	val player = koinInject<MediaPlayer>()
+	val preferenceManager = koinInject<PreferenceManager>()
+	val settingsStore = koinInject<MeloSettingsStore>()
+	val apiClient = koinInject<MeloKeepApiClient>()
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	var dailySongs by remember { mutableStateOf<List<DomainSong>>(emptyList()) }
+	var curatorNote by remember { mutableStateOf("") }
+	var isLoading by remember { mutableStateOf(true) }
+	var isAiCurating by remember { mutableStateOf(false) }
+
+	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
+	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	var activeMenuSong by remember { mutableStateOf<DomainSong?>(null) }
+	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
+
+	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
+	val downloadsMap = remember(allDownloads) { allDownloads.associateBy { it.songId } }
+
+	fun loadDailyMix(forceRegenerate: Boolean = false) {
+		scope.launch {
+			isLoading = true
+			val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+			val cachedDate = preferenceManager.dailyMixDateKey
+			val cachedIds = preferenceManager.dailyMixSongIds
+			val cachedNote = preferenceManager.dailyMixCuratorNote
+
+			if (!forceRegenerate && cachedDate == todayKey && cachedIds.isNotEmpty()) {
+				val entities = withContext(Dispatchers.IO) { songDao.getSongsByIds(cachedIds) }
+				if (entities.isNotEmpty()) {
+					dailySongs = entities.map { it.toDomainModel() }
+					curatorNote = cachedNote.takeUnless {
+						it.isBlank() ||
+							"今日专属" in it ||
+							"今日私享" in it ||
+							"温情守候" in it ||
+							it.startsWith("基于你的")
+					}.orEmpty()
+					isLoading = false
+					return@launch
+				}
+			}
+
+			// 零延迟多源算法混排生成
+			withContext(Dispatchers.IO) {
+				val starred = songDao.getStarredSongs().firstOrNull().orEmpty()
+				val topSongs = songDao.getTopSongs(40).firstOrNull().orEmpty()
+				val randomSongs = songDao.getRandomSongsList(30)
+
+				val pool = mutableListOf<SongEntity>()
+				pool.addAll(starred.shuffled().take(8))
+				pool.addAll(topSongs.shuffled().take(8))
+				pool.addAll(randomSongs)
+
+				val chosenEntities = pool.distinctBy { it.songId }.shuffled().take(25)
+				val chosenSongs = chosenEntities.map { it.toDomainModel() }
+				val songIds = chosenSongs.map { it.id }
+
+				preferenceManager.dailyMixDateKey = todayKey
+				preferenceManager.dailyMixSongIds = songIds
+				preferenceManager.dailyMixCuratorNote = ""
+
+				withContext(Dispatchers.Main) {
+					dailySongs = chosenSongs
+					curatorNote = ""
+					isLoading = false
+				}
+			}
+		}
+	}
+
+	fun triggerAiCurate() {
+		val isAuth = settingsStore.currentConfig().isAuthenticated
+		if (!isAuth) {
+			scope.launch { snackBarState.showSnackbar("请先连接 MeloKeep 服务") }
+			return
+		}
+		scope.launch {
+			isAiCurating = true
+			try {
+				val sampleTracks = dailySongs.take(8).joinToString("; ") { "${it.title} - ${it.artistName}" }
+				val prompt = "请分析以下听歌曲目，生成一句简短凝练的音乐导语（不超过28字）及3个风格标签：\n$sampleTracks"
+				val reply = withContext(Dispatchers.IO) {
+					val created = apiClient.createAgentSession()
+					var currentSession = apiClient.sendAgentMessage(sessionId = created.id, message = prompt)
+					val startTime = System.currentTimeMillis()
+					while (currentSession.status in setOf("running", "waiting_tasks", "stopping") &&
+						System.currentTimeMillis() - startTime < 20_000L
+					) {
+						delay(1000)
+						currentSession = apiClient.getAgentSession(created.id)
+					}
+					currentSession.messages
+						.lastOrNull { it.role.lowercase() != "user" && it.content.isNotBlank() }
+						?.content
+				}
+				if (!reply.isNullOrBlank()) {
+					val clean = reply.lines().filter { it.isNotBlank() }.joinToString(" ").trim()
+					curatorNote = clean
+					preferenceManager.dailyMixCuratorNote = clean
+					snackBarState.showSnackbar("AI 策展已完成")
+				}
+			} catch (_: Exception) {
+				snackBarState.showSnackbar("AI 策展暂不可用")
+			} finally {
+				isAiCurating = false
+			}
+		}
+	}
+
+	LaunchedEffect(Unit) {
+		loadDailyMix(forceRegenerate = false)
+	}
+
+	Box(
+		modifier = if (nestedInSheet) Modifier.fillMaxWidth() else Modifier.fillMaxSize()
+	) {
+		LazyColumn(
+			modifier = if (nestedInSheet) Modifier.fillMaxWidth() else Modifier.fillMaxSize(),
+			contentPadding = PaddingValues(
+				top = 8.dp,
+				bottom = (if (nestedInSheet) 28.dp else MeloBottomChromeClearance) +
+					if (isMultiSelecting) 120.dp else 0.dp
+			)
+		) {
+			item(key = "daily-mix-header", contentType = "header") {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.then(if (!nestedInSheet) Modifier.statusBarsPadding() else Modifier)
+						.padding(horizontal = 16.dp, vertical = 6.dp),
+					verticalArrangement = Arrangement.spacedBy(14.dp)
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween
+					) {
+						Surface(
+							onClick = onBack,
+							shape = CircleShape,
+							color = MaterialTheme.colorScheme.surfaceContainer,
+							border = libraryHairlineBorder(),
+							modifier = Modifier.size(36.dp)
+						) {
+							Box(contentAlignment = Alignment.Center) {
+								Icon(Icons.Outlined.ArrowBack, contentDescription = "返回", modifier = Modifier.size(18.dp))
+							}
+						}
+
+						Text(
+							text = "猜你喜欢",
+							style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+						)
+
+						Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+							if (dailySongs.isNotEmpty()) {
+								IconButton(
+									onClick = {
+										isMultiSelecting = !isMultiSelecting
+										if (!isMultiSelecting) selectedSongIds.clear()
+									}
+								) {
+									Icon(
+										imageVector = if (isMultiSelecting) Icons.Outlined.Close else Icons.Outlined.Checklist,
+										contentDescription = "多选"
+									)
+								}
+							}
+							IconButton(onClick = { loadDailyMix(forceRegenerate = true) }) {
+								Icon(Icons.Outlined.Refresh, contentDescription = "换一批")
+							}
+						}
+					}
+
+					// 简洁摘要与 AI 策展入口
+					MeloGroupedCard {
+						Column(
+							modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp)
+						) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween
+							) {
+								Text(
+									text = "共 ${dailySongs.size} 首",
+									style = MaterialTheme.typography.labelLarge.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+
+								FilledTonalButton(
+									onClick = ::triggerAiCurate,
+									enabled = !isAiCurating,
+									shape = CircleShape,
+									contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+									modifier = Modifier.height(30.dp)
+								) {
+									if (isAiCurating) {
+										CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.6.dp)
+										Spacer(Modifier.width(4.dp))
+										Text("策展中…", fontSize = 11.sp)
+									} else {
+										Icon(MeloIcons.Sparkles, null, modifier = Modifier.size(13.dp))
+										Spacer(Modifier.width(4.dp))
+										Text("AI 策展", fontSize = 11.sp)
+									}
+								}
+							}
+
+							if (curatorNote.isNotBlank()) {
+								Text(
+									text = curatorNote,
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurface
+								)
+							}
+						}
+					}
+
+					// 快捷动作条：播放全部 + 换一批 + 整单离线
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalAlignment = Alignment.CenterVertically
+					) {
+						Button(
+							onClick = { if (dailySongs.isNotEmpty()) player.playNow(dailySongs, 0) },
+							modifier = Modifier
+								.weight(1.1f)
+								.height(42.dp),
+							shape = CircleShape,
+							contentPadding = PaddingValues(horizontal = 10.dp)
+						) {
+							Icon(MeloIcons.PlayArrow, null, modifier = Modifier.size(16.dp))
+							Spacer(Modifier.width(4.dp))
+							Text("播放全部", maxLines = 1, softWrap = false)
+						}
+
+						FilledTonalButton(
+							onClick = { loadDailyMix(forceRegenerate = true) },
+							modifier = Modifier
+								.weight(0.9f)
+								.height(42.dp),
+							shape = CircleShape,
+							contentPadding = PaddingValues(horizontal = 10.dp)
+						) {
+							Icon(Icons.Outlined.Refresh, null, modifier = Modifier.size(15.dp))
+							Spacer(Modifier.width(4.dp))
+							Text("换一批", maxLines = 1, softWrap = false)
+						}
+
+						Surface(
+							onClick = {
+								if (dailySongs.isNotEmpty()) {
+									scope.launch {
+										queueSongsOffline(downloadManager, dailySongs)
+										snackBarState.showSnackbar("已将今日 ${dailySongs.size} 首全部加入手机离线缓存")
+									}
+								}
+							},
+							shape = CircleShape,
+							color = MaterialTheme.colorScheme.surfaceContainer,
+							border = libraryHairlineBorder(),
+							modifier = Modifier.height(42.dp)
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 12.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(4.dp)
+							) {
+								Icon(Icons.Outlined.Download, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+								Text("整单离线", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+							}
+						}
+					}
+				}
+			}
+
+			if (isLoading) {
+				item(key = "loading-daily-songs", contentType = "loading") {
+					Box(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(vertical = 48.dp),
+						contentAlignment = Alignment.Center
+					) {
+						CircularProgressIndicator()
+					}
+				}
+			} else if (dailySongs.isEmpty()) {
+				item(key = "empty-daily-songs", contentType = "empty") {
+					MeloQuietEmptyState(
+						message = "暂无推荐曲目",
+						icon = MeloIcons.Sparkles
+					)
+				}
+			} else {
+				itemsIndexed(
+					items = dailySongs,
+					key = { _, s -> "daily-${s.id}" },
+					contentType = { _, _ -> "track" }
+				) { idx, song ->
+					val isSelected = selectedSongIds[song.id] == true
+					val dlStatus = downloadsMap[song.id]?.status
+					val isFirst = idx == 0
+					val isLast = idx == dailySongs.lastIndex
+					val qualityTag = remember(song.id, song.bitDepth, song.fileExtension, song.bitRate) {
+						libraryFormatQuietQuality(song.bitDepth, song.fileExtension, song.bitRate)
+					}
+					val dailySubText = remember(song.id, song.artistName, song.albumTitle, qualityTag) {
+						listOfNotNull(
+							song.artistName?.takeIf { it.isNotBlank() },
+							song.albumTitle?.takeIf { it.isNotBlank() },
+							qualityTag
+						).joinToString(" · ")
+					}
+					Surface(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp)
+							.combinedClickable(
+								onClick = {
+									if (isMultiSelecting) {
+										selectedSongIds[song.id] = !isSelected
+									} else {
+										player.playNow(dailySongs, idx)
+									}
+								},
+								onLongClick = {
+									isMultiSelecting = true
+									selectedSongIds[song.id] = true
+								}
+							),
+						shape = libraryGroupedItemShape(isFirst, isLast),
+						color = if (isMultiSelecting && isSelected) {
+							MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainer
+						}
+					) {
+						Column {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 12.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(10.dp)
+							) {
+								if (isMultiSelecting) {
+									Checkbox(
+										checked = isSelected,
+										onCheckedChange = { selectedSongIds[song.id] = it }
+									)
+								} else {
+									Text(
+										text = "${idx + 1}",
+										style = MaterialTheme.typography.labelMedium.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+										modifier = Modifier.width(22.dp),
+										textAlign = TextAlign.Center
+									)
+								}
+
+								CoverArt(
+									coverArtId = song.coverArtId,
+									contentDescription = song.title,
+									modifier = Modifier
+										.size(44.dp)
+										.clip(RoundedCornerShape(9.dp))
+								)
+
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp)
+								) {
+									Text(
+										text = song.title.ifBlank { "未知歌曲" },
+										style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis
+									)
+									if (dailySubText.isNotBlank()) {
+										Text(
+											text = dailySubText,
+											style = MaterialTheme.typography.bodySmall,
+											color = MaterialTheme.colorScheme.onSurfaceVariant,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis
+										)
+									}
+								}
+
+								OfflineSongStatusIcon(
+									status = dlStatus,
+									onDownloadClick = {
+										scope.launch {
+											queueSongsOffline(downloadManager, listOf(song))
+											snackBarState.showSnackbar("已加入手机下载：${song.title}")
+										}
+									},
+									onCancelDownloadingClick = {
+										downloadManager.cancelDownload(song.id)
+										scope.launch { snackBarState.showSnackbar("已取消下载") }
+									},
+									onDeleteClick = {
+										downloadManager.deleteDownload(song.id)
+										scope.launch { snackBarState.showSnackbar("已从手机移除离线文件") }
+									}
+								)
+
+								IconButton(
+									onClick = { activeMenuSong = song },
+									modifier = Modifier.size(32.dp)
+								) {
+									Icon(
+										imageVector = Icons.Outlined.MoreVert,
+										contentDescription = "更多",
+										tint = MaterialTheme.colorScheme.onSurfaceVariant,
+										modifier = Modifier.size(18.dp)
+									)
+								}
+							}
+							if (!isLast) {
+								MeloHairlineDivider(startIndent = if (isMultiSelecting) 108.dp else 94.dp)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 多选批控悬浮条
+		AnimatedVisibility(
+			visible = isMultiSelecting && dailySongs.isNotEmpty(),
+			enter = slideInVertically { it } + fadeIn(),
+			exit = slideOutVertically { it } + fadeOut(),
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.then(if (!nestedInSheet) Modifier.navigationBarsPadding() else Modifier)
+				.padding(
+					bottom = rememberBatchDockBottomClearance(nestedInSheet = nestedInSheet),
+					start = 16.dp,
+					end = 16.dp
+				)
+		) {
+			val pickedSongs by remember(dailySongs) {
+				derivedStateOf { dailySongs.filter { selectedSongIds[it.id] == true } }
+			}
+			val hasRemovableOffline = remember(pickedSongs, downloadsMap) {
+				pickedSongs.any {
+					val st = downloadsMap[it.id]?.status
+					st == DownloadStatus.DOWNLOADED || st == DownloadStatus.DOWNLOADING
+				}
+			}
+			val hasNonMelo = remember(pickedSongs) {
+				pickedSongs.any { !MeloTrackMapper.isMeloSongId(it.id) }
+			}
+			StudioBatchSelectionDock(
+				selectedCount = pickedSongs.size,
+				totalCount = dailySongs.size,
+				hasOfflineRemovable = hasRemovableOffline,
+				onSelectAll = {
+					if (pickedSongs.size == dailySongs.size) {
+						selectedSongIds.clear()
+					} else {
+						dailySongs.forEach { selectedSongIds[it.id] = true }
+					}
+				},
+				onClear = { selectedSongIds.clear() },
+				onExit = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDownloadSelected = {
+					if (pickedSongs.isNotEmpty()) {
+						scope.launch {
+							queueSongsOffline(downloadManager, pickedSongs)
+							snackBarState.showSnackbar("已将 ${pickedSongs.size} 首加入手机离线下载队列")
+							isMultiSelecting = false
+							selectedSongIds.clear()
+						}
+					}
+				},
+				onAddToPlaylist = if (hasNonMelo) {
+					{
+						val navIds = pickedSongs.filter { !MeloTrackMapper.isMeloSongId(it.id) }.map { it.id }
+						if (navIds.isNotEmpty()) playlistDialogSongIds = navIds
+					}
+				} else null,
+				onPlaySelected = {
+					if (pickedSongs.isNotEmpty()) {
+						player.playNow(pickedSongs, 0)
+						isMultiSelecting = false
+						selectedSongIds.clear()
+					}
+				},
+				onDeleteOfflineSelected = {
+					removeSongsOffline(downloadManager, downloadsMap, pickedSongs)
+					scope.launch { snackBarState.showSnackbar("已移除所选曲目的手机离线缓存") }
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				}
+			)
+		}
+
+		activeMenuSong?.let { song ->
+			val allowNavPlaylist = !MeloTrackMapper.isMeloSongId(song.id)
+			NativeDetailSongActionSheet(
+				song = song,
+				downloadStatus = downloadsMap[song.id]?.status,
+				onDismiss = { activeMenuSong = null },
+				onPlayNext = {
+					player.playNextSingle(song)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("下一首播放：${song.title}") }
+				},
+				onAddToQueue = {
+					player.addToQueue(listOf(song))
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已添加到播放队列尾部") }
+				},
+				onAddToPlaylist = if (allowNavPlaylist) {
+					{
+						playlistDialogSongIds = listOf(song.id)
+						activeMenuSong = null
+					}
+				} else null,
+				onDownload = {
+					activeMenuSong = null
+					scope.launch {
+						queueSongsOffline(downloadManager, listOf(song))
+						snackBarState.showSnackbar("已加入手机下载：${song.title}")
+					}
+				},
+				onCancelDownload = {
+					downloadManager.cancelDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已取消下载") }
+				},
+				onDeleteDownload = {
+					downloadManager.deleteDownload(song.id)
+					activeMenuSong = null
+					scope.launch { snackBarState.showSnackbar("已从手机删除离线文件") }
+				}
+			)
+		}
+
+		playlistDialogSongIds?.let { ids ->
+			PlaylistUpdateDialog(
+				songIds = ids.toPersistentList(),
+				onSuccess = {
+					isMultiSelecting = false
+					selectedSongIds.clear()
+				},
+				onDismissRequest = { playlistDialogSongIds = null }
+			)
+		}
+	}
+}
+
+/* =========================================================================================
+ * 5. 通用离线状态指示图标、Studio 批控悬浮条 & 单曲菜单组件
+ * ========================================================================================= */
+
+internal suspend fun queueSongsOffline(
+	downloadManager: DownloadManager,
+	songs: List<DomainSong>
+) {
+	if (songs.isEmpty()) return
+	val external = songs.filter { it.isExternal || MeloTrackMapper.isMeloSongId(it.id) }
+	val internalIds = songs.filterNot { it.isExternal || MeloTrackMapper.isMeloSongId(it.id) }.map { it.id }
+	if (external.isNotEmpty()) {
+		downloadManager.downloadExternalSongs(external)
+	}
+	if (internalIds.isNotEmpty()) {
+		downloadManager.downloadCollection(internalIds)
+	}
+}
+
+internal fun removeSongsOffline(
+	downloadManager: DownloadManager,
+	downloadsMap: Map<String, DownloadEntity>,
+	songs: List<DomainSong>
+) {
+	removeSongIdsOffline(downloadManager, downloadsMap, songs.map { it.id })
+}
+
+internal fun removeSongIdsOffline(
+	downloadManager: DownloadManager,
+	downloadsMap: Map<String, DownloadEntity>,
+	songIds: List<String>
+) {
+	val toCancel = songIds.filter { downloadsMap[it]?.status == DownloadStatus.DOWNLOADING }
+	val toDelete = songIds.filter { downloadsMap[it]?.status == DownloadStatus.DOWNLOADED }
+	if (toCancel.isNotEmpty()) downloadManager.cancelCollectionDownload(toCancel)
+	if (toDelete.isNotEmpty()) downloadManager.deleteDownloadedCollection(toDelete)
+}
+
+@Composable
+internal fun rememberBatchDockBottomClearance(
+	nestedInSheet: Boolean = false
+): Dp {
+	if (nestedInSheet) return 14.dp
+	val backStack = LocalNavStack.current
+	val player = koinInject<MediaPlayer>()
+	val preferenceManager = koinInject<PreferenceManager>()
+	val sizeClass = LocalSizeClass.current
+	val hasCurrentSong by remember(player) {
+		player.uiState.map { it.currentSong != null }.distinctUntilChanged()
+	}.collectAsStateWithLifecycle(initialValue = false)
+
+	val topEntry = backStack.lastOrNull()
+	val isAtRootShell = topEntry is Screen.Library
+	val isCompact = sizeClass.widthSizeClass < WindowWidthSizeClass.Medium
+	val isFullscreenNoPlayer = topEntry is Screen.DailyMix || topEntry is Screen.PhoneDownloads
+	val allowPlayerOnScreen = isAtRootShell ||
+		preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens
+	val hasPlayerDeck = !isFullscreenNoPlayer &&
+		allowPlayerOnScreen &&
+		(hasCurrentSong || !preferenceManager.hideIfIdle)
+	val hasNavDock = isAtRootShell && isCompact
+
+	return when {
+		hasNavDock && hasPlayerDeck -> MeloBottomChromeClearance + 8.dp
+		hasNavDock -> 88.dp
+		hasPlayerDeck -> 92.dp
+		else -> 20.dp
+	}
+}
+
+@Composable
+internal fun StudioBatchSelectionDock(
+	selectedCount: Int,
+	totalCount: Int,
+	hasOfflineRemovable: Boolean,
+	onSelectAll: () -> Unit,
+	onClear: () -> Unit,
+	onExit: () -> Unit,
+	onDownloadSelected: () -> Unit,
+	onAddToPlaylist: (() -> Unit)? = null,
+	onPlaySelected: (() -> Unit)? = null,
+	onDeleteOfflineSelected: (() -> Unit)? = null,
+	playlistButtonLabel: String = "加入歌单",
+	modifier: Modifier = Modifier
+) {
+	Surface(
+		shape = RoundedCornerShape(20.dp),
+		color = MaterialTheme.colorScheme.meloGlassSurface,
+		border = libraryHairlineBorder(),
+		shadowElevation = 10.dp,
+		modifier = modifier.fillMaxWidth()
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 10.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp)
+		) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween
+			) {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(6.dp)
+				) {
+					IconButton(
+						onClick = onExit,
+						modifier = Modifier.size(28.dp)
+					) {
+						Icon(Icons.Outlined.Close, contentDescription = "退出多选", modifier = Modifier.size(16.dp))
+					}
+					Text(
+						text = "已选 $selectedCount / $totalCount 首",
+						style = MaterialTheme.typography.labelLarge.tabularNums(),
+						fontWeight = FontWeight.SemiBold,
+						color = MaterialTheme.colorScheme.onSurface
+					)
+				}
+
+				Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+					TextButton(
+						onClick = onSelectAll,
+						contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+						modifier = Modifier.height(30.dp)
+					) {
+						Text(
+							text = if (selectedCount == totalCount && totalCount > 0) "全不选" else "全选",
+							style = MaterialTheme.typography.labelMedium
+						)
+					}
+					if (selectedCount > 0) {
+						TextButton(
+							onClick = onClear,
+							contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+							modifier = Modifier.height(30.dp)
+						) {
+							Text(
+								text = "清空",
+								style = MaterialTheme.typography.labelMedium,
+								color = MaterialTheme.colorScheme.onSurfaceVariant
+							)
+						}
+					}
+				}
+			}
+
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.horizontalScroll(rememberScrollState()),
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalAlignment = Alignment.CenterVertically
+			) {
+				Button(
+					onClick = onDownloadSelected,
+					enabled = selectedCount > 0,
+					shape = CircleShape,
+					contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+					modifier = Modifier.height(36.dp)
+				) {
+					Icon(Icons.Outlined.Download, null, modifier = Modifier.size(15.dp))
+					Spacer(Modifier.width(4.dp))
+					Text("离线到手机 ($selectedCount)", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+				}
+
+				if (onAddToPlaylist != null) {
+					FilledTonalButton(
+						onClick = onAddToPlaylist,
+						enabled = selectedCount > 0,
+						shape = CircleShape,
+						contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+						modifier = Modifier.height(36.dp)
+					) {
+						Icon(Icons.Outlined.PlaylistAdd, null, modifier = Modifier.size(15.dp))
+						Spacer(Modifier.width(4.dp))
+						Text(playlistButtonLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+					}
+				}
+
+				if (onPlaySelected != null) {
+					Surface(
+						onClick = onPlaySelected,
+						enabled = selectedCount > 0,
+						shape = CircleShape,
+						color = MaterialTheme.colorScheme.surfaceContainerHigh,
+						border = libraryHairlineBorder(),
+						modifier = Modifier.height(36.dp)
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(4.dp)
+						) {
+							Icon(
+								imageVector = Icons.Filled.Play,
+								contentDescription = null,
+								modifier = Modifier.size(15.dp),
+								tint = if (selectedCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+							)
+							Text(
+								text = "播放选中",
+								style = MaterialTheme.typography.labelMedium,
+								color = if (selectedCount > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+								maxLines = 1,
+								softWrap = false
+							)
+						}
+					}
+				}
+
+				if (onDeleteOfflineSelected != null && hasOfflineRemovable) {
+					Surface(
+						onClick = onDeleteOfflineSelected,
+						shape = CircleShape,
+						color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+						contentColor = MaterialTheme.colorScheme.onErrorContainer,
+						modifier = Modifier.height(36.dp)
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(4.dp)
+						) {
+							Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(15.dp))
+							Text("删除离线", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun NativeDetailSongActionSheet(
+	song: DomainSong,
+	downloadStatus: DownloadStatus?,
+	onDismiss: () -> Unit,
+	onPlayNext: () -> Unit,
+	onAddToQueue: () -> Unit,
+	onAddToPlaylist: (() -> Unit)? = null,
+	onDownload: () -> Unit,
+	onCancelDownload: () -> Unit,
+	onDeleteDownload: () -> Unit,
+	extraActionLabel: String? = null,
+	onExtraAction: (() -> Unit)? = null
+) {
+	ModalBottomSheet(
+		onDismissRequest = onDismiss,
+		shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.navigationBarsPadding()
+				.padding(horizontal = 20.dp, vertical = 12.dp),
+			verticalArrangement = Arrangement.spacedBy(6.dp)
+		) {
+			Text(
+				text = song.title.ifBlank { "歌曲操作" },
+				style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			Text(
+				text = song.artistName ?: "未知艺人",
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant
+			)
+			MeloHairlineDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.clip(RoundedCornerShape(12.dp))
+					.clickable(onClick = onPlayNext)
+					.padding(vertical = 11.dp, horizontal = 4.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(12.dp)
+			) {
+				Icon(Icons.Outlined.QueuePlayNext, null)
+				Text("下一首播放")
+			}
+
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.clip(RoundedCornerShape(12.dp))
+					.clickable(onClick = onAddToQueue)
+					.padding(vertical = 11.dp, horizontal = 4.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(12.dp)
+			) {
+				Icon(Icons.Outlined.Queue, null)
+				Text("加入播放队列")
+			}
+
+			if (onAddToPlaylist != null) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable(onClick = onAddToPlaylist)
+						.padding(vertical = 11.dp, horizontal = 4.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp)
+				) {
+					Icon(Icons.Outlined.PlaylistAdd, null)
+					Text("加入歌单")
+				}
+			}
+
+			when (downloadStatus) {
+				DownloadStatus.DOWNLOADED -> {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(RoundedCornerShape(12.dp))
+							.clickable(onClick = onDeleteDownload)
+							.padding(vertical = 11.dp, horizontal = 4.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(12.dp)
+					) {
+						Icon(Icons.Outlined.Delete, null, tint = MaterialTheme.colorScheme.error)
+						Text("从手机删除离线文件", color = MaterialTheme.colorScheme.error)
+					}
+				}
+				DownloadStatus.DOWNLOADING -> {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(RoundedCornerShape(12.dp))
+							.clickable(onClick = onCancelDownload)
+							.padding(vertical = 11.dp, horizontal = 4.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(12.dp)
+					) {
+						Icon(Icons.Outlined.Close, null, tint = MaterialTheme.colorScheme.error)
+						Text("取消离线缓存", color = MaterialTheme.colorScheme.error)
+					}
+				}
+				else -> {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(RoundedCornerShape(12.dp))
+							.clickable(onClick = onDownload)
+							.padding(vertical = 11.dp, horizontal = 4.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(12.dp)
+					) {
+						Icon(Icons.Outlined.Download, null, tint = MaterialTheme.colorScheme.primary)
+						Text("离线到手机")
+					}
+				}
+			}
+
+			if (extraActionLabel != null && onExtraAction != null) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable(onClick = onExtraAction)
+						.padding(vertical = 11.dp, horizontal = 4.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp)
+				) {
+					Icon(Icons.Outlined.Star, null, tint = MaterialTheme.colorScheme.meloGoldText)
+					Text(extraActionLabel)
+				}
+			}
+		}
+	}
+}
+
+@Composable
+internal fun OfflineSongStatusIcon(
+	status: DownloadStatus?,
+	onDownloadClick: () -> Unit,
+	onDeleteClick: () -> Unit,
+	onCancelDownloadingClick: (() -> Unit)? = null,
+	modifier: Modifier = Modifier
+) {
+	when (status) {
+		DownloadStatus.DOWNLOADED -> {
+			Surface(
+				onClick = onDeleteClick,
+				shape = CircleShape,
+				color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+				modifier = modifier.size(28.dp)
+			) {
+				Box(contentAlignment = Alignment.Center) {
+					Icon(
+						imageVector = Icons.Outlined.Check,
+						contentDescription = "已离线至手机（点击移除）",
+						tint = MaterialTheme.colorScheme.primary,
+						modifier = Modifier.size(16.dp)
+					)
+				}
+			}
+		}
+		DownloadStatus.DOWNLOADING -> {
+			Surface(
+				onClick = { onCancelDownloadingClick?.invoke() },
+				enabled = onCancelDownloadingClick != null,
+				shape = CircleShape,
+				color = Color.Transparent,
+				modifier = modifier.size(28.dp)
+			) {
+				Box(contentAlignment = Alignment.Center) {
+					CircularProgressIndicator(
+						modifier = Modifier.size(18.dp),
+						strokeWidth = 2.dp,
+						color = MaterialTheme.colorScheme.primary
+					)
+					if (onCancelDownloadingClick != null) {
+						Icon(
+							imageVector = Icons.Outlined.Close,
+							contentDescription = "取消下载",
+							tint = MaterialTheme.colorScheme.primary,
+							modifier = Modifier.size(10.dp)
+						)
+					}
+				}
+			}
+		}
+		DownloadStatus.FAILED -> {
+			Surface(
+				onClick = onDownloadClick,
+				shape = CircleShape,
+				color = MaterialTheme.colorScheme.errorContainer,
+				modifier = modifier.size(28.dp)
+			) {
+				Box(contentAlignment = Alignment.Center) {
+					Icon(
+						imageVector = Icons.Outlined.Refresh,
+						contentDescription = "下载失败，点击重试",
+						tint = MaterialTheme.colorScheme.error,
+						modifier = Modifier.size(16.dp)
+					)
+				}
+			}
+		}
+		DownloadStatus.NOT_DOWNLOADED, null -> {
+			IconButton(
+				onClick = onDownloadClick,
+				modifier = modifier.size(28.dp)
+			) {
+				Icon(
+					imageVector = Icons.Outlined.Download,
+					contentDescription = "下载到手机",
+					tint = MaterialTheme.colorScheme.outline,
+					modifier = Modifier.size(18.dp)
+				)
+			}
+		}
+	}
+}

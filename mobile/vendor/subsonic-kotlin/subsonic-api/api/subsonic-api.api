@@ -1,0 +1,2522 @@
+public abstract interface class dev/zt64/subsonic/api/SubsonicApi {
+	public abstract fun addChatMessage (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun changePassword (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun createBookmark (Ljava/lang/String;JLjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun createBookmark$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;JLjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun createInternetRadioStation (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun createInternetRadioStation$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun createPlaylist (Ljava/lang/String;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun createPlaylistFromSongs (Ljava/lang/String;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun createPodcastChannel (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun createShare (Ljava/util/List;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun createShare$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/util/List;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun createUser (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun createUser$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun deleteBookmark (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deleteInternetRadioStation (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deletePlaylist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deletePodcastChannel (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deletePodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deleteShare (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun deleteUser (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun download (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun downloadPodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun findSonicPath (Ldev/zt64/subsonic/api/model/Song;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun findSonicPath (Ljava/lang/String;Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun findSonicPath$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Song;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun findSonicPath$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getAlbum (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getAlbumInfo (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getAlbumInfoID3 (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getAlbums (Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getAlbums$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getAlbumsID3 (Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getAlbumsID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getArtist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getArtistInfo (Ldev/zt64/subsonic/api/model/Artist;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getArtistInfo (Ljava/lang/String;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfo$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Artist;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfo$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getArtistInfoID3 (Ljava/lang/String;IZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfoID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getArtists (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getArtists$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getAvatar (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getAvatarUrl (Ljava/lang/String;Z)Ljava/lang/String;
+	public static synthetic fun getAvatarUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ZILjava/lang/Object;)Ljava/lang/String;
+	public abstract fun getBookmarks (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getCaptions (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getChatMessages (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getCoverArt (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getCoverArt$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getCoverArtUrl (Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;
+	public static synthetic fun getCoverArtUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Ljava/lang/String;
+	public abstract fun getDirectories (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getDirectory (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getGenres (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getIndexes (Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getIndexes$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getInternetRadioStations (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getLicense (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getLyrics (Ldev/zt64/subsonic/api/model/Song;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getLyrics (Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getLyrics (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getNewestPodcasts (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getNewestPodcasts$default (Ldev/zt64/subsonic/api/SubsonicApi;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getNowPlaying (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getOpenSubsonicExtensions (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPlayQueue (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPlayQueueByIndex (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPlaylist (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPlaylists (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPodcastEpisode (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getPodcasts (ZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getPodcasts$default (Ldev/zt64/subsonic/api/SubsonicApi;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getRandomSongs (ILjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getRandomSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;ILjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getScanStatus (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getShares (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getSimilarSongs (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getSimilarSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getSimilarSongsID3 (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getSimilarSongsID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getSong (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getSongs (Ljava/lang/String;IILjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IILjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getSonicSimilarTracks (Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getSonicSimilarTracks (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getSonicSimilarTracks$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSonicSimilarTracks$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getStarred (Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getStarred$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getStarredID3 (Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getStarredID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getStreamUrl (Ljava/lang/String;ILjava/lang/String;Ljava/lang/Integer;Z)Ljava/lang/String;
+	public static synthetic fun getStreamUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILjava/lang/String;Ljava/lang/Integer;ZILjava/lang/Object;)Ljava/lang/String;
+	public abstract fun getTopSongs (Ldev/zt64/subsonic/api/model/Artist;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getTopSongs (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getTopSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Artist;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getTopSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getTranscodeDecision (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;Ldev/zt64/subsonic/api/model/ClientInfo;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getTranscodeStream (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getTranscodeStream (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun getTranscodeStream$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getTranscodeStream$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getTranscodeStreamUrl (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;)Ljava/lang/String;
+	public abstract fun getUser (Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun getUsers (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun hls (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun hls$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun jukeboxControl (Ldev/zt64/subsonic/api/model/JukeboxAction;FLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun ping (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun refreshPodcasts (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun reportPlayback (Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;JLdev/zt64/subsonic/api/model/PlaybackState;FLjava/lang/Boolean;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun reportPlayback$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;JLdev/zt64/subsonic/api/model/PlaybackState;FLjava/lang/Boolean;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun savePlayQueue (Ljava/lang/Long;JILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun savePlayQueue (Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Long;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun savePlayQueue$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/Long;JILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun savePlayQueue$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Long;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun scrobble (Ljava/lang/String;Lkotlin/time/Instant;ZLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun scrobble$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/time/Instant;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun search (Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun search$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun searchID3 (Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun searchID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun setRating (Ljava/lang/String;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun star ([Ldev/zt64/subsonic/api/model/SubsonicResource;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun star ([Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun startScan (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun tokenInfo (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun unstar ([Ldev/zt64/subsonic/api/model/SubsonicResource;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun unstar ([Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun updateInternetRadioStation (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun updateInternetRadioStation$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun updatePlaylist (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun updatePlaylist$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun updateShare (Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun updateShare$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun updateUser (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun updateUser$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class dev/zt64/subsonic/api/SubsonicApi$DefaultImpls {
+	public static synthetic fun createBookmark$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;JLjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun createInternetRadioStation$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun createShare$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/util/List;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun createUser$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun findSonicPath$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Song;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun findSonicPath$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getAlbums$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getAlbumsID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/AlbumListType;IILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfo$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Artist;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfo$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getArtistInfoID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getArtists$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getAvatarUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ZILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun getCoverArt$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getCoverArtUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun getIndexes$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getNewestPodcasts$default (Ldev/zt64/subsonic/api/SubsonicApi;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getPodcasts$default (Ldev/zt64/subsonic/api/SubsonicApi;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getRandomSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;ILjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSimilarSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSimilarSongsID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IILjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSonicSimilarTracks$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Song;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getSonicSimilarTracks$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getStarred$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getStarredID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Directory;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getStreamUrl$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILjava/lang/String;Ljava/lang/Integer;ZILjava/lang/Object;)Ljava/lang/String;
+	public static synthetic fun getTopSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ldev/zt64/subsonic/api/model/Artist;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getTopSongs$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getTranscodeStream$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILjava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun getTranscodeStream$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;ILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun hls$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun reportPlayback$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ldev/zt64/subsonic/api/model/MediaType;JLdev/zt64/subsonic/api/model/PlaybackState;FLjava/lang/Boolean;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun savePlayQueue$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/Long;JILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun savePlayQueue$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Long;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun scrobble$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Lkotlin/time/Instant;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun search$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun searchID3$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;IIIIIILjava/lang/Integer;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun updateInternetRadioStation$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun updatePlaylist$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun updateShare$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun updateUser$default (Ldev/zt64/subsonic/api/SubsonicApi;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Boolean;Ljava/util/List;Ljava/lang/Integer;Ljava/util/List;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class dev/zt64/subsonic/api/model/Album : dev/zt64/subsonic/api/model/SongCollection, dev/zt64/subsonic/api/model/SubsonicResource {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Album$Companion;
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lkotlin/time/Duration;Lkotlin/time/Instant;Lkotlin/time/Instant;Lkotlin/time/Instant;ILjava/lang/Integer;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ItemDate;Ldev/zt64/subsonic/api/model/ItemDate;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/util/List;ZLjava/util/List;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/util/List;
+	public final fun component11 ()Ljava/util/List;
+	public final fun component12-FghU774 ()Lkotlin/time/Duration;
+	public final fun component13 ()Lkotlin/time/Instant;
+	public final fun component14 ()Lkotlin/time/Instant;
+	public final fun component15 ()Lkotlin/time/Instant;
+	public final fun component16 ()I
+	public final fun component17 ()Ljava/lang/Integer;
+	public final fun component18 ()Ljava/lang/String;
+	public final fun component19 ()Ldev/zt64/subsonic/api/model/ItemDate;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component20 ()Ldev/zt64/subsonic/api/model/ItemDate;
+	public final fun component21 ()Ljava/util/List;
+	public final fun component22 ()Ljava/util/List;
+	public final fun component23 ()Ljava/lang/String;
+	public final fun component24 ()Ljava/lang/String;
+	public final fun component25 ()I
+	public final fun component26 ()Ljava/util/List;
+	public final fun component27 ()Z
+	public final fun component28 ()Ljava/util/List;
+	public final fun component29 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/Integer;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArtistId ()Ljava/lang/String;
+	public final fun getArtistName ()Ljava/lang/String;
+	public final fun getArtists ()Ljava/util/List;
+	public fun getCoverArtId ()Ljava/lang/String;
+	public final fun getCreatedAt ()Lkotlin/time/Instant;
+	public final fun getDiscs ()Ljava/util/List;
+	public final fun getDisplayArtist ()Ljava/lang/String;
+	public fun getDuration-FghU774 ()Lkotlin/time/Duration;
+	public final fun getGenre ()Ljava/lang/String;
+	public final fun getGenres ()Ljava/util/List;
+	public fun getId ()Ljava/lang/String;
+	public final fun getLastPlayedAt ()Lkotlin/time/Instant;
+	public final fun getMoods ()Ljava/util/List;
+	public fun getMusicBrainzId ()Ljava/lang/String;
+	public fun getName ()Ljava/lang/String;
+	public final fun getOriginalReleaseDate ()Ldev/zt64/subsonic/api/model/ItemDate;
+	public final fun getPlayCount ()I
+	public final fun getRecordLabels ()Ljava/util/List;
+	public final fun getReleaseDate ()Ldev/zt64/subsonic/api/model/ItemDate;
+	public final fun getReleaseTypes ()Ljava/util/List;
+	public fun getSongCount ()I
+	public fun getSongs ()Ljava/util/List;
+	public fun getSortName ()Ljava/lang/String;
+	public fun getStarredAt ()Lkotlin/time/Instant;
+	public final fun getUserRating ()Ljava/lang/Integer;
+	public final fun getVersion ()Ljava/lang/String;
+	public final fun getYear ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public final fun isCompilation ()Z
+	public fun isExternal ()Z
+	public fun isStarred ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Album$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Album$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Album;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Album;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Album$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Album$Disc {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Album$Disc$Companion;
+	public fun <init> (ILjava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (ILjava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (ILjava/lang/String;Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Album$Disc;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/Album$Disc;ILjava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/Album$Disc;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCoverArtId ()Ljava/lang/String;
+	public final fun getDisc ()I
+	public final fun getTitle ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Album$Disc$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Album$Disc$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Album$Disc;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Album$Disc;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Album$Disc$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Album$RecordLabel {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Album$RecordLabel$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Album$RecordLabel;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/Album$RecordLabel;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/Album$RecordLabel;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Album$RecordLabel$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Album$RecordLabel$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Album$RecordLabel;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Album$RecordLabel;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Album$RecordLabel$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumInfo {
+	public static final field Companion Ldev/zt64/subsonic/api/model/AlbumInfo$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLargeImageUrl ()Ljava/lang/String;
+	public final fun getLastFmUrl ()Ljava/lang/String;
+	public final fun getMediumImageUrl ()Ljava/lang/String;
+	public final fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getNotes ()Ljava/lang/String;
+	public final fun getSmallImageUrl ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/AlbumInfo$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumInfo$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/AlbumInfo;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/AlbumInfo;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumInfo$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract class dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field Companion Ldev/zt64/subsonic/api/model/AlbumListType$Companion;
+	public synthetic fun <init> (ILjava/lang/String;Lkotlinx/serialization/internal/SerializationConstructorMarker;)V
+	public synthetic fun <init> (Ljava/lang/String;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getValue ()Ljava/lang/String;
+	public static final synthetic fun write$Self (Ldev/zt64/subsonic/api/model/AlbumListType;Lkotlinx/serialization/encoding/CompositeEncoder;Lkotlinx/serialization/descriptors/SerialDescriptor;)V
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$AlphabeticalByArtist : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$AlphabeticalByArtist;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$AlphabeticalByName : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$AlphabeticalByName;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$ByGenre : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field Companion Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGenre ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/AlbumListType$ByGenre$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/AlbumListType$ByGenre;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$ByGenre$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$ByYear : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field Companion Ldev/zt64/subsonic/api/model/AlbumListType$ByYear$Companion;
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Ldev/zt64/subsonic/api/model/AlbumListType$ByYear;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/AlbumListType$ByYear;IIILjava/lang/Object;)Ldev/zt64/subsonic/api/model/AlbumListType$ByYear;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFromYear ()I
+	public final fun getToYear ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/AlbumListType$ByYear$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$ByYear$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/AlbumListType$ByYear;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/AlbumListType$ByYear;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$ByYear$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Frequent : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Frequent;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Highest : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Highest;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Newest : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Newest;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Random : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Random;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Recent : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Recent;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/AlbumListType$Starred : dev/zt64/subsonic/api/model/AlbumListType {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/AlbumListType$Starred;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/Artist : dev/zt64/subsonic/api/model/SubsonicResource {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Artist$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/util/List;
+	public final fun component11 ()Ljava/util/List;
+	public final fun component12 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Lkotlin/time/Instant;
+	public final fun component7 ()Ljava/lang/Integer;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbum ()Ljava/util/List;
+	public final fun getAlbumCount ()I
+	public final fun getArtistImageUrl ()Ljava/lang/String;
+	public fun getCoverArtId ()Ljava/lang/String;
+	public fun getId ()Ljava/lang/String;
+	public fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getRoles ()Ljava/util/List;
+	public fun getSortName ()Ljava/lang/String;
+	public fun getStarredAt ()Lkotlin/time/Instant;
+	public final fun getUserRating ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun isExternal ()Z
+	public fun isStarred ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Artist$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Artist$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Artist;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Artist;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Artist$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistIndex {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ArtistIndex$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArtists ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ArtistIndex$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ArtistIndex$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ArtistIndex;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ArtistIndex;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistIndex$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistIndexes {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ArtistIndexes$Companion;
+	public fun <init> ()V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChild ()Ljava/util/List;
+	public final fun getIndex ()Ljava/util/List;
+	public final fun getShortcut ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ArtistIndexes$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ArtistIndexes$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ArtistIndexes;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ArtistIndexes;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistIndexes$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistInfo {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ArtistInfo$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBiography ()Ljava/lang/String;
+	public final fun getLargeImageUrl ()Ljava/lang/String;
+	public final fun getLastFmUrl ()Ljava/lang/String;
+	public final fun getMediumImageUrl ()Ljava/lang/String;
+	public final fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getSimilarArtists ()Ljava/util/List;
+	public final fun getSmallImageUrl ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ArtistInfo$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ArtistInfo$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ArtistInfo;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ArtistInfo;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ArtistInfo$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Artists : java/util/List, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Artists$Companion;
+	public fun add (ILdev/zt64/subsonic/api/model/ArtistIndex;)V
+	public synthetic fun add (ILjava/lang/Object;)V
+	public fun add (Ldev/zt64/subsonic/api/model/ArtistIndex;)Z
+	public synthetic fun add (Ljava/lang/Object;)Z
+	public fun addAll (ILjava/util/Collection;)Z
+	public fun addAll (Ljava/util/Collection;)Z
+	public fun clear ()V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/List;
+	public fun contains (Ldev/zt64/subsonic/api/model/ArtistIndex;)Z
+	public final fun contains (Ljava/lang/Object;)Z
+	public fun containsAll (Ljava/util/Collection;)Z
+	public fun equals (Ljava/lang/Object;)Z
+	public fun get (I)Ldev/zt64/subsonic/api/model/ArtistIndex;
+	public synthetic fun get (I)Ljava/lang/Object;
+	public final fun getIgnoredArticles ()Ljava/lang/String;
+	public final fun getIndex ()Ljava/util/List;
+	public fun getSize ()I
+	public fun hashCode ()I
+	public fun indexOf (Ldev/zt64/subsonic/api/model/ArtistIndex;)I
+	public final fun indexOf (Ljava/lang/Object;)I
+	public fun isEmpty ()Z
+	public fun iterator ()Ljava/util/Iterator;
+	public fun lastIndexOf (Ldev/zt64/subsonic/api/model/ArtistIndex;)I
+	public final fun lastIndexOf (Ljava/lang/Object;)I
+	public fun listIterator ()Ljava/util/ListIterator;
+	public fun listIterator (I)Ljava/util/ListIterator;
+	public fun remove (I)Ldev/zt64/subsonic/api/model/ArtistIndex;
+	public synthetic fun remove (I)Ljava/lang/Object;
+	public fun remove (Ljava/lang/Object;)Z
+	public fun removeAll (Ljava/util/Collection;)Z
+	public fun replaceAll (Ljava/util/function/UnaryOperator;)V
+	public fun retainAll (Ljava/util/Collection;)Z
+	public fun set (ILdev/zt64/subsonic/api/model/ArtistIndex;)Ldev/zt64/subsonic/api/model/ArtistIndex;
+	public synthetic fun set (ILjava/lang/Object;)Ljava/lang/Object;
+	public final fun size ()I
+	public fun sort (Ljava/util/Comparator;)V
+	public fun subList (II)Ljava/util/List;
+	public fun toArray ()[Ljava/lang/Object;
+	public fun toArray ([Ljava/lang/Object;)[Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Artists$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Artists$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Artists;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Artists;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Artists$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Bookmark {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Bookmark$Companion;
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lkotlin/time/Instant;
+	public final fun component5 ()Lkotlin/time/Instant;
+	public final fun component6 ()Ldev/zt64/subsonic/api/model/SubsonicResource;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComment ()Ljava/lang/String;
+	public final fun getCreatedAt ()Lkotlin/time/Instant;
+	public final fun getEntry ()Ldev/zt64/subsonic/api/model/SubsonicResource;
+	public final fun getModifiedAt ()Lkotlin/time/Instant;
+	public final fun getPosition ()I
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Bookmark$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public fun <init> (Lkotlinx/serialization/KSerializer;)V
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Bookmark;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Bookmark;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public final fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Bookmark$Companion {
+	public final fun serializer (Lkotlinx/serialization/KSerializer;)Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ChatMessage {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ChatMessage$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lkotlin/time/Instant;
+	public final fun component3 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getTime ()Lkotlin/time/Instant;
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ChatMessage$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ChatMessage$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ChatMessage;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ChatMessage;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ChatMessage$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;IILjava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;IILjava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;IILjava/util/List;Ljava/util/List;Ljava/util/List;)Ldev/zt64/subsonic/api/model/ClientInfo;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/ClientInfo;Ljava/lang/String;Ljava/lang/String;IILjava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/ClientInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCodecProfiles ()Ljava/util/List;
+	public final fun getDirectPlayProfiles ()Ljava/util/List;
+	public final fun getMaxAudioBitrate ()I
+	public final fun getMaxTranscodingAudioBitrate ()I
+	public final fun getName ()Ljava/lang/String;
+	public final fun getPlatform ()Ljava/lang/String;
+	public final fun getTranscodingProfiles ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ClientInfo$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ClientInfo$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ClientInfo;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ClientInfo;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Companion;
+	public fun <init> (Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;Ljava/util/List;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;Ljava/util/List;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLimitations ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getType ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Companion;
+	public fun <init> (Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;ZLjava/util/List;)V
+	public synthetic fun <init> (Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;ZLjava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public final fun component2 ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;ZLjava/util/List;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;ZLjava/util/List;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getComparison ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public final fun getName ()Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public final fun getRequired ()Z
+	public final fun getValues ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison$Companion;
+	public static final field Equals Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public static final field GreaterThanEqual Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public static final field LessThanEqual Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public static final field NotEquals Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Comparison$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type : java/lang/Enum {
+	public static final field AudioBitDepth Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static final field AudioBitrate Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static final field AudioChannels Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static final field AudioProfile Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static final field AudioSampleRate Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type$Companion;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecProfile$Limitation$Type$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecType : java/lang/Enum {
+	public static final field AudioCodec Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$CodecType$Companion;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/ClientInfo$CodecType;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$CodecType$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile$Companion;
+	public fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;)Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/lang/Integer;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAudioCodecs ()Ljava/util/List;
+	public final fun getContainers ()Ljava/util/List;
+	public final fun getMaxAudioChannels ()Ljava/lang/Integer;
+	public final fun getProtocols ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$DirectPlayProfile$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$Protocol : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$Protocol$Companion;
+	public static final field HLS Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public static final field HTTP Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public static final field HTTPS Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$Protocol$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;Ljava/lang/Integer;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;Ljava/lang/Integer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public final fun component4 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;Ljava/lang/Integer;)Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile;Ljava/lang/String;Ljava/lang/String;Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;Ljava/lang/Integer;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAudioCodec ()Ljava/lang/String;
+	public final fun getContainer ()Ljava/lang/String;
+	public final fun getMaxAudioChannels ()Ljava/lang/Integer;
+	public final fun getProtocol ()Ldev/zt64/subsonic/api/model/ClientInfo$Protocol;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ClientInfo$TranscodingProfile$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Contributor {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Contributor$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ldev/zt64/subsonic/api/model/Artist;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArtist ()Ldev/zt64/subsonic/api/model/Artist;
+	public final fun getRole ()Ljava/lang/String;
+	public final fun getSubRole ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Contributor$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Contributor$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Contributor;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Contributor;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Contributor$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Directory {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Directory$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lkotlin/time/Instant;
+	public final fun component5 ()Ljava/lang/Integer;
+	public final fun component6 ()Ljava/lang/Float;
+	public final fun component7 ()I
+	public final fun component8 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAverageRating ()Ljava/lang/Float;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getItems ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getParent ()Ljava/lang/String;
+	public final fun getPlayCount ()I
+	public final fun getStarredAt ()Lkotlin/time/Instant;
+	public final fun getUserRating ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public final fun isStarred ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Directory$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Directory$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Directory;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Directory;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Directory$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Genre {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Genre$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbumCount ()I
+	public final fun getName ()Ljava/lang/String;
+	public final fun getSongCount ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Genre$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Genre$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Genre;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Genre;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Genre$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/InternetRadioStation {
+	public static final field Companion Ldev/zt64/subsonic/api/model/InternetRadioStation$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCoverArtId ()Ljava/lang/String;
+	public final fun getHomepageUrl ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getStreamUrl ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/InternetRadioStation$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/InternetRadioStation$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/InternetRadioStation;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/InternetRadioStation;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/InternetRadioStation$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ItemDate {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ItemDate$Companion;
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Integer;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDay ()Ljava/lang/Integer;
+	public final fun getMonth ()Ljava/lang/Integer;
+	public final fun getYear ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ItemDate$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ItemDate$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ItemDate;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ItemDate;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ItemDate$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract class dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$Companion;
+	public synthetic fun <init> (ILkotlinx/serialization/internal/SerializationConstructorMarker;)V
+	public static final synthetic fun write$Self (Ldev/zt64/subsonic/api/model/JukeboxAction;Lkotlinx/serialization/encoding/CompositeEncoder;Lkotlinx/serialization/descriptors/SerialDescriptor;)V
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Add : dev/zt64/subsonic/api/model/JukeboxAction, dev/zt64/subsonic/api/model/JukeboxAction$ActionId {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$Add$Companion;
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Ldev/zt64/subsonic/api/model/JukeboxAction$Add;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/JukeboxAction$Add;JILjava/lang/Object;)Ldev/zt64/subsonic/api/model/JukeboxAction$Add;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getId ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/JukeboxAction$Add$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Add$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/JukeboxAction$Add;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/JukeboxAction$Add;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Add$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Clear : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Clear;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Remove : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$Remove$Companion;
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Ldev/zt64/subsonic/api/model/JukeboxAction$Remove;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/JukeboxAction$Remove;IILjava/lang/Object;)Ldev/zt64/subsonic/api/model/JukeboxAction$Remove;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/JukeboxAction$Remove$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Remove$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/JukeboxAction$Remove;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/JukeboxAction$Remove;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Remove$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Set : dev/zt64/subsonic/api/model/JukeboxAction, dev/zt64/subsonic/api/model/JukeboxAction$ActionId {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$Set$Companion;
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Ldev/zt64/subsonic/api/model/JukeboxAction$Set;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/JukeboxAction$Set;JILjava/lang/Object;)Ldev/zt64/subsonic/api/model/JukeboxAction$Set;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getId ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/JukeboxAction$Set$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Set$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/JukeboxAction$Set;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/JukeboxAction$Set;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Set$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$SetGain : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain$Companion;
+	public fun <init> (F)V
+	public final fun component1 ()F
+	public final fun copy (F)Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain;FILjava/lang/Object;)Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGain ()F
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/JukeboxAction$SetGain$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/JukeboxAction$SetGain;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$SetGain$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Shuffle : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Shuffle;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Skip : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field Companion Ldev/zt64/subsonic/api/model/JukeboxAction$Skip$Companion;
+	public fun <init> (II)V
+	public synthetic fun <init> (IIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Ldev/zt64/subsonic/api/model/JukeboxAction$Skip;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/JukeboxAction$Skip;IIILjava/lang/Object;)Ldev/zt64/subsonic/api/model/JukeboxAction$Skip;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()I
+	public final fun getOffset ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/JukeboxAction$Skip$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Skip$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/JukeboxAction$Skip;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/JukeboxAction$Skip;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Skip$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Start : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Start;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Status : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Status;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/JukeboxAction$Stop : dev/zt64/subsonic/api/model/JukeboxAction {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/JukeboxAction$Stop;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/License {
+	public static final field Companion Ldev/zt64/subsonic/api/model/License$Companion;
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lkotlin/time/Instant;
+	public final fun component4 ()Lkotlin/time/Instant;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEmail ()Ljava/lang/String;
+	public final fun getLicenseExpires ()Lkotlin/time/Instant;
+	public final fun getTrialExpires ()Lkotlin/time/Instant;
+	public final fun getValid ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/License$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/License$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/License;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/License;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/License$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Lyrics {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Lyrics$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArtistName ()Ljava/lang/String;
+	public final fun getTitle ()Ljava/lang/String;
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Lyrics$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Lyrics$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Lyrics;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Lyrics;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Lyrics$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/MediaType : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/MediaType$Companion;
+	public static final field PODCAST Ldev/zt64/subsonic/api/model/MediaType;
+	public static final field SONG Ldev/zt64/subsonic/api/model/MediaType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/MediaType;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/MediaType;
+}
+
+public final class dev/zt64/subsonic/api/model/MediaType$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/MusicFolder {
+	public static final field Companion Ldev/zt64/subsonic/api/model/MusicFolder$Companion;
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()I
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/MusicFolder$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/MusicFolder$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/MusicFolder;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/MusicFolder;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/MusicFolder$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/NowPlayingEntry {
+	public static final field Companion Ldev/zt64/subsonic/api/model/NowPlayingEntry$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMinutesAgo ()I
+	public final fun getPlayerId ()I
+	public final fun getPlayerName ()Ljava/lang/String;
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/NowPlayingEntry$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/NowPlayingEntry$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/NowPlayingEntry;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/NowPlayingEntry;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/NowPlayingEntry$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PlayQueue {
+	public static final field Companion Ldev/zt64/subsonic/api/model/PlayQueue$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lkotlin/time/Instant;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCurrentId ()Ljava/lang/String;
+	public final fun getModifiedAt ()Lkotlin/time/Instant;
+	public final fun getModifiedBy ()Ljava/lang/String;
+	public final fun getPosition ()J
+	public final fun getSongs ()Ljava/util/List;
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/PlayQueue$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/PlayQueue$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/PlayQueue;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/PlayQueue;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PlayQueue$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PlaybackState : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/PlaybackState$Companion;
+	public static final field PAUSED Ldev/zt64/subsonic/api/model/PlaybackState;
+	public static final field PLAYING Ldev/zt64/subsonic/api/model/PlaybackState;
+	public static final field STARTING Ldev/zt64/subsonic/api/model/PlaybackState;
+	public static final field STOPPED Ldev/zt64/subsonic/api/model/PlaybackState;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/PlaybackState;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/PlaybackState;
+}
+
+public final class dev/zt64/subsonic/api/model/PlaybackState$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Playlist : dev/zt64/subsonic/api/model/SongCollection {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Playlist$Companion;
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLkotlin/time/Instant;Lkotlin/time/Instant;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/util/List;Lkotlin/time/Instant;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/Boolean;
+	public final fun component11 ()Ljava/lang/Boolean;
+	public final fun component12 ()Ljava/util/List;
+	public final fun component13 ()Lkotlin/time/Instant;
+	public final fun component14 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()I
+	public final fun component7-UwyO8pc ()J
+	public final fun component8 ()Lkotlin/time/Instant;
+	public final fun component9 ()Lkotlin/time/Instant;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllowedUsers ()Ljava/util/List;
+	public final fun getComment ()Ljava/lang/String;
+	public fun getCoverArtId ()Ljava/lang/String;
+	public final fun getCreatedAt ()Lkotlin/time/Instant;
+	public synthetic fun getDuration-FghU774 ()Lkotlin/time/Duration;
+	public fun getDuration-UwyO8pc ()J
+	public fun getId ()Ljava/lang/String;
+	public final fun getModifiedAt ()Lkotlin/time/Instant;
+	public fun getName ()Ljava/lang/String;
+	public final fun getOwner ()Ljava/lang/String;
+	public final fun getPublic ()Ljava/lang/Boolean;
+	public final fun getReadOnly ()Ljava/lang/Boolean;
+	public fun getSongCount ()I
+	public fun getSongs ()Ljava/util/List;
+	public final fun getValidUntil ()Lkotlin/time/Instant;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Playlist$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Playlist$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Playlist;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Playlist;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Playlist$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastChannel {
+	public static final field Companion Ldev/zt64/subsonic/api/model/PodcastChannel$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCoverArtId ()Ljava/lang/String;
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getEpisodes ()Ljava/util/List;
+	public final fun getErrorMessage ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getOriginalImageUrl ()Ljava/lang/String;
+	public final fun getStatus ()Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public final fun getTitle ()Ljava/lang/String;
+	public final fun getUrl ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/PodcastChannel$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/PodcastChannel$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/PodcastChannel;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/PodcastChannel;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastChannel$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastEpisode : dev/zt64/subsonic/api/model/SubsonicResource {
+	public static final field Companion Ldev/zt64/subsonic/api/model/PodcastEpisode$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Z
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public final fun component7 ()Lkotlin/time/Instant;
+	public final fun component8 ()Lkotlin/time/Instant;
+	public final fun component9 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChannelId ()Ljava/lang/String;
+	public fun getCoverArtId ()Ljava/lang/String;
+	public final fun getDescription ()Ljava/lang/String;
+	public fun getId ()Ljava/lang/String;
+	public fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getPublishDate ()Lkotlin/time/Instant;
+	public fun getSortName ()Ljava/lang/String;
+	public fun getStarredAt ()Lkotlin/time/Instant;
+	public final fun getStatus ()Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public final fun getStreamId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun isExternal ()Z
+	public fun isStarred ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/PodcastEpisode$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/PodcastEpisode$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/PodcastEpisode;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/PodcastEpisode;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastEpisode$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastStatus : java/lang/Enum {
+	public static final field COMPLETED Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static final field Companion Ldev/zt64/subsonic/api/model/PodcastStatus$Companion;
+	public static final field DOWNLOADING Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static final field ERROR Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static final field NEW Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static final field SKIPPED Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/PodcastStatus;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/PodcastStatus;
+}
+
+public final class dev/zt64/subsonic/api/model/PodcastStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Role : java/lang/Enum {
+	public static final field ADMIN Ldev/zt64/subsonic/api/model/Role;
+	public static final field COMMENT Ldev/zt64/subsonic/api/model/Role;
+	public static final field COVER_ART Ldev/zt64/subsonic/api/model/Role;
+	public static final field Companion Ldev/zt64/subsonic/api/model/Role$Companion;
+	public static final field DOWNLOAD Ldev/zt64/subsonic/api/model/Role;
+	public static final field GUEST Ldev/zt64/subsonic/api/model/Role;
+	public static final field JUKEBOX Ldev/zt64/subsonic/api/model/Role;
+	public static final field PLAYLIST Ldev/zt64/subsonic/api/model/Role;
+	public static final field PODCAST Ldev/zt64/subsonic/api/model/Role;
+	public static final field SETTINGS Ldev/zt64/subsonic/api/model/Role;
+	public static final field SHARE Ldev/zt64/subsonic/api/model/Role;
+	public static final field STREAM Ldev/zt64/subsonic/api/model/Role;
+	public static final field UPLOAD Ldev/zt64/subsonic/api/model/Role;
+	public static final field VIDEO_CONVERSION Ldev/zt64/subsonic/api/model/Role;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Role;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/Role;
+}
+
+public final class dev/zt64/subsonic/api/model/Role$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ScanStatus {
+	public static final field Companion Ldev/zt64/subsonic/api/model/ScanStatus$Companion;
+	public final fun component1 ()Z
+	public final fun component2 ()I
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCount ()I
+	public final fun getScanning ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/ScanStatus$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/ScanStatus$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/ScanStatus;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/ScanStatus;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/ScanStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SearchResult {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SearchResult$Companion;
+	public fun <init> ()V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbums ()Ljava/util/List;
+	public final fun getArtists ()Ljava/util/List;
+	public final fun getSongs ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SearchResult$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SearchResult$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SearchResult;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SearchResult;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SearchResult$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Share {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Share$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lkotlin/time/Instant;
+	public final fun component6 ()Lkotlin/time/Instant;
+	public final fun component7 ()Lkotlin/time/Instant;
+	public final fun component8 ()I
+	public final fun component9 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCreatedAt ()Lkotlin/time/Instant;
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getExpiresAt ()Lkotlin/time/Instant;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getItems ()Ljava/util/List;
+	public final fun getLastVisited ()Lkotlin/time/Instant;
+	public final fun getUrl ()Ljava/lang/String;
+	public final fun getUsername ()Ljava/lang/String;
+	public final fun getVisitCount ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Share$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Share$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Share;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Share;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Share$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song : dev/zt64/subsonic/api/model/SubsonicResource {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$Companion;
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lkotlin/time/Duration;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/String;ILjava/lang/Integer;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ldev/zt64/subsonic/api/model/Song$ReplayGain;Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;Lkotlin/time/Duration;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Ljava/lang/String;Ljava/lang/String;ZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/String;
+	public final fun component11 ()Ljava/lang/String;
+	public final fun component12 ()Ljava/lang/String;
+	public final fun component13 ()Ljava/lang/Integer;
+	public final fun component14 ()Ljava/lang/Integer;
+	public final fun component15 ()Ljava/util/List;
+	public final fun component16 ()Ljava/lang/Integer;
+	public final fun component17 ()Ljava/lang/String;
+	public final fun component18 ()Ljava/util/List;
+	public final fun component19 ()Ljava/util/List;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component20-FghU774 ()Lkotlin/time/Duration;
+	public final fun component21 ()Ljava/lang/Integer;
+	public final fun component22 ()Ljava/util/List;
+	public final fun component23 ()Ljava/lang/String;
+	public final fun component24 ()I
+	public final fun component25 ()Ljava/lang/Integer;
+	public final fun component26 ()Ljava/lang/Float;
+	public final fun component27 ()Ljava/lang/Integer;
+	public final fun component28 ()Ljava/lang/Integer;
+	public final fun component29 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component30 ()Ljava/lang/Integer;
+	public final fun component31 ()Ldev/zt64/subsonic/api/model/Song$ReplayGain;
+	public final fun component32 ()Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public final fun component33-FghU774 ()Lkotlin/time/Duration;
+	public final fun component34 ()Ljava/lang/Long;
+	public final fun component35 ()Ljava/lang/String;
+	public final fun component36 ()Ljava/lang/String;
+	public final fun component37 ()Ljava/lang/String;
+	public final fun component38 ()Ljava/util/List;
+	public final fun component39 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component40 ()Ljava/lang/String;
+	public final fun component41 ()Ljava/lang/String;
+	public final fun component42 ()Ljava/lang/String;
+	public final fun component43 ()Lkotlin/time/Instant;
+	public final fun component44 ()Ljava/lang/String;
+	public final fun component45 ()Ljava/lang/String;
+	public final fun component46 ()Z
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/util/List;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/lang/String;
+	public static synthetic fun copy-_CUt2w4$dev_zt64_subsonic_subsonic_api$default (Ldev/zt64/subsonic/api/model/Song;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Lkotlin/time/Duration;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/String;ILjava/lang/Integer;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ldev/zt64/subsonic/api/model/Song$ReplayGain;Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;Lkotlin/time/Duration;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lkotlin/time/Instant;Ljava/lang/String;Ljava/lang/String;ZIILjava/lang/Object;)Ldev/zt64/subsonic/api/model/Song;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbumArtists ()Ljava/util/List;
+	public final fun getAlbumId ()Ljava/lang/String;
+	public final fun getAlbumTitle ()Ljava/lang/String;
+	public final fun getArtistId ()Ljava/lang/String;
+	public final fun getArtistName ()Ljava/lang/String;
+	public final fun getArtists ()Ljava/util/List;
+	public final fun getAudioChannelCount ()Ljava/lang/Integer;
+	public final fun getAverageRating ()Ljava/lang/Float;
+	public final fun getBitDepth ()Ljava/lang/Integer;
+	public final fun getBitRate ()Ljava/lang/Integer;
+	public final fun getBookmarkPosition-FghU774 ()Lkotlin/time/Duration;
+	public final fun getBpm ()Ljava/lang/Integer;
+	public final fun getComment ()Ljava/lang/String;
+	public final fun getContributors ()Ljava/util/List;
+	public fun getCoverArtId ()Ljava/lang/String;
+	public final fun getDiscNumber ()Ljava/lang/Integer;
+	public final fun getDisplayAlbumArtist ()Ljava/lang/String;
+	public final fun getDisplayArtist ()Ljava/lang/String;
+	public final fun getDisplayComposer ()Ljava/lang/String;
+	public final fun getDuration-FghU774 ()Lkotlin/time/Duration;
+	public final fun getExplicitStatus ()Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public final fun getFileExtension ()Ljava/lang/String;
+	public final fun getFilePath ()Ljava/lang/String;
+	public final fun getFileSize ()Ljava/lang/Long;
+	public final fun getGenre ()Ljava/lang/String;
+	public final fun getGenres ()Ljava/util/List;
+	public fun getId ()Ljava/lang/String;
+	public final fun getIsrc ()Ljava/util/List;
+	public final fun getMimeType ()Ljava/lang/String;
+	public final fun getMoods ()Ljava/util/List;
+	public final fun getMovements ()Ljava/util/List;
+	public fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getParentId ()Ljava/lang/String;
+	public final fun getPlayCount ()I
+	public final fun getReplayGain ()Ldev/zt64/subsonic/api/model/Song$ReplayGain;
+	public final fun getSampleRate ()Ljava/lang/Integer;
+	public fun getSortName ()Ljava/lang/String;
+	public fun getStarredAt ()Lkotlin/time/Instant;
+	public final fun getTitle ()Ljava/lang/String;
+	public final fun getTrackNumber ()Ljava/lang/Integer;
+	public final fun getTranscodedContentType ()Ljava/lang/String;
+	public final fun getTranscodedSuffix ()Ljava/lang/String;
+	public final fun getUserRating ()Ljava/lang/Integer;
+	public final fun getWorks ()Ljava/util/List;
+	public final fun getYear ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun isExternal ()Z
+	public fun isStarred ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Song$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Song$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Song;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Song;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$ExplicitStatus : java/lang/Enum {
+	public static final field CLEAN Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$ExplicitStatus$Companion;
+	public static final field EXPLICIT Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public static final field UNKNOWN Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/Song$ExplicitStatus;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$ExplicitStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Movement {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$Movement$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Integer;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCount ()Ljava/lang/Integer;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getNumber ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Song$Movement$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Song$Movement$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Song$Movement;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Song$Movement;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Movement$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$ReplayGain {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$ReplayGain$Companion;
+	public final fun component1 ()Ljava/lang/Float;
+	public final fun component2 ()Ljava/lang/Float;
+	public final fun component3 ()Ljava/lang/Float;
+	public final fun component4 ()Ljava/lang/Float;
+	public final fun component5 ()Ljava/lang/Float;
+	public final fun component6 ()Ljava/lang/Float;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbumGain ()Ljava/lang/Float;
+	public final fun getAlbumPeak ()Ljava/lang/Float;
+	public final fun getBaseGain ()Ljava/lang/Float;
+	public final fun getFallbackGain ()Ljava/lang/Float;
+	public final fun getTrackGain ()Ljava/lang/Float;
+	public final fun getTrackPeak ()Ljava/lang/Float;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Song$ReplayGain$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Song$ReplayGain$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Song$ReplayGain;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Song$ReplayGain;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$ReplayGain$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$SongArtist {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$SongArtist$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Song$SongArtist;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/Song$SongArtist;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/Song$SongArtist;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Song$SongArtist$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Song$SongArtist$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Song$SongArtist;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Song$SongArtist;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$SongArtist$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Type : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$Type$Companion;
+	public static final field MUSIC Ldev/zt64/subsonic/api/model/Song$Type;
+	public static final field VIDEO Ldev/zt64/subsonic/api/model/Song$Type;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Song$Type;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/Song$Type;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Type$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Work {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Song$Work$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Ldev/zt64/subsonic/api/model/Song$Work;
+	public static synthetic fun copy$default (Ldev/zt64/subsonic/api/model/Song$Work;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/zt64/subsonic/api/model/Song$Work;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMusicBrainzId ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Song$Work$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Song$Work$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Song$Work;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Song$Work;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Song$Work$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class dev/zt64/subsonic/api/model/SongCollection {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SongCollection$Companion;
+	public abstract fun getCoverArtId ()Ljava/lang/String;
+	public abstract fun getDuration-FghU774 ()Lkotlin/time/Duration;
+	public abstract fun getId ()Ljava/lang/String;
+	public abstract fun getName ()Ljava/lang/String;
+	public abstract fun getSongCount ()I
+	public abstract fun getSongs ()Ljava/util/List;
+}
+
+public final class dev/zt64/subsonic/api/model/SongCollection$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SonicMatch {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SonicMatch$Companion;
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/SubsonicResource;
+	public final fun component2 ()F
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntry ()Ldev/zt64/subsonic/api/model/SubsonicResource;
+	public final fun getSimilarity ()F
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SonicMatch$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SonicMatch$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SonicMatch;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SonicMatch;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SonicMatch$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Starred {
+	public static final field Companion Ldev/zt64/subsonic/api/model/Starred$Companion;
+	public fun <init> ()V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAlbums ()Ljava/util/List;
+	public final fun getArtists ()Ljava/util/List;
+	public final fun getSongs ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/Starred$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/Starred$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/Starred;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/Starred;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/Starred$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StreamDetails {
+	public static final field Companion Ldev/zt64/subsonic/api/model/StreamDetails$Companion;
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/Integer;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAudioBitdepth ()Ljava/lang/Integer;
+	public final fun getAudioBitrate ()Ljava/lang/Integer;
+	public final fun getAudioChannels ()Ljava/lang/Integer;
+	public final fun getAudioProfile ()Ljava/lang/String;
+	public final fun getAudioSamplerate ()Ljava/lang/Integer;
+	public final fun getCodec ()Ljava/lang/String;
+	public final fun getContainer ()Ljava/lang/String;
+	public final fun getProtocol ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/StreamDetails$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/StreamDetails$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/StreamDetails;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/StreamDetails;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StreamDetails$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StructuredLyrics {
+	public static final field Companion Ldev/zt64/subsonic/api/model/StructuredLyrics$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()I
+	public final fun component6 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDisplayArtist ()Ljava/lang/String;
+	public final fun getDisplayTitle ()Ljava/lang/String;
+	public final fun getLang ()Ljava/lang/String;
+	public final fun getLines ()Ljava/util/List;
+	public final fun getOffset ()I
+	public final fun getSynced ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/StructuredLyrics$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/StructuredLyrics$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/StructuredLyrics;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/StructuredLyrics;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StructuredLyrics$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StructuredLyrics$Line {
+	public static final field Companion Ldev/zt64/subsonic/api/model/StructuredLyrics$Line$Companion;
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getStart ()Ljava/lang/Integer;
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/StructuredLyrics$Line$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/StructuredLyrics$Line$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/StructuredLyrics$Line;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/StructuredLyrics$Line;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/StructuredLyrics$Line$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicErrorCode : java/lang/Enum {
+	public static final field AUTH_METHOD_NOT_SUPPORTED Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicErrorCode$Companion;
+	public static final field DATA_NOT_FOUND Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field GENERIC Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field INCOMPATIBLE_CLIENT_VERSION Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field INCOMPATIBLE_SERVER_VERSION Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field INVALID_API_KEY Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field MULTIPLE_CONFLICTING_AUTH Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field REQUIRED_PARAMETER_MISSING Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field TOKEN_AUTH_NOT_SUPPORTED_LDAP Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field TRIAL_EXPIRED Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field UNAUTHORIZED Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static final field WRONG_USERNAME_OR_PASSWORD Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public final fun getDescription ()Ljava/lang/String;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicErrorCode$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicException : java/lang/Exception {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ldev/zt64/subsonic/api/model/SubsonicErrorCode;)V
+	public synthetic fun <init> (Ljava/lang/String;Ldev/zt64/subsonic/api/model/SubsonicErrorCode;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCode ()Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicExtension {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicExtension$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()[I
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getVersions ()[I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SubsonicExtension$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SubsonicExtension$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SubsonicExtension;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SubsonicExtension;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicExtension$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public abstract interface class dev/zt64/subsonic/api/model/SubsonicResource {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResource$Companion;
+	public abstract fun getCoverArtId ()Ljava/lang/String;
+	public abstract fun getId ()Ljava/lang/String;
+	public abstract fun getMusicBrainzId ()Ljava/lang/String;
+	public abstract fun getSortName ()Ljava/lang/String;
+	public abstract fun getStarredAt ()Lkotlin/time/Instant;
+	public abstract fun isExternal ()Z
+	public fun isStarred ()Z
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResource$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResource$DefaultImpls {
+	public static fun isStarred (Ldev/zt64/subsonic/api/model/SubsonicResource;)Z
+}
+
+public abstract interface class dev/zt64/subsonic/api/model/SubsonicResponse {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResponse$Companion;
+	public abstract fun getOpenSubsonic ()Z
+	public abstract fun getServerVersion ()Ljava/lang/String;
+	public abstract fun getStatus ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public abstract fun getType ()Ljava/lang/String;
+	public abstract fun getVersion ()Ljava/lang/String;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Companion {
+	public final fun serializer (Lkotlinx/serialization/KSerializer;)Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Empty : dev/zt64/subsonic/api/model/SubsonicResponse {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResponse$Empty$Companion;
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Z
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getOpenSubsonic ()Z
+	public fun getServerVersion ()Ljava/lang/String;
+	public fun getStatus ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public fun getType ()Ljava/lang/String;
+	public fun getVersion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SubsonicResponse$Empty$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SubsonicResponse$Empty$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SubsonicResponse$Empty;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SubsonicResponse$Empty;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Empty$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Error : dev/zt64/subsonic/api/model/SubsonicResponse {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$Companion;
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Z
+	public final fun component6 ()Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getError ()Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail;
+	public fun getOpenSubsonic ()Z
+	public fun getServerVersion ()Ljava/lang/String;
+	public fun getStatus ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public fun getType ()Ljava/lang/String;
+	public fun getVersion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SubsonicResponse$Error$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SubsonicResponse$Error;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SubsonicResponse$Error;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Error$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail$Companion;
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Ldev/zt64/subsonic/api/model/SubsonicErrorCode;
+	public final fun getHelpUrl ()Ljava/lang/String;
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Error$ErrorDetail$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Success : dev/zt64/subsonic/api/model/SubsonicResponse {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicResponse$Success$Companion;
+	public final fun component1 ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Z
+	public final fun component6 ()Ljava/lang/Object;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getData ()Ljava/lang/Object;
+	public fun getOpenSubsonic ()Z
+	public fun getServerVersion ()Ljava/lang/String;
+	public fun getStatus ()Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public fun getType ()Ljava/lang/String;
+	public fun getVersion ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/SubsonicResponse$Success$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public fun <init> (Lkotlinx/serialization/KSerializer;)V
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/SubsonicResponse$Success;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/SubsonicResponse$Success;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public final fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicResponse$Success$Companion {
+	public final fun serializer (Lkotlinx/serialization/KSerializer;)Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicStatus : java/lang/Enum {
+	public static final field Companion Ldev/zt64/subsonic/api/model/SubsonicStatus$Companion;
+	public static final field FAILED Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public static final field OK Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/zt64/subsonic/api/model/SubsonicStatus;
+	public static fun values ()[Ldev/zt64/subsonic/api/model/SubsonicStatus;
+}
+
+public final class dev/zt64/subsonic/api/model/SubsonicStatus$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/TokenInfo {
+	public static final field Companion Ldev/zt64/subsonic/api/model/TokenInfo$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getUsername ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/TokenInfo$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/TokenInfo$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/TokenInfo;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/TokenInfo;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/TokenInfo$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/TranscodeDecision {
+	public static final field Companion Ldev/zt64/subsonic/api/model/TranscodeDecision$Companion;
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ldev/zt64/subsonic/api/model/StreamDetails;
+	public final fun component6 ()Ldev/zt64/subsonic/api/model/StreamDetails;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCanDirectPlay ()Z
+	public final fun getCanTranscode ()Z
+	public final fun getErrorReason ()Ljava/lang/String;
+	public final fun getSourceStream ()Ldev/zt64/subsonic/api/model/StreamDetails;
+	public final fun getTranscodeParams ()Ljava/lang/String;
+	public final fun getTranscodeStream ()Ldev/zt64/subsonic/api/model/StreamDetails;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/TranscodeDecision$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/TranscodeDecision$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/TranscodeDecision;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/TranscodeDecision;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/TranscodeDecision$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/User {
+	public static final field Companion Ldev/zt64/subsonic/api/model/User$Companion;
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/util/List;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEmail ()Ljava/lang/String;
+	public final fun getFolder ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getRoles ()Ljava/util/List;
+	public final fun getScrobblingEnabled ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final synthetic class dev/zt64/subsonic/api/model/User$$serializer : kotlinx/serialization/internal/GeneratedSerializer {
+	public static final field INSTANCE Ldev/zt64/subsonic/api/model/User$$serializer;
+	public final fun childSerializers ()[Lkotlinx/serialization/KSerializer;
+	public final fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ldev/zt64/subsonic/api/model/User;
+	public synthetic fun deserialize (Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;
+	public final fun getDescriptor ()Lkotlinx/serialization/descriptors/SerialDescriptor;
+	public final fun serialize (Lkotlinx/serialization/encoding/Encoder;Ldev/zt64/subsonic/api/model/User;)V
+	public synthetic fun serialize (Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V
+	public fun typeParametersSerializers ()[Lkotlinx/serialization/KSerializer;
+}
+
+public final class dev/zt64/subsonic/api/model/User$Companion {
+	public final fun serializer ()Lkotlinx/serialization/KSerializer;
+}
+

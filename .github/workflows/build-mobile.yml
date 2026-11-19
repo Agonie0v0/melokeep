@@ -1,0 +1,328 @@
+name: 构建移动端双端包 (Android APK & iOS Unsigned IPA)
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/build-mobile.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "可选：指定构建版本号（如 v1.0.13），留空则自动读取最新 Tag"
+        required: false
+        default: ""
+        type: string
+      publish_to_latest_release:
+        description: "构建完成后直接上传/覆盖到当前最新 GitHub Release"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      version:
+        description: "本次构建的版本号（如 v1.0.13）"
+        required: false
+        default: ""
+        type: string
+    outputs:
+      signing_mode:
+        description: "Android APK 签名模式（release 或 fallback）"
+        value: ${{ jobs.build-android.outputs.signing_mode }}
+      android_asset_name:
+        description: "Android APK 资产文件名"
+        value: ${{ jobs.build-android.outputs.asset_name }}
+      ios_asset_name:
+        description: "iOS IPA 资产文件名"
+        value: ${{ jobs.build-ios.outputs.asset_name }}
+
+concurrency:
+  group: mobile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-android:
+    name: 构建 Android Release APK
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      signing_mode: ${{ steps.sign.outputs.signing_mode }}
+      asset_name: ${{ steps.ver.outputs.android_asset_name }}
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 解析构建版本号
+        id: ver
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          raw="$(printf '%s' "${INPUT_VERSION:-}" | tr -d '[:space:]')"
+          if [ -z "$raw" ]; then
+            raw="$(git tag --list "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          fi
+          [ -n "$raw" ] || raw="v1.0.0"
+          case "$raw" in
+            v*) ver_tag="$raw" ;;
+            *) ver_tag="v$raw" ;;
+          esac
+          clean_ver="${ver_tag#v}"
+          core_ver="${clean_ver%%-*}"
+          IFS='.' read -r major minor patch <<< "$core_ver"
+          major="${major:-1}"
+          minor="${minor:-0}"
+          patch="${patch:-0}"
+          ver_code=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
+          echo "ver_tag=$ver_tag" >> "$GITHUB_OUTPUT"
+          echo "clean_ver=$clean_ver" >> "$GITHUB_OUTPUT"
+          echo "ver_code=$ver_code" >> "$GITHUB_OUTPUT"
+          echo "android_asset_name=MeloKeep-${ver_tag}-android.apk" >> "$GITHUB_OUTPUT"
+          echo "Resolved Android version: tag=$ver_tag, clean=$clean_ver, code=$ver_code"
+
+      - name: 配置 JDK 21 (Temurin)
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 安装 Android SDK 37.2 组件
+        run: |
+          set -euo pipefail
+          SDK_MANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDK_MANAGER" ]; then
+            SDK_MANAGER="$(find "${ANDROID_HOME}/cmdline-tools" -name sdkmanager -type f | head -n 1)"
+          fi
+          yes | "$SDK_MANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDK_MANAGER" "platform-tools" "platforms;android-37.2" "build-tools;37.0.0"
+
+      - name: 缓存 Gradle 依赖
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-android-${{ runner.os }}-${{ hashFiles('mobile/**/*.gradle*', 'mobile/gradle/libs.versions.toml', 'mobile/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-android-${{ runner.os }}-
+
+      - name: 运行共享模块单测并编译 Android Release APK
+        working-directory: mobile
+        env:
+          MELOKEEP_VERSION_NAME: ${{ steps.ver.outputs.ver_tag }}
+          MELOKEEP_VERSION_CODE: ${{ steps.ver.outputs.ver_code }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:testAndroidHostTest :app:assembleRelease --no-daemon --console=plain
+
+      - name: 对齐、签名并校验 Release APK
+        id: sign
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          ASSET_NAME: ${{ steps.ver.outputs.android_asset_name }}
+        run: |
+          set -euo pipefail
+          UNSIGNED_APK="$(find mobile/app/build/outputs/apk/release -maxdepth 2 -name '*.apk' -type f | head -n 1)"
+          if [ -z "$UNSIGNED_APK" ] || [ ! -f "$UNSIGNED_APK" ]; then
+            echo "未找到 Android Release APK 编译产物" >&2
+            exit 1
+          fi
+
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$ZIPALIGN"
+          test -n "$APKSIGNER"
+
+          mkdir -p melokeep_outputs
+          ALIGNED_APK="/tmp/melokeep-aligned.apk"
+          "$ZIPALIGN" -f -P 16 4 "$UNSIGNED_APK" "$ALIGNED_APK" 2>/dev/null || "$ZIPALIGN" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+
+          if [ -n "$KEYSTORE" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE" | tr -d '[:space:]' | base64 --decode > /tmp/release.keystore
+            "$APKSIGNER" sign \
+              --ks /tmp/release.keystore \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --key-pass env:KEY_PASSWORD \
+              --out "melokeep_outputs/$ASSET_NAME" \
+              "$ALIGNED_APK"
+            echo "signing_mode=release" >> "$GITHUB_OUTPUT"
+            echo "Signed with repository release keystore."
+          else
+            echo "::notice::未检测到完整的 KEYSTORE/KEY_ALIAS/KEY_PASSWORD/KEYSTORE_PASSWORD Secrets，本次使用临时回退证书签名。"
+            keytool -genkeypair -v \
+              -keystore /tmp/fallback.keystore \
+              -storetype PKCS12 \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=MeloKeep Fallback,O=MeloKeep,C=CN"
+            "$APKSIGNER" sign \
+              --ks /tmp/fallback.keystore \
+              --ks-key-alias androiddebugkey \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              --out "melokeep_outputs/$ASSET_NAME" \
+              "$ALIGNED_APK"
+            echo "signing_mode=fallback" >> "$GITHUB_OUTPUT"
+          fi
+
+          "$APKSIGNER" verify --verbose "melokeep_outputs/$ASSET_NAME"
+          ls -lh "melokeep_outputs/$ASSET_NAME"
+
+      - name: 清理临时签名文件
+        if: always()
+        run: rm -f /tmp/release.keystore /tmp/fallback.keystore /tmp/melokeep-aligned.apk
+
+      - name: 上传 Android APK Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: MeloKeep-android-apk
+          path: melokeep_outputs/${{ steps.ver.outputs.android_asset_name }}
+          if-no-files-found: error
+
+  build-ios:
+    name: 构建 iOS 未签名 IPA (SideStore/AltStore)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    outputs:
+      asset_name: ${{ steps.ver.outputs.ios_asset_name }}
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 解析构建版本号
+        id: ver
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          raw="$(printf '%s' "${INPUT_VERSION:-}" | tr -d '[:space:]')"
+          if [ -z "$raw" ]; then
+            raw="$(git tag --list "v*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          fi
+          [ -n "$raw" ] || raw="v1.0.0"
+          case "$raw" in
+            v*) ver_tag="$raw" ;;
+            *) ver_tag="v$raw" ;;
+          esac
+          clean_ver="${ver_tag#v}"
+          core_ver="${clean_ver%%-*}"
+          IFS='.' read -r major minor patch <<< "$core_ver"
+          major="${major:-1}"
+          minor="${minor:-0}"
+          patch="${patch:-0}"
+          ver_code=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
+          echo "ver_tag=$ver_tag" >> "$GITHUB_OUTPUT"
+          echo "clean_ver=$clean_ver" >> "$GITHUB_OUTPUT"
+          echo "ver_code=$ver_code" >> "$GITHUB_OUTPUT"
+          echo "ios_asset_name=MeloKeep-${ver_tag}-ios-unsigned.ipa" >> "$GITHUB_OUTPUT"
+          echo "Resolved iOS version: tag=$ver_tag, clean=$clean_ver, code=$ver_code"
+
+      - name: 配置 JDK 21 (Temurin)
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 检查 Xcode 环境
+        run: xcodebuild -version
+
+      - name: 缓存 Gradle 与 Kotlin/Native 依赖
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: gradle-ios-${{ runner.os }}-${{ hashFiles('mobile/**/*.gradle*', 'mobile/gradle/libs.versions.toml', 'mobile/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-ios-${{ runner.os }}-
+
+      - name: 编译 ComposeApp Framework 并打包 IPA
+        env:
+          MELOKEEP_VERSION_NAME: ${{ steps.ver.outputs.clean_ver }}
+          MELOKEEP_VERSION_CODE: ${{ steps.ver.outputs.ver_code }}
+          IPA_FILENAME: ${{ steps.ver.outputs.ios_asset_name }}
+        run: bash mobile/iosApp/build-ios-ipa.sh
+
+      - name: 校验 IPA 产出物
+        env:
+          ASSET_NAME: ${{ steps.ver.outputs.ios_asset_name }}
+        run: ls -lh "melokeep_outputs/$ASSET_NAME"
+
+      - name: 上传 iOS IPA Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: MeloKeep-ios-ipa
+          path: melokeep_outputs/${{ steps.ver.outputs.ios_asset_name }}
+          if-no-files-found: error
+
+  upload-to-latest-release:
+    name: 上传/覆盖移动端安装包至最新 Release
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to_latest_release == true
+    needs: [build-android, build-ios]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: 下载双端产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: MeloKeep-*
+          path: /tmp/mobile-assets
+          merge-multiple: true
+
+      - name: 上传或覆盖至 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+          ANDROID_ASSET: ${{ needs.build-android.outputs.asset_name }}
+          IOS_ASSET: ${{ needs.build-ios.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          TARGET_TAG="$(printf '%s' "${INPUT_VERSION:-}" | tr -d '[:space:]')"
+          if [ -n "$TARGET_TAG" ]; then
+            case "$TARGET_TAG" in
+              v*) ;;
+              *) TARGET_TAG="v$TARGET_TAG" ;;
+            esac
+          else
+            TARGET_TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName -q '.[0].tagName')"
+          fi
+          if [ -z "$TARGET_TAG" ]; then
+            echo "未找到目标 GitHub Release，请先通过发布流水线创建 Release 或手动指定 version。" >&2
+            exit 1
+          fi
+
+          ANDROID_SRC="/tmp/mobile-assets/$ANDROID_ASSET"
+          IOS_SRC="/tmp/mobile-assets/$IOS_ASSET"
+          ANDROID_DST="/tmp/mobile-assets/MeloKeep-${TARGET_TAG}-android.apk"
+          IOS_DST="/tmp/mobile-assets/MeloKeep-${TARGET_TAG}-ios-unsigned.ipa"
+
+          [ -f "$ANDROID_SRC" ] && [ "$ANDROID_SRC" != "$ANDROID_DST" ] && mv "$ANDROID_SRC" "$ANDROID_DST"
+          [ -f "$IOS_SRC" ] && [ "$IOS_SRC" != "$IOS_DST" ] && mv "$IOS_SRC" "$IOS_DST"
+
+          files=()
+          [ -f "$ANDROID_DST" ] && files+=("$ANDROID_DST")
+          [ -f "$IOS_DST" ] && files+=("$IOS_DST")
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "未找到可上传的安装包资产" >&2
+            exit 1
+          fi
+
+          gh release upload "$TARGET_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Uploaded mobile assets to release $TARGET_TAG"

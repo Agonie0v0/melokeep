@@ -1,0 +1,17 @@
+{
+  "indexes": {
+    "lastModified": 1678943707000,
+    "ignoredArticles": "The An A Die Das Ein Eine Les Le La",
+    "index": [
+      {
+        "name": "A",
+        "artist": [
+          {
+            "id": "ar-1",
+            "name": "Artist 1"
+          }
+        ]
+      }
+    ]
+  }
+}
