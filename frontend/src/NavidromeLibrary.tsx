@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CheckSquare,
   Disc3,
+  Download,
   Play,
   Plus,
   RefreshCw,
@@ -15,7 +16,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { api } from "./api";
+import {
+  api,
+  downloadNavidromeArchive,
+  navidromeSingleDownloadUrl,
+  triggerUrlDownload,
+  type NavidromeArchiveRequest,
+} from "./api";
 import { Cover, Button, Modal, SongTitle, SongActions } from "./components";
 import { clock } from "./lyrics";
 import {
@@ -128,6 +135,9 @@ export function NavidromeLibrary({
 
   const [multiSelect, setMultiSelect] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const [downloadNotice, setDownloadNotice] = useState("");
 
   useEffect(() => {
     const abort = new AbortController();
@@ -293,6 +303,7 @@ export function NavidromeLibrary({
     albumRequest.current = abort;
     setBusy(true);
     setError("");
+    setDownloadError("");
     try {
       setAlbum(
         await api<AlbumDetail>(
@@ -316,6 +327,7 @@ export function NavidromeLibrary({
     setSearch("");
     setOffset(0);
     setSelectedIds(new Set());
+    setDownloadError("");
     if (persist) {
       scheduleSavePreferences({ navidrome_view: { mode: nextMode } });
     }
@@ -352,6 +364,61 @@ export function NavidromeLibrary({
     setMultiSelect(false);
     setSelectedIds(new Set());
   }
+
+  async function handleArchiveDownload(
+    req: NavidromeArchiveRequest,
+    fallbackFilename: string,
+    successLabel: string,
+  ) {
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadError("");
+    setDownloadNotice("");
+    try {
+      const filename = await downloadNavidromeArchive(req, fallbackFilename);
+      setDownloadNotice(`${successLabel}（${filename}）`);
+    } catch (e) {
+      setDownloadError((e as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function handleSingleDownload(track: Track) {
+    setDownloadError("");
+    setDownloadNotice("");
+    const ident = track.source_id || track.id;
+    triggerUrlDownload(navidromeSingleDownloadUrl(ident));
+    setDownloadNotice(`已开始下载「${track.title}」`);
+  }
+
+  function handleDownloadSelected() {
+    if (!selectedTracks.length || downloading) return;
+    if (selectedTracks.length === 1) {
+      handleSingleDownload(selectedTracks[0]);
+      return;
+    }
+    void handleArchiveDownload(
+      { song_ids: selectedTracks.map((t) => t.source_id || t.id) },
+      "navidrome-selected.zip",
+      `已打包下载所选 ${selectedTracks.length} 首歌曲`,
+    );
+  }
+
+  function handleDownloadAll() {
+    if (downloading) return;
+    void handleArchiveDownload(
+      { all: true, query: query || "" },
+      "navidrome-all.zip",
+      query ? `已打包下载“${query}”的全部匹配歌曲` : "已打包下载全部歌曲",
+    );
+  }
+
+  const isPaginatedSongList =
+    !album &&
+    !artist &&
+    (mode === "songs" || Boolean(query)) &&
+    (hasMore || offset > 0);
 
   return (
     <section
@@ -396,6 +463,16 @@ export function NavidromeLibrary({
       {deleteNotice && (
         <p role="status" className="setting-help">
           {deleteNotice}
+        </p>
+      )}
+      {downloadError && (
+        <p role="alert" className="library-error">
+          {downloadError}
+        </p>
+      )}
+      {downloadNotice && (
+        <p role="status" className="library-inline-status">
+          {downloadNotice}
         </p>
       )}
       <div className="library-toolbar">
@@ -589,10 +666,37 @@ export function NavidromeLibrary({
               加入歌单
             </button>
           )}
+          <button
+            type="button"
+            className="secondary"
+            disabled={!selectedTracks.length || downloading}
+            onClick={handleDownloadSelected}
+          >
+            <Download />
+            {downloading ? "正在打包…" : `下载所选 (${selectedTracks.length})`}
+          </button>
+          {isPaginatedSongList && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={downloading}
+              title="打包下载当前筛选范围内的全部歌曲（单次最多 500 首）"
+              onClick={handleDownloadAll}
+            >
+              <Download />
+              {downloading ? "正在打包…" : "下载全部"}
+            </button>
+          )}
           <button type="button" className="secondary" onClick={exitMultiSelect}>
             <X />
             退出多选
           </button>
+          {isPaginatedSongList && (
+            <span className="nav-multi-hint">
+              当前页显示 {shownTracks.length}{" "}
+              首；「下载全部」将打包全部匹配歌曲（单次最多 500 首）。
+            </span>
+          )}
         </div>
       )}
       {error ? (
@@ -642,6 +746,21 @@ export function NavidromeLibrary({
                   >
                     <Plus />
                     全部加入待播
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!album.tracks.length || downloading}
+                    onClick={() =>
+                      void handleArchiveDownload(
+                        { album_id: album.id },
+                        `${album.name || "navidrome-album"}.zip`,
+                        `已打包下载专辑「${album.name}」`,
+                      )
+                    }
+                  >
+                    <Download />
+                    {downloading ? "正在打包…" : "下载全辑"}
                   </button>
                 </div>
               </div>
@@ -709,6 +828,17 @@ export function NavidromeLibrary({
                           savePlaylist ? () => savePlaylist([track]) : undefined
                         }
                       >
+                        <a
+                          className="icon-button library-download"
+                          aria-label={`下载 ${track.title}`}
+                          href={navidromeSingleDownloadUrl(
+                            track.source_id || track.id,
+                          )}
+                          download
+                        >
+                          <Download />
+                          <span>下载</span>
+                        </a>
                         {canDelete && (
                           <Button
                             label={`删除原文件 ${track.title}`}
@@ -829,6 +959,17 @@ export function NavidromeLibrary({
                                 : undefined
                             }
                           >
+                            <a
+                              className="icon-button library-download"
+                              aria-label={`下载 ${track.title}`}
+                              href={navidromeSingleDownloadUrl(
+                                track.source_id || track.id,
+                              )}
+                              download
+                            >
+                              <Download />
+                              <span>下载</span>
+                            </a>
                             {canDelete && (
                               <Button
                                 label={`删除原文件 ${track.title}`}

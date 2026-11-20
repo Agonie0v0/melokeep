@@ -68,3 +68,109 @@ export async function api<T>(
   }
   return data as T;
 }
+
+export interface NavidromeArchiveRequest {
+  song_ids?: string[];
+  all?: boolean;
+  query?: string;
+  album_id?: string;
+}
+
+export function navidromeSingleDownloadUrl(ident: string): string {
+  return `/api/navidrome/download/${encodeURIComponent(ident)}`;
+}
+
+export function parseContentDispositionFilename(
+  header: string | null | undefined,
+  fallback = "navidrome-tracks.zip",
+): string {
+  if (!header) return fallback;
+  const utf8Match = header.match(
+    /filename\*\s*=\s*(?:UTF-8|utf-8)?''([^;\r\n]+)/i,
+  );
+  if (utf8Match?.[1]) {
+    try {
+      const decoded = decodeURIComponent(utf8Match[1].trim())
+        .replace(/[/\\?%*:|"<>]/g, "_")
+        .trim();
+      if (decoded) return decoded;
+    } catch {
+      /* Ignore malformed percent-encoding and try plain filename=. */
+    }
+  }
+  const plainMatch =
+    header.match(/filename\s*=\s*"([^"\r\n]+)"/i) ||
+    header.match(/filename\s*=\s*([^;\r\n]+)/i);
+  if (plainMatch?.[1]) {
+    const cleaned = plainMatch[1]
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .replace(/[/\\?%*:|"<>]/g, "_")
+      .trim();
+    if (cleaned) return cleaned;
+  }
+  return fallback;
+}
+
+export function triggerBlobDownload(blob: Blob, filename: string) {
+  if (typeof document === "undefined" || typeof URL === "undefined") return;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } else {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export function triggerUrlDownload(url: string) {
+  if (typeof document === "undefined") return;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+export async function downloadNavidromeArchive(
+  req: NavidromeArchiveRequest,
+  fallbackFilename = "navidrome-tracks.zip",
+): Promise<string> {
+  const response = await fetch("/api/navidrome/downloads/archive", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-MeloKeep-Request": "1",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req),
+  });
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("melokeep-login"));
+    }
+    const data = await response
+      .json()
+      .catch(() => ({ detail: "打包下载失败，请检查服务状态" }));
+    throw new ApiError(
+      formatApiDetail((data as Record<string, unknown>)?.detail) ||
+        `下载失败 (${response.status})`,
+      response.status,
+    );
+  }
+  const blob = await response.blob();
+  const filename = parseContentDispositionFilename(
+    response.headers.get("Content-Disposition"),
+    fallbackFilename,
+  );
+  triggerBlobDownload(blob, filename);
+  return filename;
+}

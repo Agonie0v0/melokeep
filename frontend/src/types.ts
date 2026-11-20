@@ -180,6 +180,15 @@ export interface LibraryFilesPage {
   folders?: { root: string; folder: string }[];
 }
 
+export interface LibraryRefreshResult {
+  roots_scanned: number;
+  scanned_files: number;
+  unchanged_files: number;
+  updated_or_new: number;
+  marked_missing: number;
+  unhealthy_roots?: string[];
+}
+
 export interface NavidromeConfig {
   enabled: boolean;
   url: string;

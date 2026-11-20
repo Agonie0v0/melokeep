@@ -4,6 +4,7 @@ import {
   buildKeepExistingChoices,
   countPendingReviewItems,
   extractScopeDirFromFolderKey,
+  formatLibraryRefreshNotice,
   getJobProgress,
   hasReadyJobItems,
   isFinishedJobStatus,
@@ -121,4 +122,30 @@ test("buildKeepExistingChoices and item helpers only select needs_review items",
   );
   assert.deepEqual(buildKeepExistingChoices(undefined), {});
   assert.equal(hasReadyJobItems(undefined), false);
+});
+
+test("formatLibraryRefreshNotice summarizes scanned, updated, missing, and unhealthy roots", () => {
+  assert.equal(
+    formatLibraryRefreshNotice({
+      roots_scanned: 1,
+      scanned_files: 42,
+      unchanged_files: 39,
+      updated_or_new: 2,
+      marked_missing: 1,
+      unhealthy_roots: [],
+    }),
+    "已刷新音乐库：共扫描 42 首，新增/更新 2 首，移除 1 条失效记录",
+  );
+  assert.equal(
+    formatLibraryRefreshNotice({
+      roots_scanned: 2,
+      scanned_files: 10,
+      unchanged_files: 10,
+      updated_or_new: 0,
+      marked_missing: 0,
+      unhealthy_roots: ["/mnt/offline"],
+    }),
+    "已刷新音乐库：共扫描 10 首，新增/更新 0 首，移除 0 条失效记录（异常目录：/mnt/offline）",
+  );
+  assert.equal(formatLibraryRefreshNotice(null), "已刷新音乐库");
 });

@@ -1,4 +1,4 @@
-import type { LibraryJob, LibraryJobItem } from "./types";
+import type { LibraryJob, LibraryJobItem, LibraryRefreshResult } from "./types";
 
 export const RUNNING_JOB_STATUSES = new Set([
   "queued",
@@ -162,4 +162,20 @@ export function hasReadyJobItems(
   return items.some(
     (item) => item.status === "ready" || item.status === "preview_ready",
   );
+}
+
+export function formatLibraryRefreshNotice(
+  res: Partial<LibraryRefreshResult> | null | undefined,
+): string {
+  if (!res) return "已刷新音乐库";
+  const scanned = Number(res.scanned_files) || 0;
+  const updated = Number(res.updated_or_new) || 0;
+  const missing = Number(res.marked_missing) || 0;
+  const base = `已刷新音乐库：共扫描 ${scanned} 首，新增/更新 ${updated} 首，移除 ${missing} 条失效记录`;
+  const unhealthy = Array.isArray(res.unhealthy_roots)
+    ? res.unhealthy_roots.filter((r) => typeof r === "string" && r.trim())
+    : [];
+  return unhealthy.length
+    ? `${base}（异常目录：${unhealthy.join("、")}）`
+    : base;
 }

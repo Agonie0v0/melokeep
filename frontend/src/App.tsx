@@ -39,6 +39,7 @@ import {
   CircleAlert,
 } from "lucide-react";
 import { ApiError, api } from "./api";
+import { formatLibraryRefreshNotice } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
 import { selectResults } from "./results";
 import { parseLrc, clock, type LyricLine } from "./lyrics";
@@ -68,6 +69,7 @@ import type {
   DownloadJob,
   LibraryFile,
   LibraryFilesPage,
+  LibraryRefreshResult,
   SourceStatus,
   SavedPlaylist,
   PlaylistSummary,
@@ -249,9 +251,11 @@ export function App() {
   const [filesCursor, setFilesCursor] = useState<string | null>(null);
   const [filesIndexing, setFilesIndexing] = useState(false);
   const [filesLoadingMore, setFilesLoadingMore] = useState(false);
+  const [filesRefreshing, setFilesRefreshing] = useState(false);
+  const filesRefreshingRef = useRef(false);
   const [libraryFolders, setLibraryFolders] = useState<
-    { root: string; folder: string }[]
-  >([]);
+    { root: string; folder: string }[] | undefined
+  >(undefined);
   const libraryFiltersRef = useRef({
     query: "",
     root: "",
@@ -266,6 +270,7 @@ export function App() {
     options: {
       cursor?: string | null;
       filters?: { query: string; root: string; folder: string; sort: string };
+      rescan?: boolean;
     } = {},
   ) {
     const filters = options.filters ?? libraryFiltersRef.current;
@@ -281,11 +286,12 @@ export function App() {
     if (filters.root) params.set("root", filters.root);
     if (filters.folder) params.set("folder", filters.folder);
     if (cursor) params.set("cursor", cursor);
+    if (options.rescan) params.set("rescan", "1");
     try {
       const page = await api<LibraryFilesPage>(
         `/library/files?${params.toString()}`,
       );
-      if (generation !== libraryGenRef.current) return;
+      if (generation !== libraryGenRef.current) return false;
       setFiles((previous) => {
         if (!cursor) return page.items;
         const seen = new Set(previous.map((item) => item.path));
@@ -299,18 +305,53 @@ export function App() {
       if (Array.isArray(page.folders)) {
         setLibraryFolders(page.folders);
       }
+      return true;
     } catch (error) {
-      if (generation !== libraryGenRef.current) return;
+      if (generation !== libraryGenRef.current) return false;
       if (error instanceof ApiError && error.status === 409 && cursor) {
         setFilesCursor(null);
-        await loadLibraryFiles({ cursor: null, filters });
-        return;
+        return await loadLibraryFiles({ cursor: null, filters });
       }
       fail(error);
+      return false;
     } finally {
       if (cursor && generation === libraryGenRef.current) {
         setFilesLoadingMore(false);
       }
+    }
+  }
+  async function refreshLibraryFiles() {
+    if (filesRefreshingRef.current) return;
+    filesRefreshingRef.current = true;
+    setFilesRefreshing(true);
+    try {
+      let summaryNotice = "";
+      let useRescanFallback = false;
+      try {
+        const res = await api<LibraryRefreshResult>("/library/refresh", "POST");
+        summaryNotice = formatLibraryRefreshNotice(res);
+      } catch (err) {
+        if (
+          err instanceof ApiError &&
+          (err.status === 404 || err.status === 405)
+        ) {
+          useRescanFallback = true;
+        } else {
+          throw err;
+        }
+      }
+      const loaded = await loadLibraryFiles({
+        cursor: null,
+        rescan: useRescanFallback,
+      });
+      if (loaded) {
+        setNotice(summaryNotice || "已重新扫描并刷新音乐库");
+      }
+    } catch (err) {
+      fail(err);
+    } finally {
+      filesRefreshingRef.current = false;
+      setFilesRefreshing(false);
     }
   }
   const [savedPlaylists, setSavedPlaylists] = useState<PlaylistSummary[]>([]),
@@ -3465,7 +3506,11 @@ export function App() {
                 }
               }}
               onNotice={setNotice}
-              refresh={() => void loadLibraryFiles({ cursor: null })}
+              refresh={async () => {
+                await loadLibraryFiles({ cursor: null });
+              }}
+              rescan={() => refreshLibraryFiles()}
+              rescanning={filesRefreshing}
               play={(track, context) => void play(track, context)}
               playAll={(items) => void playCollection(items)}
               queue={(items) => void addToPlaylist(items)}

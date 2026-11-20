@@ -274,6 +274,8 @@ export function MusicLibrary({
   busy,
   error,
   refresh,
+  rescan,
+  rescanning = false,
   play,
   playAll,
   queue,
@@ -301,6 +303,8 @@ export function MusicLibrary({
   busy: boolean;
   error: string;
   refresh: () => void | Promise<void>;
+  rescan?: () => void | Promise<void>;
+  rescanning?: boolean;
   play: (track: Track, context?: Track[]) => void;
   playAll: (tracks: Track[]) => void;
   queue: (tracks: Track[]) => void;
@@ -380,8 +384,18 @@ export function MusicLibrary({
   const [knownFolders, setKnownFolders] = useState<Record<string, FolderEntry>>(
     {},
   );
+  const [localRefreshing, setLocalRefreshing] = useState(false);
+  const pendingFolderRebuildRef = useRef(false);
+  const isRefreshing = rescanning || localRefreshing;
   useEffect(() => {
+    let resetDeletedActiveFolder = false;
     setKnownFolders((prev) => {
+      const shouldRebuildFresh =
+        pendingFolderRebuildRef.current ||
+        serverFolders !== undefined ||
+        (folder === "all" && !query.trim());
+      pendingFolderRebuildRef.current = false;
+
       if (
         files.length === 0 &&
         !(serverFolders && serverFolders.length > 0) &&
@@ -390,14 +404,15 @@ export function MusicLibrary({
       ) {
         return Object.keys(prev).length ? {} : prev;
       }
-      let changedMap = false;
-      const next = { ...prev };
+
+      const next: Record<string, FolderEntry> = shouldRebuildFresh
+        ? {}
+        : { ...prev };
       for (const file of files) {
         const norm = normalizeFolderPath(file.folder);
         const key = makeFolderKey(file.root || "", norm);
         if (!next[key]) {
           next[key] = { root: file.root || "", name: norm };
-          changedMap = true;
         }
       }
       for (const item of serverFolders ?? []) {
@@ -406,11 +421,39 @@ export function MusicLibrary({
         const key = makeFolderKey(root, norm);
         if (!next[key]) {
           next[key] = { root, name: norm };
-          changedMap = true;
         }
       }
-      return changedMap ? next : prev;
+
+      if (
+        shouldRebuildFresh &&
+        folder !== "all" &&
+        prev[folder] &&
+        !next[folder]
+      ) {
+        resetDeletedActiveFolder = true;
+      }
+
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length &&
+        prevKeys.every(
+          (k) =>
+            next[k] &&
+            next[k].root === prev[k].root &&
+            next[k].name === prev[k].name,
+        )
+      ) {
+        return prev;
+      }
+      return next;
     });
+
+    if (resetDeletedActiveFolder) {
+      setFolder("all");
+      setSelected([]);
+      notifyFilters(query, "all", sort);
+    }
   }, [files, serverFolders, folder, query]);
 
   const folders = Object.entries(knownFolders).sort((a, b) =>
@@ -868,12 +911,17 @@ export function MusicLibrary({
         <button
           className="secondary"
           onClick={() => {
+            if (isRefreshing || busy || loadingMore) return;
+            pendingFolderRebuildRef.current = true;
+            setLocalRefreshing(true);
             setKnownFolders({});
-            void refresh();
+            void Promise.resolve(rescan ? rescan() : refresh()).finally(() => {
+              setLocalRefreshing(false);
+            });
           }}
-          disabled={busy || loadingMore}
+          disabled={busy || loadingMore || isRefreshing}
         >
-          刷新音乐库
+          {isRefreshing ? "正在扫描刷新…" : "刷新音乐库"}
         </button>
       </div>
       {indexing && (
