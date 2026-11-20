@@ -13,6 +13,7 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -2081,20 +2082,20 @@ class MeloKeepSharedTest {
 
 		// Controller refreshLibraryAndReload with unhealthyRoots reloads files and sets noticeMessage
 		includeUnhealthy = true
-		var successResult: Result<MeloLibraryRefreshResult>? = null
+		val successDeferred = CompletableDeferred<Result<MeloLibraryRefreshResult>>()
 		controller.refreshLibraryAndReload(query = "New", folder = "Fresh") {
-			successResult = it
+			successDeferred.complete(it)
 		}
-		withContext(Dispatchers.Default) {
+		val successResult = withContext(Dispatchers.Default) {
 			withTimeout(5_000L) {
+				val res = successDeferred.await()
 				controller.state.first {
-					!it.filesLoading &&
-						it.libraryFiles.size == 1 &&
-						successResult != null
+					!it.filesLoading && it.libraryFiles.size == 1
 				}
+				res
 			}
 		}
-		assertTrue(successResult!!.isSuccess)
+		assertTrue(successResult.isSuccess)
 		assertEquals(2, refreshCalledCount)
 		assertEquals(1, filesCalledCount)
 		assertEquals("New", controller.state.value.fileQuery)
@@ -2108,18 +2109,18 @@ class MeloKeepSharedTest {
 
 		// Controller failure surfaces errorMessage and invokes onCompleted failure
 		refreshShouldFail = true
-		var failResult: Result<MeloLibraryRefreshResult>? = null
-		controller.refreshLibraryAndReload { failResult = it }
-		withContext(Dispatchers.Default) {
+		val failDeferred = CompletableDeferred<Result<MeloLibraryRefreshResult>>()
+		controller.refreshLibraryAndReload { failDeferred.complete(it) }
+		val failResult = withContext(Dispatchers.Default) {
 			withTimeout(5_000L) {
+				val res = failDeferred.await()
 				controller.state.first {
-					!it.filesLoading &&
-						it.errorMessage == "曲库正在扫描中" &&
-						failResult != null
+					!it.filesLoading && it.errorMessage == "曲库正在扫描中"
 				}
+				res
 			}
 		}
-		assertTrue(failResult!!.isFailure)
+		assertTrue(failResult.isFailure)
 
 		controllerScope.cancel()
 		client.close()
