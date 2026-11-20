@@ -21,6 +21,7 @@ object WorkNames {
 object WorkKeys {
 	const val FORCE = "force"
 	const val PERIODIC = "periodic"
+	const val MANUAL = "manual"
 	const val STORAGE = "storage"
 
 	const val PROGRESS = "progress"

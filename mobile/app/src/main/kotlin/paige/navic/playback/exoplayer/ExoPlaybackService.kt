@@ -78,8 +78,8 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 
 		setMediaNotificationProvider(notificationProvider)
 
-		stateHolder.playerInstance.let { player ->
-			player as Player
+		stateHolder.playerInstance.let { exoPlayer ->
+			val player: Player = exoPlayer
 			statusBarLyricsController = StatusBarLyricsController(
 				serviceScope, lyricsRepository, preferenceManager, notificationProvider
 			).also { it.attach(player) }
@@ -96,6 +96,7 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 
 			exoEqualizerManager.apply {
 				applyEqualizerMode(equalizerManager.config.value.mode)
+				attachSession(exoPlayer.audioSessionId)
 				scope.launch(Dispatchers.Main) {
 					equalizerManager.config.collect { updateConfig() }
 				}

@@ -183,7 +183,8 @@ fun ArtistListScreenGridItem(
 	onDeselect: () -> Unit,
 	onPlayNext: () -> Unit,
 	onAddToQueue: () -> Unit,
-	onSetStarred: (starred: Boolean) -> Unit
+	onSetStarred: (starred: Boolean) -> Unit,
+	onOpen: (() -> Unit)? = null
 ) {
 	val backStack = LocalNavStack.current
 
@@ -192,6 +193,7 @@ fun ArtistListScreenGridItem(
 	Box(modifier) {
 		ArtGridItem(
 			onClick = dropUnlessResumed {
+				onOpen?.invoke()
 				backStack.add(Screen.ArtistDetail(artist.id))
 			},
 			onLongClick = onSelect,

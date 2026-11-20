@@ -107,7 +107,8 @@ class SyncManager(
 				Logger.i("SyncManager", "Syncing now because we haven't synced before")
 				enqueueManualSync(
 					force = false,
-					policy = ExistingWorkPolicy.KEEP
+					policy = ExistingWorkPolicy.KEEP,
+					manualSync = true
 				)
 			}
 		}
@@ -122,7 +123,8 @@ class SyncManager(
 				.setInputData(
 					workDataOf(
 						WorkKeys.FORCE to false,
-						WorkKeys.PERIODIC to true
+						WorkKeys.PERIODIC to true,
+						WorkKeys.MANUAL to false
 					)
 				)
 				.setBackoffCriteria(
@@ -145,16 +147,23 @@ class SyncManager(
 
 		schedulePeriodicWork()
 		preferenceManager.lastFullSyncTime = 0
-		enqueueManualSync(force = true)
+		enqueueManualSync(force = true, manualSync = true)
 	}
 
 	private fun enqueueManualSync(
 		force: Boolean,
-		policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE
+		policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE,
+		manualSync: Boolean = true
 	) {
 		val request = OneTimeWorkRequestBuilder<LibrarySyncWorker>()
 			.setConstraints(networkConstraints())
-			.setInputData(workDataOf(WorkKeys.FORCE to force))
+			.setInputData(
+				workDataOf(
+					WorkKeys.FORCE to force,
+					WorkKeys.PERIODIC to false,
+					WorkKeys.MANUAL to manualSync
+				)
+			)
 			.setBackoffCriteria(
 				BackoffPolicy.EXPONENTIAL,
 				30,

@@ -59,6 +59,12 @@ fun LyricsScreenKaraokeText(
 
 	val lyricsBeatByBeat = preferenceManager.lyricsBeatByBeat
 	val lyricsBrightInactive = preferenceManager.lyricsBrightInactive
+	val fontSizeSp = preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f)
+	val activeColor = remember(preferenceManager.lyricsActiveColorHex) {
+		parseLyricsHexColor(preferenceManager.lyricsActiveColorHex) ?: Color.White
+	}
+	val customInactiveAlpha = preferenceManager.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
+	val useCenterAlign = preferenceManager.lyricsTextAlign == "center"
 
 	val isRtl = textLayoutResult?.let { layout ->
 		(0 until layout.lineCount).any { lineIndex ->
@@ -66,10 +72,16 @@ fun LyricsScreenKaraokeText(
 		}
 	} ?: false
 
+	val resolvedTextAlign = when {
+		useCenterAlign -> TextAlign.Center
+		isRtl -> TextAlign.End
+		else -> TextAlign.Start
+	}
+
 	val inactiveAlpha = when {
 		!isSynced -> 1f
-		lyricsBrightInactive -> 0.9f
-		else -> 0.35f
+		lyricsBrightInactive -> maxOf(customInactiveAlpha, 0.85f)
+		else -> customInactiveAlpha
 	}
 
 	val alphaTransition by animateFloatAsState(
@@ -78,6 +90,7 @@ fun LyricsScreenKaraokeText(
 	)
 
 	val textStyle = MaterialTheme.typography.headlineLargeEmphasized.copy(
+		lineHeight = (fontSizeSp * 1.28f).sp,
 		lineBreak = LineBreak(
 			strategy = LineBreak.Strategy.HighQuality,
 			strictness = LineBreak.Strictness.Strict,
@@ -85,15 +98,20 @@ fun LyricsScreenKaraokeText(
 		)
 	)
 
+	val baseColor = when {
+		isActive -> activeColor.copy(alpha = customInactiveAlpha)
+		lyricsBrightInactive -> activeColor.copy(alpha = alphaTransition)
+		else -> MaterialTheme.colorScheme.onSurface.copy(alpha = alphaTransition)
+	}
+
 	Box(modifier = modifier.clickable { onClick() }) {
 		Text(
 			text = text,
-			fontSize = 32.sp,
+			fontSize = fontSizeSp.sp,
 			fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
-			textAlign = if (isRtl) TextAlign.End else TextAlign.Start,
+			textAlign = resolvedTextAlign,
 			style = textStyle,
-			color = if (lyricsBrightInactive) Color.White.copy(alpha = alphaTransition * 0.4f)
-			else MaterialTheme.colorScheme.onSurface.copy(alpha = alphaTransition * 0.4f),
+			color = baseColor,
 			onTextLayout = { textLayoutResult = it },
 			modifier = Modifier.fillMaxWidth()
 		)
@@ -101,11 +119,11 @@ fun LyricsScreenKaraokeText(
 		if (isActive) {
 			Text(
 				text = text,
-				fontSize = 32.sp,
+				fontSize = fontSizeSp.sp,
 				fontWeight = FontWeight.Bold,
-				textAlign = if (isRtl) TextAlign.End else TextAlign.Start,
+				textAlign = resolvedTextAlign,
 				style = textStyle,
-				color = Color.White,
+				color = activeColor,
 				modifier = Modifier
 					.fillMaxWidth()
 					.alpha(alphaTransition)

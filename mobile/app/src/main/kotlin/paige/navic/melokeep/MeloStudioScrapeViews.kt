@@ -47,9 +47,11 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -766,7 +768,15 @@ private fun LibraryJobSummaryRow(
 						) {
 							Text("对比 / 候选", style = MaterialTheme.typography.labelMedium)
 						}
-						if (canApply) {
+						if (statusLower == "needs_review") {
+							FilledTonalButton(
+								onClick = onClick,
+								contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+								modifier = Modifier.height(30.dp)
+							) {
+								Text("去确认候选", style = MaterialTheme.typography.labelMedium)
+							}
+						} else if (canApply) {
 							FilledTonalButton(
 								onClick = onApply,
 								contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
@@ -816,10 +826,14 @@ internal fun StudioLibraryFilePickerSheet(
 	onSelectAllFiles: () -> Unit,
 	onClearSelection: () -> Unit,
 	onPreviewScrape: () -> Unit,
-	onDirectOrganize: () -> Unit
+	onDirectOrganize: () -> Unit,
+	onScrapeScope: (autoApply: Boolean) -> Unit
 ) {
 	var queryInput by remember(state.fileQuery) { mutableStateOf(state.fileQuery) }
 	val focusManager = LocalFocusManager.current
+	val hasMoreFiles = !state.nextCursor.isNullOrBlank()
+	val allLoadedSelected = state.libraryFiles.isNotEmpty() &&
+		state.libraryFiles.all { it.path in state.selectedFilePaths }
 
 	ModalBottomSheet(
 		onDismissRequest = onDismissRequest,
@@ -848,7 +862,7 @@ internal fun StudioLibraryFilePickerSheet(
 					fontWeight = FontWeight.SemiBold
 				)
 				TextButton(
-					onClick = if (state.selectedFilePaths.size == state.libraryFiles.size && state.libraryFiles.isNotEmpty()) {
+					onClick = if (allLoadedSelected) {
 						onClearSelection
 					} else {
 						onSelectAllFiles
@@ -856,13 +870,21 @@ internal fun StudioLibraryFilePickerSheet(
 					contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
 				) {
 					Text(
-						if (state.selectedFilePaths.size == state.libraryFiles.size && state.libraryFiles.isNotEmpty()) {
+						if (allLoadedSelected) {
 							"取消全选"
 						} else {
-							"全选当前"
+							"全选已加载 (${state.libraryFiles.size})"
 						}
 					)
 				}
+			}
+
+			if (hasMoreFiles) {
+				Text(
+					text = "曲库分页未全部加载（已加载 ${state.libraryFiles.size} 首），可继续“加载更多文件”或下方整目录/全库送往刮削",
+					style = MaterialTheme.typography.labelSmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant
+				)
 			}
 
 			Surface(
@@ -1101,6 +1123,19 @@ internal fun StudioLibraryFilePickerSheet(
 					Text("直接整理归档", maxLines = 1)
 				}
 			}
+
+			val scopeLabel = if (state.currentFolder.isNullOrBlank()) {
+				"全库送往刮削"
+			} else {
+				"整目录送往刮削"
+			}
+			FilledTonalButton(
+				modifier = Modifier.fillMaxWidth(),
+				enabled = !state.jobsLoading,
+				onClick = { onScrapeScope(false) }
+			) {
+				Text(scopeLabel, maxLines = 1)
+			}
 		}
 	}
 }
@@ -1154,10 +1189,16 @@ private fun LibraryFileRow(
 internal fun StudioScrapeDiffSheet(
 	job: MeloLibraryJob?,
 	jobsLoading: Boolean,
+	errorMessage: String?,
+	noticeMessage: String?,
 	fileTagVersions: Map<String, List<MeloTagVersion>>,
 	hostNavBottom: Dp,
 	onDismissRequest: () -> Unit,
+	onClearError: () -> Unit,
+	onClearNotice: () -> Unit,
 	onPreviewCandidate: (jobId: String, itemKey: String, candidateId: String) -> Unit,
+	onSearchCandidates: (jobId: String, itemId: String, query: String) -> Unit,
+	onKeepExistingPending: (jobId: String) -> Unit,
 	onLoadFileVersions: (path: String) -> Unit,
 	onRestoreFileVersion: (jobId: String, itemId: String) -> Unit,
 	onApplyJob: (jobId: String, choices: Map<String, String>, autoTriggerScan: Boolean) -> Unit,
@@ -1167,12 +1208,22 @@ internal fun StudioScrapeDiffSheet(
 	val candidateChoices = remember(job?.id) {
 		mutableStateMapOf<String, String>()
 	}
+	val lastServerChoices = remember(job?.id) {
+		mutableStateMapOf<String, String>()
+	}
 	LaunchedEffect(job?.id, job?.items) {
 		job?.items?.forEach { item ->
 			val key = item.id.ifBlank { item.originalPath.ifBlank { item.path } }
-			val chosenId = item.chosen ?: item.candidates.firstOrNull()?.id
-			if (key.isNotBlank() && !chosenId.isNullOrBlank() && key !in candidateChoices) {
-				candidateChoices[key] = chosenId
+			if (key.isNotBlank()) {
+				val serverChosen = item.chosen?.takeIf { it.isNotBlank() }
+				val prevServerChosen = lastServerChoices[key]
+				if (serverChosen != null) {
+					candidateChoices[key] = serverChosen
+					lastServerChoices[key] = serverChosen
+				} else if (prevServerChosen != null) {
+					candidateChoices.remove(key)
+					lastServerChoices.remove(key)
+				}
 			}
 		}
 	}
@@ -1202,9 +1253,21 @@ internal fun StudioScrapeDiffSheet(
 		}
 
 		val statusLower = job.status.trim().lowercase()
-		val canApply = statusLower in (STUDIO_SCRAPE_REVIEW_STATES + "partial") ||
-			job.items.any { it.status.trim().lowercase() in STUDIO_SCRAPE_REVIEW_STATES }
-		val canCancel = statusLower in STUDIO_SCRAPE_RUNNING_STATES && statusLower != "restoring"
+		val isRunning = statusLower in STUDIO_SCRAPE_RUNNING_STATES ||
+			statusLower in MeloStudioUiState.RUNNING_LIBRARY_JOB_STATUSES
+		val hasPendingReviewItems = job.items.any { it.status.trim().lowercase() == "needs_review" }
+		val readyCount = job.items.count { item ->
+			val key = item.id.ifBlank { item.originalPath.ifBlank { item.path } }
+			val selected = candidateChoices[key] ?: item.chosen.orEmpty()
+			val itemStatus = item.status.trim().lowercase()
+			itemStatus !in setOf("failed", "error", "cancelled", "skipped") &&
+				(itemStatus in setOf("preview_ready", "ready") || selected.isNotBlank())
+		}
+		val canApply = !isRunning && (
+			statusLower in (STUDIO_SCRAPE_REVIEW_STATES + "partial") ||
+				job.items.any { it.status.trim().lowercase() in STUDIO_SCRAPE_REVIEW_STATES }
+			)
+		val canCancel = isRunning && statusLower != "restoring"
 		val canRetry = statusLower in setOf("failed", "partial", "needs_attention")
 
 		Column(
@@ -1214,6 +1277,73 @@ internal fun StudioScrapeDiffSheet(
 				.padding(bottom = maxOf(hostNavBottom, 16.dp) + 16.dp),
 			verticalArrangement = Arrangement.spacedBy(10.dp)
 		) {
+			if (!errorMessage.isNullOrBlank()) {
+				Surface(
+					shape = RoundedCornerShape(12.dp),
+					color = MaterialTheme.colorScheme.errorContainer,
+					border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f))
+				) {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp, vertical = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween
+					) {
+						Text(
+							text = errorMessage,
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onErrorContainer,
+							modifier = Modifier.weight(1f)
+						)
+						IconButton(
+							onClick = onClearError,
+							modifier = Modifier.size(24.dp)
+						) {
+							Icon(
+								imageVector = Icons.Outlined.Close,
+								contentDescription = "关闭提示",
+								tint = MaterialTheme.colorScheme.onErrorContainer,
+								modifier = Modifier.size(15.dp)
+							)
+						}
+					}
+				}
+			}
+
+			if (!noticeMessage.isNullOrBlank()) {
+				Surface(
+					shape = RoundedCornerShape(12.dp),
+					color = MaterialTheme.colorScheme.primaryContainer
+				) {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp, vertical = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween
+					) {
+						Text(
+							text = noticeMessage,
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onPrimaryContainer,
+							modifier = Modifier.weight(1f)
+						)
+						IconButton(
+							onClick = onClearNotice,
+							modifier = Modifier.size(24.dp)
+						) {
+							Icon(
+								imageVector = Icons.Outlined.Close,
+								contentDescription = "关闭提示",
+								tint = MaterialTheme.colorScheme.onPrimaryContainer,
+								modifier = Modifier.size(15.dp)
+							)
+						}
+					}
+				}
+			}
+
 			Row(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.SpaceBetween,
@@ -1233,6 +1363,35 @@ internal fun StudioScrapeDiffSheet(
 				}
 				if (jobsLoading) {
 					CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+				}
+			}
+
+			if (isRunning) {
+				if (job.total > 0) {
+					LinearProgressIndicator(
+						progress = { (job.processed.toFloat() / job.total.toFloat()).coerceIn(0f, 1f) },
+						modifier = Modifier
+							.fillMaxWidth()
+							.height(4.dp)
+							.clip(CircleShape)
+					)
+				} else {
+					LinearProgressIndicator(
+						modifier = Modifier
+							.fillMaxWidth()
+							.height(4.dp)
+							.clip(CircleShape)
+					)
+				}
+			}
+
+			if (hasPendingReviewItems && !isRunning) {
+				OutlinedButton(
+					onClick = { onKeepExistingPending(job.id) },
+					enabled = !jobsLoading,
+					modifier = Modifier.fillMaxWidth()
+				) {
+					Text("全部待确认项保留现有标签")
 				}
 			}
 
@@ -1294,6 +1453,10 @@ internal fun StudioScrapeDiffSheet(
 								candidateChoices[itemKey] = candId
 								onPreviewCandidate(job.id, itemKey, candId)
 							},
+							onSearchCandidates = { searchQuery ->
+								val targetItemId = item.id.ifBlank { itemKey }
+								onSearchCandidates(job.id, targetItemId, searchQuery)
+							},
 							onToggleVersions = {
 								val next = !versionsExpanded
 								expandedVersionPaths[versionTargetPath] = next
@@ -1335,6 +1498,14 @@ internal fun StudioScrapeDiffSheet(
 				}
 			}
 
+			if (canApply && readyCount == 0) {
+				Text(
+					text = "暂无可归档曲目：请先为待确认曲目选择候选、点击「保留现有标签」或重新搜索候选",
+					style = MaterialTheme.typography.labelSmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant
+				)
+			}
+
 			Row(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1359,16 +1530,21 @@ internal fun StudioScrapeDiffSheet(
 				if (canApply) {
 					Button(
 						onClick = {
-							onApplyJob(job.id, candidateChoices.toMap(), autoScanAfterApply)
+							onApplyJob(job.id, candidateChoices.filterValues { it.isNotBlank() }, autoScanAfterApply)
 						},
-						enabled = !jobsLoading,
+						enabled = !jobsLoading && !isRunning && readyCount > 0,
 						modifier = Modifier.weight(1.6f)
 					) {
 						Icon(Icons.Outlined.Check, null, modifier = Modifier.size(16.dp))
 						Spacer(Modifier.width(6.dp))
 						Text(
-							text = if (autoScanAfterApply) "确认归档并扫库" else "确认归档",
-							maxLines = 1
+							text = if (autoScanAfterApply) {
+								"确认归档并扫库 ($readyCount/${job.items.size})"
+							} else {
+								"确认归档 ($readyCount/${job.items.size})"
+							},
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis
 						)
 					}
 				}
@@ -1385,9 +1561,22 @@ private fun ScrapeDiffItemCard(
 	versionsExpanded: Boolean,
 	versions: List<MeloTagVersion>?,
 	onSelectCandidate: (String) -> Unit,
+	onSearchCandidates: (String) -> Unit,
 	onToggleVersions: () -> Unit,
 	onRestoreVersion: (versionJobId: String) -> Unit
 ) {
+	val itemStatusLower = item.status.trim().lowercase()
+	val isNeedsReview = itemStatusLower == "needs_review"
+	var searchExpanded by rememberSaveable(item.id, item.path) { mutableStateOf(false) }
+	val defaultSearchQuery = remember(item.id, item.before, item.name, item.path) {
+		val title = item.before["title"].orEmpty().trim()
+		val artist = item.before["artist"].orEmpty().trim()
+		listOf(artist, title)
+			.filter { it.isNotBlank() }
+			.joinToString(" - ")
+			.ifBlank { item.name.substringBeforeLast('.').ifBlank { item.path.substringAfterLast('/').substringBeforeLast('.') } }
+	}
+	var searchQueryInput by rememberSaveable(item.id, item.path) { mutableStateOf(defaultSearchQuery) }
 	MeloGroupedCard(modifier = Modifier.animateContentSize()) {
 		Column(
 			modifier = Modifier.padding(12.dp),
@@ -1508,16 +1697,100 @@ private fun ScrapeDiffItemCard(
 				}
 			}
 
-			if (item.candidates.isNotEmpty()) {
+			if (item.candidates.isNotEmpty() || isNeedsReview) {
 				Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-					Text(
-						text = "候选 (${item.candidates.size})",
-						style = MaterialTheme.typography.labelMedium.tabularNums(),
-						color = MaterialTheme.colorScheme.onSurfaceVariant
-					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically
+					) {
+						Text(
+							text = "候选 (${item.candidates.size})",
+							style = MaterialTheme.typography.labelMedium.tabularNums(),
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+						if (isNeedsReview) {
+							TextButton(
+								onClick = { searchExpanded = !searchExpanded },
+								contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+								modifier = Modifier.height(26.dp)
+							) {
+								Icon(
+									imageVector = Icons.Outlined.Search,
+									contentDescription = null,
+									modifier = Modifier.size(13.dp)
+								)
+								Spacer(Modifier.width(4.dp))
+								Text(
+									text = if (searchExpanded) "收起重搜" else "重新搜索候选",
+									style = MaterialTheme.typography.labelSmall
+								)
+							}
+						}
+					}
 					LazyRow(
 						horizontalArrangement = Arrangement.spacedBy(8.dp)
 					) {
+						if (isNeedsReview) {
+							item(key = "existing-pill", contentType = "keep-existing-pill") {
+								val keepExistingSelected = selectedCandidateId == "existing"
+								Surface(
+									modifier = Modifier
+										.clip(RoundedCornerShape(12.dp))
+										.clickable(enabled = !jobsLoading) {
+											onSelectCandidate("existing")
+										},
+									shape = RoundedCornerShape(12.dp),
+									color = if (keepExistingSelected) {
+										MaterialTheme.colorScheme.secondaryContainer
+									} else {
+										MaterialTheme.colorScheme.surfaceContainerLow
+									},
+									border = BorderStroke(
+										width = MeloHairlineWidth,
+										color = if (keepExistingSelected) {
+											MaterialTheme.colorScheme.secondary
+										} else {
+											MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+										}
+									)
+								) {
+									Column(
+										modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+										verticalArrangement = Arrangement.spacedBy(2.dp)
+									) {
+										Row(
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(5.dp)
+										) {
+											Text(
+												text = "保留现有标签",
+												style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+												color = if (keepExistingSelected) {
+													MaterialTheme.colorScheme.onSecondaryContainer
+												} else {
+													MaterialTheme.colorScheme.onSurface
+												}
+											)
+											if (keepExistingSelected) {
+												Icon(
+													imageVector = Icons.Outlined.Check,
+													contentDescription = "已选中",
+													tint = MaterialTheme.colorScheme.onSecondaryContainer,
+													modifier = Modifier.size(13.dp)
+												)
+											}
+										}
+										Text(
+											text = "不覆盖原文件元数据",
+											style = MaterialTheme.typography.bodySmall,
+											color = MaterialTheme.colorScheme.onSurfaceVariant,
+											maxLines = 1
+										)
+									}
+								}
+							}
+						}
 						itemsIndexed(
 							items = item.candidates,
 							key = { idx, c -> c.id.ifBlank { "cand-$idx" } },
@@ -1529,6 +1802,38 @@ private fun ScrapeDiffItemCard(
 								enabled = !jobsLoading,
 								onClick = { onSelectCandidate(cand.id) }
 							)
+						}
+					}
+
+					AnimatedVisibility(visible = searchExpanded && isNeedsReview) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(top = 4.dp),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							OutlinedTextField(
+								value = searchQueryInput,
+								onValueChange = { searchQueryInput = it },
+								singleLine = true,
+								label = { Text("输入歌名或歌手关键词") },
+								keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+								keyboardActions = KeyboardActions(
+									onSearch = {
+										if (searchQueryInput.isNotBlank() && !jobsLoading) {
+											onSearchCandidates(searchQueryInput.trim())
+										}
+									}
+								),
+								modifier = Modifier.weight(1f)
+							)
+							FilledTonalButton(
+								onClick = { onSearchCandidates(searchQueryInput.trim()) },
+								enabled = searchQueryInput.isNotBlank() && !jobsLoading
+							) {
+								Text("搜索")
+							}
 						}
 					}
 				}

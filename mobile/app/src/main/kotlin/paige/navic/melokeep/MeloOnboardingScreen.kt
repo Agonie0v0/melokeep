@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import paige.navic.di.LocalNavStack
@@ -79,6 +80,7 @@ import paige.navic.domain.manager.runtime.PermissionManager
 import paige.navic.domain.manager.session.LoginManager
 import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SessionState
+import paige.navic.domain.manager.session.SyncManager
 import paige.navic.ui.core.LoginEvent
 import paige.navic.ui.core.LoginUiState
 import paige.navic.ui.icons.Icons
@@ -104,6 +106,7 @@ fun MeloOnboardingScreen(
 	val apiClient = koinInject<MeloKeepApiClient>()
 	val sessionManager = koinInject<SessionManager>()
 	val loginManager = koinInject<LoginManager>()
+	val syncManager = koinInject<SyncManager>()
 	val permissionManager = koinInject<PermissionManager>()
 
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
@@ -121,6 +124,9 @@ fun MeloOnboardingScreen(
 	var probingHealth by rememberSaveable { mutableStateOf(false) }
 	var healthStatusMessage by rememberSaveable { mutableStateOf<String?>(null) }
 	var healthStatusSuccess by rememberSaveable { mutableStateOf(false) }
+	var enteringApp by rememberSaveable { mutableStateOf(false) }
+	var enterErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+	var showSkipAnyway by rememberSaveable { mutableStateOf(false) }
 
 	var navidromeExpanded by rememberSaveable {
 		mutableStateOf(sessionState !is SessionState.Unauthenticated)
@@ -170,6 +176,91 @@ fun MeloOnboardingScreen(
 	val finishOnboarding: () -> Unit = {
 		meloSettingsStore.setOnboardingDismissed(true)
 		onFinished()
+	}
+
+	val verifyAndFinishOnboarding: () -> Unit = {
+		focusManager.clearFocus()
+		enterErrorMessage = null
+
+		val trimmedMeloUrl = meloUrl.trim()
+		val normalizedInputMelo = MeloSettingsStore.normalizeBaseUrl(trimmedMeloUrl)
+		val meloAlreadyMatched = meloConfig.isAuthenticated &&
+			MeloSettingsStore.normalizeBaseUrl(meloConfig.baseUrl) == normalizedInputMelo &&
+			meloPass.isBlank() &&
+			(meloUser.trim() == meloConfig.username || !meloConfig.authEnabled)
+		val shouldConnectMelo = trimmedMeloUrl.isNotEmpty() && !meloAlreadyMatched
+
+		val trimmedNavUrl = navidromeUrl.trim().removeSuffix("/")
+		val normalizedNavUrl = when {
+			trimmedNavUrl.startsWith("https://") || trimmedNavUrl.startsWith("http://") -> trimmedNavUrl
+			trimmedNavUrl.isNotEmpty() -> "https://$trimmedNavUrl"
+			else -> ""
+		}
+		val hasNavCreds = navidromeUrl.isNotBlank() && navidromeUser.isNotBlank() && navidromePass.isNotBlank()
+		val partialNavCreds = (navidromeUser.isNotBlank() || navidromePass.isNotBlank()) && !hasNavCreds
+		val navAlreadyMatched = isNavidromeConnected &&
+			sessionManager.instanceUrl.trim().removeSuffix("/") == normalizedNavUrl &&
+			sessionManager.username == navidromeUser.trim()
+		val shouldConnectNav = hasNavCreds && !navAlreadyMatched
+
+		when {
+			partialNavCreds -> {
+				val err = "请完整填写 Navidrome 服务器地址、账号和密码"
+				navidromeLocalError = err
+				enterErrorMessage = err
+				showSkipAnyway = true
+			}
+			!shouldConnectMelo && !shouldConnectNav -> finishOnboarding()
+			else -> {
+				enteringApp = true
+				showSkipAnyway = false
+				scope.launch {
+					var meloConnectedOk = !shouldConnectMelo
+					try {
+						if (shouldConnectMelo) {
+							val health = apiClient.health(trimmedMeloUrl)
+							if (!health.ok) {
+								throw IllegalStateException("MeloKeep 服务状态异常")
+							}
+							apiClient.login(
+								baseUrl = trimmedMeloUrl,
+								username = meloUser.trim(),
+								password = meloPass,
+								deviceName = deviceName
+							)
+							meloSettingsController.loadConfig()
+							meloConnectedOk = true
+						}
+						if (shouldConnectNav) {
+							loginManager.instanceState.edit { replace(0, length, trimmedNavUrl) }
+							loginManager.usernameState.edit { replace(0, length, navidromeUser.trim()) }
+							loginManager.passwordState.edit { replace(0, length, navidromePass) }
+							if (loginManager.isLocalNetworkInstance() && !permissionManager.requestLocalNetworkPermission()) {
+								throw IllegalStateException("请授予局域网访问权限后再连接 Navidrome")
+							}
+							permissionManager.requestNotificationsPermission()
+							sessionManager.login(normalizedNavUrl, navidromeUser.trim(), navidromePass)
+							syncManager.startPeriodicSync(syncImmediately = true)
+						}
+						enteringApp = false
+						finishOnboarding()
+					} catch (e: CancellationException) {
+						throw e
+					} catch (e: Exception) {
+						enteringApp = false
+						val msg = e.message?.takeIf { it.isNotBlank() } ?: "连接校验失败，请检查服务器地址、账号密码或网络"
+						enterErrorMessage = msg
+						if (!meloConnectedOk) {
+							healthStatusSuccess = false
+							healthStatusMessage = msg
+						} else if (shouldConnectNav) {
+							navidromeLocalError = msg
+						}
+						showSkipAnyway = true
+					}
+				}
+			}
+		}
 	}
 
 	Column(
@@ -726,25 +817,83 @@ fun MeloOnboardingScreen(
 
 		// 底部完成按钮
 		MeloHairlineDivider()
-		Box(
+		Column(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(horizontal = 16.dp, vertical = 12.dp),
-			contentAlignment = Alignment.Center
+			horizontalAlignment = Alignment.CenterHorizontally,
+			verticalArrangement = Arrangement.spacedBy(8.dp)
 		) {
-			Button(
-				onClick = finishOnboarding,
-				shape = RoundedCornerShape(12.dp),
+			AnimatedVisibility(visible = !enterErrorMessage.isNullOrBlank()) {
+				Surface(
+					modifier = Modifier
+						.widthIn(max = 520.dp)
+						.fillMaxWidth(),
+					shape = RoundedCornerShape(10.dp),
+					color = MaterialTheme.colorScheme.errorContainer,
+					border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f))
+				) {
+					Text(
+						text = enterErrorMessage.orEmpty(),
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onErrorContainer,
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+					)
+				}
+			}
+
+			Row(
 				modifier = Modifier
 					.widthIn(max = 520.dp)
-					.fillMaxWidth()
-					.height(48.dp)
+					.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+				verticalAlignment = Alignment.CenterVertically
 			) {
-				Text(
-					text = "进入应用",
-					style = MaterialTheme.typography.titleSmall,
-					fontWeight = FontWeight.SemiBold
-				)
+				if (showSkipAnyway) {
+					OutlinedButton(
+						onClick = finishOnboarding,
+						enabled = !enteringApp,
+						shape = RoundedCornerShape(12.dp),
+						modifier = Modifier
+							.weight(0.36f)
+							.height(48.dp)
+					) {
+						Text(
+							text = "仍要进入",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.Medium
+						)
+					}
+				}
+
+				Button(
+					onClick = verifyAndFinishOnboarding,
+					enabled = !enteringApp,
+					shape = RoundedCornerShape(12.dp),
+					modifier = Modifier
+						.weight(if (showSkipAnyway) 0.64f else 1f)
+						.height(48.dp)
+				) {
+					if (enteringApp) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(16.dp),
+							strokeWidth = 2.dp,
+							color = MaterialTheme.colorScheme.onPrimary
+						)
+						Spacer(Modifier.width(8.dp))
+						Text(
+							text = "正在保存并校验…",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.SemiBold
+						)
+					} else {
+						Text(
+							text = "进入应用",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.SemiBold
+						)
+					}
+				}
 			}
 		}
 	}

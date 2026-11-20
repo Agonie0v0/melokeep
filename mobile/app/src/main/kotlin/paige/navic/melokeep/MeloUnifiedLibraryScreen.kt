@@ -9,7 +9,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
@@ -178,6 +180,7 @@ fun MeloUnifiedLibraryScreen(
 
 	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
 	val meloConfig by settingsStore.config.collectAsStateWithLifecycle()
+	val librarySearchHistory by settingsStore.librarySearchHistory.collectAsStateWithLifecycle()
 	val studioState by studioController.state.collectAsStateWithLifecycle()
 	val localState by localController.state.collectAsStateWithLifecycle()
 	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -277,7 +280,21 @@ fun MeloUnifiedLibraryScreen(
 		}
 	}
 
-	BackHandler(enabled = sourceMode == LibrarySourceMode.LOCAL && localDetailRoute != null) {
+	val activeLocalDetail = if (sourceMode == LibrarySourceMode.LOCAL && isMeloConnected) {
+		localDetailRoute
+	} else {
+		null
+	}
+
+	LaunchedEffect(activeLocalDetail) {
+		when (activeLocalDetail) {
+			is LibraryLocalDetailRoute.Playlist -> localController.loadPlaylistDetail(activeLocalDetail.id)
+			LibraryLocalDetailRoute.Favorites -> localController.refreshFavorites()
+			else -> localController.clearActivePlaylist()
+		}
+	}
+
+	BackHandler(enabled = activeLocalDetail != null) {
 		localDetailRoute = null
 	}
 
@@ -292,131 +309,176 @@ fun MeloUnifiedLibraryScreen(
 			.fillMaxSize()
 			.background(MaterialTheme.colorScheme.background)
 	) {
-		Column(modifier = Modifier.fillMaxSize()) {
-			UnifiedLibraryTopHeader(
-				sourceMode = sourceMode,
-				onSelectSourceMode = { sourceMode = it },
-				isNavidromeLoggedIn = isNavidromeLoggedIn,
-				isMeloConnected = isMeloConnected,
-				scanningNavidrome = studioState.scanningNavidrome,
-				scanTrackCount = studioState.scanStatus?.count,
-				onTriggerScan = {
-					if (isMeloConnected) {
-						studioController.triggerNavidromeScan()
-					} else {
-						scope.launch {
-							snackBarState.currentSnackbarData?.dismiss()
-							snackBarState.showSnackbar("请先连接 MeloKeep 服务以触发扫库")
-						}
-						onOpenMeloSettings()
+		AnimatedContent(
+			targetState = activeLocalDetail,
+			transitionSpec = {
+				when {
+					initialState == null && targetState != null -> {
+						(slideInHorizontally(tween(180)) { it / 5 } + fadeIn(tween(180))) togetherWith
+							(slideOutHorizontally(tween(180)) { -it / 8 } + fadeOut(tween(140)))
 					}
-				},
-				onOpenNavidromeSearch = dropUnlessResumed {
-					backStack.add(Screen.Search(nested = true))
-				},
-				onOpenCreateFolder = { mkdirDialogOpen = true },
-				fileSearchOpen = fileSearchOpen,
-				onToggleFileSearch = {
-					val next = !fileSearchOpen
-					fileSearchOpen = next
-					if (!next && studioState.fileQuery.isNotBlank()) {
-						fileSearchInput = ""
-						studioController.loadLibraryFiles(
-							query = "",
-							folder = folderArg,
-							reset = true
-						)
+					initialState != null && targetState == null -> {
+						(slideInHorizontally(tween(180)) { -it / 8 } + fadeIn(tween(180))) togetherWith
+							(slideOutHorizontally(tween(180)) { it / 5 } + fadeOut(tween(140)))
 					}
-				},
-				navSubTab = navSubTab,
-				onSelectNavSubTab = { navSubTab = it },
-				localSubTab = localSubTab,
-				onSelectLocalSubTab = {
-					localSubTab = it
-					localDetailRoute = null
-				},
-				showLocalSubTabs = localDetailRoute == null,
-				fileSearchInput = fileSearchInput,
-				onFileSearchInputChange = { fileSearchInput = it },
-				onFileSearchSubmit = {
-					studioController.loadLibraryFiles(
-						query = fileSearchInput,
-						folder = folderArg,
-						reset = true
-					)
-				},
-				onFileSearchClear = {
-					fileSearchInput = ""
-					studioController.loadLibraryFiles(
-						query = "",
-						folder = folderArg,
-						reset = true
-					)
+					else -> fadeIn(tween(180)) togetherWith fadeOut(tween(140))
 				}
-			)
+			},
+			modifier = Modifier.fillMaxSize(),
+			label = "UnifiedLibraryLocalDetailSwitch"
+		) { detailRoute ->
+			if (detailRoute != null) {
+				LibraryLocalDetailView(
+					route = detailRoute,
+					onBack = { localDetailRoute = null },
+					studioState = studioState,
+					localState = localState,
+					localController = localController,
+					downloadsMap = downloadsMap,
+					currentPlayingPair = currentPlayingPair,
+					hostNavBottom = hostNavBottom,
+					onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it }
+				)
+			} else {
+				Column(modifier = Modifier.fillMaxSize()) {
+					UnifiedLibraryTopHeader(
+						sourceMode = sourceMode,
+						onSelectSourceMode = { sourceMode = it },
+						isNavidromeLoggedIn = isNavidromeLoggedIn,
+						isMeloConnected = isMeloConnected,
+						scanningNavidrome = studioState.scanningNavidrome,
+						scanTrackCount = studioState.scanStatus?.count,
+						onTriggerScan = {
+							if (isMeloConnected) {
+								studioController.triggerNavidromeScan()
+							} else {
+								scope.launch {
+									snackBarState.currentSnackbarData?.dismiss()
+									snackBarState.showSnackbar("请先连接 MeloKeep 服务以触发扫库")
+								}
+								onOpenMeloSettings()
+							}
+						},
+						onOpenNavidromeSearch = dropUnlessResumed {
+							backStack.add(Screen.Search(nested = true))
+						},
+						onOpenCreateFolder = { mkdirDialogOpen = true },
+						fileSearchOpen = fileSearchOpen,
+						onToggleFileSearch = {
+							val next = !fileSearchOpen
+							fileSearchOpen = next
+							if (!next && studioState.fileQuery.isNotBlank()) {
+								fileSearchInput = ""
+								studioController.loadLibraryFiles(
+									query = "",
+									folder = folderArg,
+									reset = true
+								)
+							}
+						},
+						navSubTab = navSubTab,
+						onSelectNavSubTab = { navSubTab = it },
+						localSubTab = localSubTab,
+						onSelectLocalSubTab = {
+							localSubTab = it
+							localDetailRoute = null
+						},
+						showLocalSubTabs = true,
+						fileSearchInput = fileSearchInput,
+						onFileSearchInputChange = { fileSearchInput = it },
+						onFileSearchSubmit = {
+							settingsStore.recordLibrarySearchHistory(fileSearchInput)
+							studioController.loadLibraryFiles(
+								query = fileSearchInput,
+								folder = folderArg,
+								reset = true
+							)
+						},
+						onFileSearchClear = {
+							fileSearchInput = ""
+							studioController.loadLibraryFiles(
+								query = "",
+								folder = folderArg,
+								reset = true
+							)
+						},
+						librarySearchHistory = librarySearchHistory,
+						onSelectSearchHistory = { kw ->
+							fileSearchInput = kw
+							settingsStore.recordLibrarySearchHistory(kw)
+							studioController.loadLibraryFiles(
+								query = kw,
+								folder = folderArg,
+								reset = true
+							)
+						},
+						onRemoveSearchHistory = settingsStore::removeLibrarySearchHistory,
+						onClearSearchHistory = settingsStore::clearLibrarySearchHistory
+					)
 
-			AnimatedContent(
-				targetState = sourceMode,
-				transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
-				modifier = Modifier.weight(1f),
-				label = "UnifiedLibrarySourceSwitch"
-			) { activeSource ->
-				when (activeSource) {
-					LibrarySourceMode.NAVIDROME -> {
-						if (!isNavidromeLoggedIn) {
-							NavidromeUnauthenticatedCard(
-								onConfigureNavidrome = { navidromeConnectionSheetOpen = true },
-								onSwitchToLocal = { sourceMode = LibrarySourceMode.LOCAL }
-							)
-						} else {
-							LibraryNavidromeStreamingSection(
-								subTab = navSubTab,
-								albumCardsMode = albumCardsMode,
-								songCardsMode = songCardsMode,
-								isMeloConnected = isMeloConnected,
-								studioState = studioState,
-								studioController = studioController,
-								downloadsMap = downloadsMap,
-								currentPlayingPair = currentPlayingPair,
-								hostNavBottom = hostNavBottom,
-								onSelectSubTab = { navSubTab = it },
-								onToggleAlbumCardsMode = {
-									val next = !albumCardsMode
-									albumCardsMode = next
-									preferenceManager.albumListViewMode = if (next) ListViewMode.Grid else ListViewMode.List
-								},
-								onToggleSongCardsMode = { songCardsMode = !songCardsMode },
-								onOpenDailyMix = { dailyMixSheetOpen = true }
-							)
-						}
-					}
+					AnimatedContent(
+						targetState = sourceMode,
+						transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
+						modifier = Modifier.weight(1f),
+						label = "UnifiedLibrarySourceSwitch"
+					) { activeSource ->
+						when (activeSource) {
+							LibrarySourceMode.NAVIDROME -> {
+								if (!isNavidromeLoggedIn) {
+									NavidromeUnauthenticatedCard(
+										onConfigureNavidrome = { navidromeConnectionSheetOpen = true },
+										onSwitchToLocal = { sourceMode = LibrarySourceMode.LOCAL }
+									)
+								} else {
+									LibraryNavidromeStreamingSection(
+										subTab = navSubTab,
+										albumCardsMode = albumCardsMode,
+										songCardsMode = songCardsMode,
+										isMeloConnected = isMeloConnected,
+										studioState = studioState,
+										studioController = studioController,
+										downloadsMap = downloadsMap,
+										currentPlayingPair = currentPlayingPair,
+										hostNavBottom = hostNavBottom,
+										onSelectSubTab = { navSubTab = it },
+										onToggleAlbumCardsMode = {
+											val next = !albumCardsMode
+											albumCardsMode = next
+											preferenceManager.albumListViewMode = if (next) ListViewMode.Grid else ListViewMode.List
+										},
+										onToggleSongCardsMode = { songCardsMode = !songCardsMode },
+										onOpenDailyMix = { dailyMixSheetOpen = true }
+									)
+								}
+							}
 
-					LibrarySourceMode.LOCAL -> {
-						if (!isMeloConnected) {
-							MeloLocalUnconfiguredCard(
-								onOpenMeloSettings = onOpenMeloSettings
-							)
-						} else {
-							LibraryLocalSection(
-								subTab = localSubTab,
-								detailRoute = localDetailRoute,
-								onOpenRoute = { localDetailRoute = it },
-								onSelectSubTab = {
-									localSubTab = it
-									localDetailRoute = null
-								},
-								studioState = studioState,
-								studioController = studioController,
-								localState = localState,
-								localController = localController,
-								downloadsMap = downloadsMap,
-								currentPlayingPair = currentPlayingPair,
-								hostNavBottom = hostNavBottom,
-								onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it },
-								onRenameFolder = { renameFolderTarget = it },
-								onEditTags = { file -> editingFilePath = file.path },
-								onRefreshFiles = reloadLocalFiles
-							)
+							LibrarySourceMode.LOCAL -> {
+								if (!isMeloConnected) {
+									MeloLocalUnconfiguredCard(
+										onOpenMeloSettings = onOpenMeloSettings
+									)
+								} else {
+									LibraryLocalSection(
+										subTab = localSubTab,
+										onOpenRoute = { localDetailRoute = it },
+										onSelectSubTab = {
+											localSubTab = it
+											localDetailRoute = null
+										},
+										studioState = studioState,
+										studioController = studioController,
+										localState = localState,
+										localController = localController,
+										downloadsMap = downloadsMap,
+										currentPlayingPair = currentPlayingPair,
+										hostNavBottom = hostNavBottom,
+										onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it },
+										onRenameFolder = { renameFolderTarget = it },
+										onEditTags = { file -> editingFilePath = file.path },
+										onRefreshFiles = reloadLocalFiles
+									)
+								}
+							}
 						}
 					}
 				}
@@ -470,7 +532,9 @@ fun MeloUnifiedLibraryScreen(
 					if (ids.isNotEmpty()) localPlaylistPickerIds = ids
 				},
 				onSelectAll = {
-					if (studioState.selectedFilePaths.size == studioState.libraryFiles.size) {
+					val allLoadedSelected = studioState.libraryFiles.isNotEmpty() &&
+						studioState.libraryFiles.all { it.path in studioState.selectedFilePaths }
+					if (allLoadedSelected) {
 						studioController.clearFileSelection()
 					} else {
 						studioController.selectAllFiles()
@@ -751,9 +815,20 @@ private fun UnifiedLibraryTopHeader(
 	fileSearchInput: String,
 	onFileSearchInputChange: (String) -> Unit,
 	onFileSearchSubmit: () -> Unit,
-	onFileSearchClear: () -> Unit
+	onFileSearchClear: () -> Unit,
+	librarySearchHistory: List<String>,
+	onSelectSearchHistory: (String) -> Unit,
+	onRemoveSearchHistory: (String) -> Unit,
+	onClearSearchHistory: () -> Unit
 ) {
 	val focusManager = LocalFocusManager.current
+	var manageHistory by remember { mutableStateOf(false) }
+	var clearHistoryConfirmOpen by remember { mutableStateOf(false) }
+	LaunchedEffect(librarySearchHistory.isEmpty()) {
+		if (librarySearchHistory.isEmpty()) {
+			manageHistory = false
+		}
+	}
 	val localSearchable = localSubTab == LibraryLocalSubTab.FOLDERS ||
 		localSubTab == LibraryLocalSubTab.SONGS ||
 		localSubTab == LibraryLocalSubTab.ALBUMS ||
@@ -1016,7 +1091,133 @@ private fun UnifiedLibraryTopHeader(
 					}
 				}
 			}
+
+			AnimatedVisibility(
+				visible = sourceMode == LibrarySourceMode.LOCAL &&
+					isMeloConnected &&
+					fileSearchOpen &&
+					localSearchable &&
+					librarySearchHistory.isNotEmpty()
+			) {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 16.dp),
+					verticalArrangement = Arrangement.spacedBy(6.dp)
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically
+					) {
+						Text(
+							text = "最近搜索",
+							style = MaterialTheme.typography.labelMedium,
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+						Row(
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							Text(
+								text = if (manageHistory) "完成" else "管理",
+								style = MaterialTheme.typography.labelMedium,
+								color = MaterialTheme.colorScheme.primary,
+								modifier = Modifier
+									.clip(CircleShape)
+									.clickable { manageHistory = !manageHistory }
+									.padding(horizontal = 6.dp, vertical = 2.dp)
+							)
+							Text(
+								text = "清空",
+								style = MaterialTheme.typography.labelMedium,
+								color = MaterialTheme.colorScheme.error,
+								modifier = Modifier
+									.clip(CircleShape)
+									.clickable { clearHistoryConfirmOpen = true }
+									.padding(horizontal = 6.dp, vertical = 2.dp)
+							)
+						}
+					}
+
+					LazyRow(
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						contentPadding = PaddingValues(bottom = 2.dp)
+					) {
+						items(librarySearchHistory, key = { it }) { item ->
+							Surface(
+								onClick = {
+									if (manageHistory) {
+										onRemoveSearchHistory(item)
+									} else {
+										focusManager.clearFocus()
+										onSelectSearchHistory(item)
+									}
+								},
+								shape = CircleShape,
+								color = MaterialTheme.colorScheme.surfaceContainer,
+								border = libraryHairlineBorder()
+							) {
+								Row(
+									modifier = Modifier.padding(
+										start = 11.dp,
+										end = if (manageHistory) 8.dp else 11.dp,
+										top = 5.dp,
+										bottom = 5.dp
+									),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(5.dp)
+								) {
+									Text(
+										text = item,
+										style = MaterialTheme.typography.labelMedium,
+										color = MaterialTheme.colorScheme.onSurface,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis
+									)
+									if (manageHistory) {
+										Icon(
+											imageVector = Icons.Outlined.Close,
+											contentDescription = "删除",
+											tint = MaterialTheme.colorScheme.onSurfaceVariant,
+											modifier = Modifier.size(13.dp)
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
+	}
+
+	if (clearHistoryConfirmOpen) {
+		AlertDialog(
+			onDismissRequest = { clearHistoryConfirmOpen = false },
+			title = { Text("清空搜索历史") },
+			text = { Text("确认清空本地曲库的所有最近搜索记录吗？") },
+			confirmButton = {
+				Button(
+					onClick = {
+						clearHistoryConfirmOpen = false
+						manageHistory = false
+						onClearSearchHistory()
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("清空")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { clearHistoryConfirmOpen = false }) {
+					Text("取消")
+				}
+			}
+		)
 	}
 }
 

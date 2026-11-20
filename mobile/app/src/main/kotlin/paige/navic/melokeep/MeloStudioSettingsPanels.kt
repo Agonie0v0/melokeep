@@ -6,6 +6,7 @@
 
 package paige.navic.melokeep
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.animateFloatAsState
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -60,12 +62,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.ImageLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
+import paige.navic.generated.BuildInfo
 import paige.navic.domain.manager.playback.AudioGainManager
 import paige.navic.domain.manager.playback.EqualizerManager
 import paige.navic.domain.manager.playback.StreamCacheManager
@@ -82,7 +87,10 @@ import paige.navic.domain.model.settings.NowPlayingSliderStyle
 import paige.navic.domain.model.settings.OfflineMode
 import paige.navic.domain.model.settings.ReplayGainMode
 import paige.navic.domain.model.settings.StreamingQuality
+import paige.navic.domain.model.settings.UpdateCheckFrequency
 import paige.navic.playback.exoplayer.ExoStateHolder
+import paige.navic.ui.component.sheet.ChangelogViewModel
+import paige.navic.ui.component.sheet.UpdateCheckFeedback
 import paige.navic.ui.component.common.VerticalSlider
 import paige.navic.ui.core.LoginUiState
 import paige.navic.ui.icons.Icons
@@ -90,6 +98,7 @@ import paige.navic.ui.icons.outlined.Add
 import paige.navic.ui.icons.outlined.ChevronForward
 import paige.navic.ui.icons.outlined.Close
 import paige.navic.ui.icons.outlined.Refresh
+import paige.navic.ui.screen.lyrics.component.LyricsStyleCustomizationControls
 import paige.navic.ui.theme.positive
 import paige.navic.ui.theme.tabularNums
 import paige.navic.util.network.PROXY_URL_REGEX
@@ -101,6 +110,19 @@ internal const val SettingsLyricsOffsetMaxMs = 5000
 private const val SettingsLyricsOffsetStepMs = 100
 private const val SettingsLyricsOffsetSliderSteps =
 	(SettingsLyricsOffsetMaxMs - SettingsLyricsOffsetMinMs) / SettingsLyricsOffsetStepMs - 1
+
+@Composable
+internal fun rememberMeloVersionName(): String {
+	val context = LocalContext.current
+	return remember(context) {
+		runCatching {
+			context.packageManager
+				.getPackageInfo(context.packageName, 0)
+				.versionName
+				?.takeIf { it.isNotBlank() }
+		}.getOrNull() ?: "dev"
+	}
+}
 
 // =============================================================================
 // 1. Navidrome 连接面板
@@ -676,7 +698,21 @@ internal fun SettingsLyricsAndStagePanel(
 			}
 		}
 
-		// 2. 歌词显示
+		// 2. 歌词外观样式
+		item(key = "lyrics-style") {
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "歌词外观样式")
+				MeloGroupedCard {
+					LyricsStyleCustomizationControls(
+						preferenceManager = preferenceManager,
+						showResetButton = true,
+						modifier = Modifier.padding(16.dp)
+					)
+				}
+			}
+		}
+
+		// 3. 歌词显示
 		item(key = "lyrics-display") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 				MeloSectionLabel(title = "歌词显示")
@@ -1091,6 +1127,14 @@ internal fun SettingsStorageAndAboutPanel(
 	val syncManager = koinInject<SyncManager>()
 	val imageLoader = koinInject<ImageLoader>()
 	val preferenceManager = koinInject<PreferenceManager>()
+	val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+	val changelogViewModel = if (activityOwner != null) {
+		koinViewModel<ChangelogViewModel>(viewModelStoreOwner = activityOwner)
+	} else {
+		koinViewModel<ChangelogViewModel>()
+	}
+	val updateFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
+	val appVersionName = rememberMeloVersionName()
 	val scope = rememberCoroutineScope()
 
 	val syncState by syncManager.syncState.collectAsStateWithLifecycle()
@@ -1302,13 +1346,103 @@ internal fun SettingsStorageAndAboutPanel(
 						}
 					}
 
-					MeloHairlineDivider(startIndent = 16.dp)
+					if (!BuildInfo.FDROID) {
+						MeloHairlineDivider(startIndent = 16.dp)
 
-					SettingsToggleRow(
-						title = "自动检查更新",
-						checked = preferenceManager.checkForUpdates,
-						onCheckedChange = { preferenceManager.checkForUpdates = it }
-					)
+						SettingsToggleRow(
+							title = "自动检查更新",
+							checked = preferenceManager.checkForUpdates,
+							onCheckedChange = { preferenceManager.checkForUpdates = it }
+						)
+
+						if (preferenceManager.checkForUpdates) {
+							MeloHairlineDivider(startIndent = 16.dp)
+
+							Column(
+								modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+								verticalArrangement = Arrangement.spacedBy(8.dp)
+							) {
+								Text(
+									text = "检查更新频率",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium
+								)
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(6.dp)
+								) {
+									UpdateCheckFrequency.entries.forEach { freq ->
+										SettingsChoicePill(
+											label = when (freq) {
+												UpdateCheckFrequency.OnEveryLaunch -> "每次启动"
+												UpdateCheckFrequency.Daily -> "每天"
+												UpdateCheckFrequency.Weekly -> "每周"
+												UpdateCheckFrequency.ManualOnly -> "仅手动"
+											},
+											selected = preferenceManager.updateCheckFrequency == freq,
+											onClick = { preferenceManager.updateCheckFrequency = freq },
+											modifier = Modifier.weight(1f)
+										)
+									}
+								}
+							}
+						}
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 13.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp)
+							) {
+								Text(
+									text = "检查更新",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium
+								)
+								val statusText = when (val fb = updateFeedback) {
+									UpdateCheckFeedback.Checking -> "正在连接 GitHub Releases…"
+									UpdateCheckFeedback.UpToDate -> "当前已是最新版本 v$appVersionName"
+									is UpdateCheckFeedback.UpdateAvailable -> "发现新版本 ${fb.tag}"
+									is UpdateCheckFeedback.Error -> fb.message
+									UpdateCheckFeedback.Idle -> "当前版本 v$appVersionName"
+								}
+								Text(
+									text = statusText,
+									style = MaterialTheme.typography.bodySmall,
+									color = when (updateFeedback) {
+										is UpdateCheckFeedback.Error -> MaterialTheme.colorScheme.error
+										is UpdateCheckFeedback.UpdateAvailable -> MaterialTheme.colorScheme.primary
+										else -> MaterialTheme.colorScheme.onSurfaceVariant
+									}
+								)
+							}
+							Surface(
+								onClick = {
+									changelogViewModel.checkForUpdates(
+										currentVersion = appVersionName,
+										manual = true
+									)
+								},
+								enabled = updateFeedback !is UpdateCheckFeedback.Checking,
+								shape = RoundedCornerShape(10.dp),
+								color = MaterialTheme.colorScheme.primaryContainer
+							) {
+								Text(
+									text = if (updateFeedback is UpdateCheckFeedback.Checking) "检查中…" else "立即检查更新",
+									style = MaterialTheme.typography.labelMedium,
+									color = MaterialTheme.colorScheme.onPrimaryContainer,
+									modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+								)
+							}
+						}
+					}
 				}
 			}
 		}
@@ -1316,7 +1450,7 @@ internal fun SettingsStorageAndAboutPanel(
 		// 4. 极简版本尾注
 		item(key = "storage-version") {
 			Text(
-				text = "MeloKeep v1.0.15",
+				text = "MeloKeep v$appVersionName",
 				style = MaterialTheme.typography.labelSmall.tabularNums(),
 				color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
 				textAlign = TextAlign.Center,
@@ -1388,28 +1522,36 @@ internal fun SettingsEqualizerPanel(
 				)
 
 				MeloGroupedCard {
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(12.dp),
-						horizontalArrangement = Arrangement.spacedBy(6.dp)
+					Column(
+						modifier = Modifier.padding(12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp)
 					) {
-						EqualizerMode.entries.forEach { mode ->
-							SettingsChoicePill(
-								label = when (mode) {
-									EqualizerMode.BuiltIn -> "内置 EQ"
-									EqualizerMode.External -> "系统音效"
-									EqualizerMode.Disabled -> "关闭"
-								},
-								selected = config.mode == mode,
-								onClick = {
-									scope.launch {
-										equalizerManager.setConfig(config.copy(mode = mode))
-									}
-								},
-								modifier = Modifier.weight(1f)
-							)
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(6.dp)
+						) {
+							EqualizerMode.entries.forEach { mode ->
+								SettingsChoicePill(
+									label = when (mode) {
+										EqualizerMode.BuiltIn -> "内置 EQ"
+										EqualizerMode.External -> "系统音效"
+										EqualizerMode.Disabled -> "关闭"
+									},
+									selected = config.mode == mode,
+									onClick = {
+										scope.launch {
+											equalizerManager.setConfig(config.copy(mode = mode))
+										}
+									},
+									modifier = Modifier.weight(1f)
+								)
+							}
 						}
+						Text(
+							text = "「系统音效」会将音频会话接入手机系统声效（如杜比全景声/厂商外放增强），推荐默认开启；「内置 EQ」可在此微调频段；「关闭」则旁路直出。",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
 					}
 				}
 			}

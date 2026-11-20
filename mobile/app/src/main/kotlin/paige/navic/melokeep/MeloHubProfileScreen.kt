@@ -129,7 +129,6 @@ fun MeloHubProfileScreen(
 	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
 	var phoneDownloadsSheetOpen by rememberSaveable { mutableStateOf(false) }
 	var connectionSheetOpen by rememberSaveable { mutableStateOf(false) }
-	var lyricsSheetOpen by rememberSaveable { mutableStateOf(false) }
 
 	val openSettingsRoot = dropUnlessResumed {
 		if (backStack.lastOrNull() !is Screen.Settings.Root) {
@@ -281,9 +280,6 @@ fun MeloHubProfileScreen(
 					SleepTimerMode.Disabled -> "关闭"
 				}
 
-				val playerOffset = formatCompactOffsetShort(preferenceManager.playerLyricsOffsetMs)
-				val statusBarOffset = formatCompactOffsetShort(preferenceManager.statusBarLyricsOffsetMs)
-
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					MeloSectionLabel(title = "工具与存储")
 
@@ -310,15 +306,6 @@ fun MeloHubProfileScreen(
 							value = timerValue,
 							valueHighlight = timerActive,
 							onClick = { sleepTimerOpen = true }
-						)
-
-						MeloHairlineDivider(startIndent = 46.dp)
-
-						HubActionRow(
-							icon = Icons.Outlined.Lyrics,
-							title = "歌词偏移",
-							value = "$playerOffset / $statusBarOffset ms",
-							onClick = { lyricsSheetOpen = true }
 						)
 
 						MeloHairlineDivider(startIndent = 46.dp)
@@ -410,8 +397,9 @@ fun MeloHubProfileScreen(
 
 			// 4. 极简版本尾注
 			item(key = "hub-version", contentType = "hub-version") {
+				val appVersionName = rememberMeloVersionName()
 				Text(
-					text = "MeloKeep v1.0.15",
+					text = "MeloKeep v$appVersionName",
 					style = MaterialTheme.typography.labelSmall.tabularNums(),
 					color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
 					textAlign = TextAlign.Center,
@@ -433,10 +421,6 @@ fun MeloHubProfileScreen(
 	MeloNavidromeConnectionSheet(
 		presented = connectionSheetOpen,
 		onDismissRequest = { connectionSheetOpen = false }
-	)
-	MeloLyricsAndStageSheet(
-		presented = lyricsSheetOpen,
-		onDismissRequest = { lyricsSheetOpen = false }
 	)
 }
 
@@ -617,10 +601,4 @@ private fun formatCompactHost(rawUrl: String): String {
 		.removePrefix("http://")
 		.trimEnd('/')
 		.ifBlank { "未配置" }
-}
-
-private fun formatCompactOffsetShort(offsetMs: Int): String = when {
-	offsetMs > 0 -> "+$offsetMs"
-	offsetMs < 0 -> "$offsetMs"
-	else -> "0"
 }

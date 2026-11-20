@@ -11,6 +11,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,14 +31,14 @@ import kotlin.time.Duration.Companion.milliseconds
 class SearchViewModel(
 	private val repository: SearchRepository,
 	private val songRepository: SongRepository,
+	private val settingsStore: MeloSettingsStore,
 	reachability: ReachabilityFlow,
 	downloadManager: DownloadManager
 ) : ViewModel() {
 	val searchState: StateFlow<UiState<List<Any>>>
 		field = MutableStateFlow<UiState<List<Any>>>(UiState.Success(emptyList()))
 
-	val searchHistory: StateFlow<List<String>>
-		field = MutableStateFlow<List<String>>(emptyList())
+	val searchHistory: StateFlow<List<String>> = settingsStore.librarySearchHistory
 
 	val selectedSong: StateFlow<DomainSong?>
 		field = MutableStateFlow(null)
@@ -78,19 +79,15 @@ class SearchViewModel(
 	}
 
 	fun addToSearchHistory(query: String) {
-		if (query.isBlank()) return
-		val current = searchHistory.value.toMutableList()
-		if (current.contains(query)) {
-			current.remove(query)
-		}
-		current.add(0, query)
-		searchHistory.value = current.take(10)
+		settingsStore.recordLibrarySearchHistory(query)
 	}
 
 	fun removeFromSearchHistory(query: String) {
-		val current = searchHistory.value.toMutableList()
-		current.remove(query)
-		searchHistory.value = current
+		settingsStore.removeLibrarySearchHistory(query)
+	}
+
+	fun clearSearchHistory() {
+		settingsStore.clearLibrarySearchHistory()
 	}
 
 	fun selectSong(song: DomainSong) {

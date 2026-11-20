@@ -229,38 +229,21 @@ fun MeloStudioSettingsHomeScreen(
 				}
 			}
 
-			// 2. 歌词偏移（播放页 & 状态栏双轴独立调节 + 高级舞台入口）
+			// 2. 歌词与播放页（合并原重复偏移卡片与二级歌词入口）
 			item(key = "section-lyrics", contentType = "settings-section") {
+				val fontSizeLabel = "${preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f).roundToInt()}sp"
+				val offsetMs = preferenceManager.playerLyricsOffsetMs
+				val offsetLabel = when {
+					offsetMs > 0 -> "+${offsetMs}ms"
+					offsetMs < 0 -> "${offsetMs}ms"
+					else -> "0ms"
+				}
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "歌词偏移")
+					MeloSectionLabel(title = "歌词与播放页")
 					MeloGroupedCard {
-						SettingsLyricsOffsetControl(
-							title = "播放页歌词",
-							offsetMs = preferenceManager.playerLyricsOffsetMs,
-							onOffsetChange = { preferenceManager.playerLyricsOffsetMs = it },
-							modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsToggleRow(
-							title = "状态栏歌词",
-							checked = preferenceManager.statusBarLyricsEnabled,
-							onCheckedChange = { preferenceManager.statusBarLyricsEnabled = it }
-						)
-
-						SettingsLyricsOffsetControl(
-							title = "时间偏移",
-							offsetMs = preferenceManager.statusBarLyricsOffsetMs,
-							onOffsetChange = { preferenceManager.statusBarLyricsOffsetMs = it },
-							showSteppers = true,
-							modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
 						SettingsNavRow(
-							title = "歌词动效与播放页",
+							title = "歌词与播放页",
+							value = "$fontSizeLabel · 偏移 $offsetLabel",
 							onClick = { currentSheet = "lyrics" }
 						)
 					}
@@ -414,8 +397,9 @@ fun MeloStudioSettingsHomeScreen(
 
 			// 6. 极简版本尾注
 			item(key = "section-version", contentType = "settings-version") {
+				val appVersionName = rememberMeloVersionName()
 				Text(
-					text = "MeloKeep v1.0.15",
+					text = "MeloKeep v$appVersionName",
 					style = MaterialTheme.typography.labelSmall.tabularNums(),
 					color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
 					textAlign = TextAlign.Center,

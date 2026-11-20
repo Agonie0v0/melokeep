@@ -40,7 +40,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -291,6 +293,7 @@ fun MeloDiscoverScreen(
 									}
 								},
 								onClearHistory = controller::clearHistory,
+								onRemoveHistory = controller::removeHistory,
 								onPickHistoryOrHot = { kw -> submitSearch(kw, false) },
 								onPlayTracks = { songs, startIndex ->
 									player.playNow(songs, startIndex)
@@ -570,6 +573,7 @@ private fun DiscoverSearchModeBody(
 	onClearSelection: () -> Unit,
 	onBatchDownload: () -> Unit,
 	onClearHistory: () -> Unit,
+	onRemoveHistory: (String) -> Unit,
 	onPickHistoryOrHot: (String) -> Unit,
 	onPlayTracks: (List<DomainSong>, Int) -> Unit,
 	onTogglePlayPause: () -> Unit,
@@ -581,6 +585,13 @@ private fun DiscoverSearchModeBody(
 	val listState = rememberLazyListState()
 	val expandedGroups = remember(state.keyword) {
 		mutableStateMapOf<String, Boolean>()
+	}
+	var manageHistory by remember { mutableStateOf(false) }
+	var clearHistoryConfirmOpen by remember { mutableStateOf(false) }
+	LaunchedEffect(state.searchHistory.isEmpty()) {
+		if (state.searchHistory.isEmpty()) {
+			manageHistory = false
+		}
 	}
 
 	val groupedTracks = state.groupedTracks
@@ -648,15 +659,29 @@ private fun DiscoverSearchModeBody(
 									MeloSectionLabel(
 										title = "最近搜索",
 										trailing = {
-											Text(
-												text = "清空",
-												style = MaterialTheme.typography.labelMedium,
-												color = MaterialTheme.colorScheme.primary,
-												modifier = Modifier
-													.clip(CircleShape)
-													.clickable(onClick = onClearHistory)
-													.padding(horizontal = 6.dp, vertical = 2.dp)
-											)
+											Row(
+												horizontalArrangement = Arrangement.spacedBy(8.dp),
+												verticalAlignment = Alignment.CenterVertically
+											) {
+												Text(
+													text = if (manageHistory) "完成" else "管理",
+													style = MaterialTheme.typography.labelMedium,
+													color = MaterialTheme.colorScheme.primary,
+													modifier = Modifier
+														.clip(CircleShape)
+														.clickable { manageHistory = !manageHistory }
+														.padding(horizontal = 6.dp, vertical = 2.dp)
+												)
+												Text(
+													text = "清空",
+													style = MaterialTheme.typography.labelMedium,
+													color = MaterialTheme.colorScheme.error,
+													modifier = Modifier
+														.clip(CircleShape)
+														.clickable { clearHistoryConfirmOpen = true }
+														.padding(horizontal = 6.dp, vertical = 2.dp)
+												)
+											}
 										}
 									)
 									FlowRow(
@@ -666,7 +691,14 @@ private fun DiscoverSearchModeBody(
 										state.searchHistory.forEach { item ->
 											DiscoverQuietTagChip(
 												label = item,
-												onClick = { onPickHistoryOrHot(item) }
+												editing = manageHistory,
+												onClick = {
+													if (manageHistory) {
+														onRemoveHistory(item)
+													} else {
+														onPickHistoryOrHot(item)
+													}
+												}
 											)
 										}
 									}
@@ -884,11 +916,40 @@ private fun DiscoverSearchModeBody(
 			)
 		}
 	}
+
+	if (clearHistoryConfirmOpen) {
+		AlertDialog(
+			onDismissRequest = { clearHistoryConfirmOpen = false },
+			title = { Text("清空搜索历史") },
+			text = { Text("确认清空全网搜索的所有最近记录吗？") },
+			confirmButton = {
+				Button(
+					onClick = {
+						clearHistoryConfirmOpen = false
+						manageHistory = false
+						onClearHistory()
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("清空")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { clearHistoryConfirmOpen = false }) {
+					Text("取消")
+				}
+			}
+		)
+	}
 }
 
 @Composable
 private fun DiscoverQuietTagChip(
 	label: String,
+	editing: Boolean = false,
 	onClick: () -> Unit
 ) {
 	Surface(
@@ -897,17 +958,39 @@ private fun DiscoverQuietTagChip(
 		color = MaterialTheme.colorScheme.surfaceContainer,
 		border = BorderStroke(
 			width = MeloHairlineWidth,
-			color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+			color = if (editing) {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+			} else {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+			}
 		)
 	) {
-		Text(
-			text = label,
-			style = MaterialTheme.typography.bodySmall,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-		)
+		Row(
+			modifier = Modifier.padding(
+				start = 12.dp,
+				end = if (editing) 8.dp else 12.dp,
+				top = 6.dp,
+				bottom = 6.dp
+			),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(5.dp)
+		) {
+			Text(
+				text = label,
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			if (editing) {
+				Icon(
+					imageVector = Icons.Outlined.Close,
+					contentDescription = "删除搜索记录",
+					tint = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.size(13.dp)
+				)
+			}
+		}
 	}
 }
 

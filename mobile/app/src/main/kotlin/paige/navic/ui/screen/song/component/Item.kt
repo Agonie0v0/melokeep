@@ -51,6 +51,7 @@ import paige.navic.domain.model.DomainSong
 import paige.navic.ui.component.common.CoverArt
 import paige.navic.ui.component.common.MarqueeText
 import paige.navic.ui.component.common.SmallRatingRow
+import paige.navic.ui.component.common.SongQueueSwipeBackground
 import paige.navic.ui.component.common.SwipeToDismissBox
 import paige.navic.ui.component.sheet.SongSheet
 import paige.navic.ui.icons.Icons
@@ -102,36 +103,10 @@ fun SongListScreenItem(
 			scope.launch { dismissState.reset() }
 		},
 		backgroundContent = {
-			Box(
-				modifier = Modifier
-					.fillMaxSize()
-					.clip(MaterialTheme.shapes.extraSmall)
-					.background(MaterialTheme.colorScheme.primaryContainer)
-					.padding(horizontal = 20.dp),
-				contentAlignment = Alignment.CenterEnd
-			) {
-				when (dismissState.dismissDirection) {
-					SwipeToDismissBoxValue.StartToEnd -> {
-						Icon(
-							imageVector = Icons.Outlined.Queue,
-							contentDescription = stringResource(R.string.action_add_to_queue),
-							tint = MaterialTheme.colorScheme.onPrimaryContainer,
-							modifier = Modifier.align(Alignment.CenterStart)
-						)
-					}
-
-					SwipeToDismissBoxValue.EndToStart -> {
-						Icon(
-							imageVector = Icons.Outlined.QueuePlayNext,
-							contentDescription = stringResource(R.string.action_play_next),
-							tint = MaterialTheme.colorScheme.onPrimaryContainer,
-							modifier = Modifier.align(Alignment.CenterEnd)
-						)
-					}
-
-					else -> {}
-				}
-			}
+			SongQueueSwipeBackground(
+				dismissDirection = dismissState.dismissDirection,
+				shape = MaterialTheme.shapes.extraSmall
+			)
 		}
 	) {
 		Box {

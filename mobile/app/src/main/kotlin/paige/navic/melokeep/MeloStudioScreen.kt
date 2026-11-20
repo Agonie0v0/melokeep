@@ -477,6 +477,17 @@ fun MeloStudioScreen(
 				autoOpenNextJobDetail = true
 				controller.createScrapeJob(action = "both", autoApply = true)
 				filePickerOpen = false
+			},
+			onScrapeScope = { autoApply ->
+				controller.clearJobDetail()
+				autoOpenNextJobDetail = true
+				controller.createScrapeJob(
+					paths = emptyList(),
+					scopeDir = state.currentFolder.orEmpty(),
+					action = "both",
+					autoApply = autoApply
+				)
+				filePickerOpen = false
 			}
 		)
 	}
@@ -485,14 +496,24 @@ fun MeloStudioScreen(
 		StudioScrapeDiffSheet(
 			job = state.activeJobDetail,
 			jobsLoading = state.jobsLoading,
+			errorMessage = state.errorMessage,
+			noticeMessage = state.noticeMessage,
 			fileTagVersions = state.fileTagVersions,
 			hostNavBottom = navBottomPadding,
 			onDismissRequest = {
 				diffSheetVisible = false
 				controller.clearJobDetail()
 			},
+			onClearError = controller::clearError,
+			onClearNotice = controller::clearNotice,
 			onPreviewCandidate = { jobId, itemKey, candidateId ->
 				controller.previewCandidateChoice(jobId, itemKey, candidateId)
+			},
+			onSearchCandidates = { jobId, itemId, query ->
+				controller.searchJobItemCandidates(jobId, itemId, query)
+			},
+			onKeepExistingPending = { jobId ->
+				controller.keepExistingForPendingItems(jobId)
 			},
 			onLoadFileVersions = controller::loadFileVersions,
 			onRestoreFileVersion = { jobId, itemId ->

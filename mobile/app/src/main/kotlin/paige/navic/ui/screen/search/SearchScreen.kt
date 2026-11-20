@@ -8,25 +8,35 @@ package paige.navic.ui.screen.search
 
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.insert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
@@ -35,8 +45,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
@@ -130,7 +144,22 @@ fun SearchScreen(
 	var selectedCategory by remember { mutableStateOf(SearchCategory.ALL) }
 	var songToQueue by remember { mutableStateOf<DomainSong?>(null) }
 	var shareId by remember { mutableStateOf<String?>(null) }
+	var manageHistory by remember { mutableStateOf(false) }
+	var clearHistoryConfirmOpen by remember { mutableStateOf(false) }
 	val downloadDeletionHandler = rememberDownloadDeletionHandler()
+
+	LaunchedEffect(searchHistory.isEmpty()) {
+		if (searchHistory.isEmpty()) {
+			manageHistory = false
+		}
+	}
+
+	val recordCurrentQuery: () -> Unit = {
+		val currentText = query.text.toString().trim()
+		if (currentText.isNotEmpty()) {
+			viewModel.addToSearchHistory(currentText)
+		}
+	}
 
 	val rootViewModel = koinViewModel<RootViewModel>()
 	LaunchedEffect(Unit) {
@@ -238,11 +267,15 @@ fun SearchScreen(
 										starred = if (selectedSong == song) selectedSongIsStarred else song.starredAt != null,
 										rating = if (selectedSong == song) selectedSongRating else (song.userRating
 											?: 0),
-										onSelect = { viewModel.selectSong(song) },
+										onSelect = {
+											recordCurrentQuery()
+											viewModel.selectSong(song)
+										},
 										onDeselect = { viewModel.clearSelectedSong() },
 										onSetStarred = { viewModel.starSelectedSong(it) },
 										onSetShareId = { shareId = it },
 										onPlayNext = {
+											recordCurrentQuery()
 											if (player.checkDuplicate(song.id, preferenceManager)) {
 												songToQueue = song
 											} else {
@@ -250,13 +283,17 @@ fun SearchScreen(
 											}
 										},
 										onAddToQueue = {
+											recordCurrentQuery()
 											if (player.checkDuplicate(song.id, preferenceManager)) {
 												songToQueue = song
 											} else {
 												player.addToQueueSingle(song)
 											}
 										},
-										onClick = { player.playNow(song) },
+										onClick = {
+											recordCurrentQuery()
+											player.playNow(song)
+										},
 										onSetRating = { viewModel.rateSelectedSong(it) },
 										download = download,
 										onDownload = { downloadManager.downloadSong(song.id) },
@@ -283,6 +320,7 @@ fun SearchScreen(
 									selected = album == albumListSelection.data?.selected,
 									starred = albumListSelection.data?.selected?.starredAt != null,
 									onSelect = {
+										recordCurrentQuery()
 										albumListViewModel.selected = album
 									},
 									onDeselect = {
@@ -290,10 +328,17 @@ fun SearchScreen(
 									},
 									onSetStarred = { albumListViewModel.starAlbum(it) },
 									onSetShareId = { },
-									onPlayNext = { player.playNext(album as DomainSongCollection) },
-									onAddToQueue = { player.addToQueue(album as DomainSongCollection) },
+									onPlayNext = {
+										recordCurrentQuery()
+										player.playNext(album as DomainSongCollection)
+									},
+									onAddToQueue = {
+										recordCurrentQuery()
+										player.addToQueue(album as DomainSongCollection)
+									},
 									rating = albumListSelection.data?.selected?.userRating ?: 0,
-									onSetRating = { albumListViewModel.setRating(it) }
+									onSetRating = { albumListViewModel.setRating(it) },
+									onOpen = recordCurrentQuery
 								)
 							}
 
@@ -312,59 +357,130 @@ fun SearchScreen(
 									selected = artist == artistListSelection.data?.selected,
 									selectedArtistAlbums = emptyList(),
 									starred = artistListSelection.data?.selected?.starredAt != null,
-									onSelect = { artistListViewModel.selectArtist(artist) },
+									onSelect = {
+										recordCurrentQuery()
+										artistListViewModel.selectArtist(artist)
+									},
 									onDeselect = { artistListViewModel.clearSelection() },
 									onSetStarred = { artistListViewModel.starArtist(it) },
-									onPlayNext = { artistListViewModel.playArtistAlbumsNext(player) },
+									onPlayNext = {
+										recordCurrentQuery()
+										artistListViewModel.playArtistAlbumsNext(player)
+									},
 									onAddToQueue = {
+										recordCurrentQuery()
 										artistListViewModel.addArtistAlbumsToQueue(
 											player
 										)
-									}
+									},
+									onOpen = recordCurrentQuery
 								)
 							}
 						} else {
 							if (searchHistory.isNotEmpty()) {
 								item(span = { GridItemSpan(maxLineSpan) }) {
-									Text(
-										text = stringResource(R.string.action_search_history),
-										style = MaterialTheme.typography.titleMedium,
-										color = MaterialTheme.colorScheme.primary,
-										modifier = Modifier.padding(
-											horizontal = 20.dp,
-											vertical = 12.dp
+									Row(
+										modifier = Modifier
+											.fillMaxWidth()
+											.padding(horizontal = 20.dp, vertical = 10.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.SpaceBetween
+									) {
+										Text(
+											text = stringResource(R.string.action_search_history),
+											style = MaterialTheme.typography.titleMedium,
+											color = MaterialTheme.colorScheme.primary
 										)
-									)
-								}
-								items(
-									searchHistory.size,
-									span = { GridItemSpan(maxLineSpan) }) { index ->
-									val historyItem = searchHistory[index]
-									ListItem(
-										modifier = Modifier.clickable {
-											query.clearText()
-											query.edit { insert(0, historyItem) }
-										},
-										content = { Text(historyItem) },
-										leadingContent = {
-											Icon(
-												imageVector = Icons.Outlined.History,
-												contentDescription = null,
-												tint = MaterialTheme.colorScheme.onSurfaceVariant
+										Row(
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(8.dp)
+										) {
+											Text(
+												text = if (manageHistory) "完成" else "管理",
+												style = MaterialTheme.typography.labelLarge,
+												color = MaterialTheme.colorScheme.primary,
+												modifier = Modifier
+													.clip(CircleShape)
+													.clickable { manageHistory = !manageHistory }
+													.padding(horizontal = 8.dp, vertical = 4.dp)
 											)
-										},
-										trailingContent = {
-											IconButton(onClick = {
-												viewModel.removeFromSearchHistory(historyItem)
-											}) {
-												Icon(
-													imageVector = Icons.Outlined.Close,
-													contentDescription = stringResource(R.string.action_remove_from_history),
-													tint = MaterialTheme.colorScheme.onSurfaceVariant
+											Text(
+												text = "清空",
+												style = MaterialTheme.typography.labelLarge,
+												color = MaterialTheme.colorScheme.error,
+												modifier = Modifier
+													.clip(CircleShape)
+													.clickable { clearHistoryConfirmOpen = true }
+													.padding(horizontal = 8.dp, vertical = 4.dp)
+											)
+										}
+									}
+								}
+								item(span = { GridItemSpan(maxLineSpan) }) {
+									FlowRow(
+										modifier = Modifier
+											.fillMaxWidth()
+											.padding(horizontal = 20.dp, vertical = 4.dp),
+										horizontalArrangement = Arrangement.spacedBy(8.dp),
+										verticalArrangement = Arrangement.spacedBy(8.dp)
+									) {
+										searchHistory.forEach { historyItem ->
+											Surface(
+												onClick = {
+													if (manageHistory) {
+														viewModel.removeFromSearchHistory(historyItem)
+													} else {
+														query.clearText()
+														query.edit { insert(0, historyItem) }
+														viewModel.addToSearchHistory(historyItem)
+													}
+												},
+												shape = CircleShape,
+												color = MaterialTheme.colorScheme.surfaceContainer,
+												border = BorderStroke(
+													width = 1.dp,
+													color = if (manageHistory) {
+														MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+													} else {
+														MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+													}
 												)
+											) {
+												Row(
+													modifier = Modifier.padding(
+														start = 12.dp,
+														end = if (manageHistory) 8.dp else 12.dp,
+														top = 7.dp,
+														bottom = 7.dp
+													),
+													verticalAlignment = Alignment.CenterVertically,
+													horizontalArrangement = Arrangement.spacedBy(6.dp)
+												) {
+													Icon(
+														imageVector = Icons.Outlined.History,
+														contentDescription = null,
+														tint = MaterialTheme.colorScheme.onSurfaceVariant,
+														modifier = Modifier.size(14.dp)
+													)
+													Text(
+														text = historyItem,
+														style = MaterialTheme.typography.bodySmall,
+														color = MaterialTheme.colorScheme.onSurface,
+														maxLines = 1,
+														overflow = TextOverflow.Ellipsis
+													)
+													if (manageHistory) {
+														Icon(
+															imageVector = Icons.Outlined.Close,
+															contentDescription = stringResource(R.string.action_remove_from_history),
+															tint = MaterialTheme.colorScheme.onSurfaceVariant,
+															modifier = Modifier.size(14.dp)
+														)
+													}
+												}
 											}
 										}
-									)
+									}
 								}
 							}
 						}
@@ -372,6 +488,34 @@ fun SearchScreen(
 				}
 			}
 		}
+	}
+
+	if (clearHistoryConfirmOpen) {
+		AlertDialog(
+			onDismissRequest = { clearHistoryConfirmOpen = false },
+			title = { Text("清空搜索历史") },
+			text = { Text("确认清空所有曲库搜索历史记录吗？") },
+			confirmButton = {
+				Button(
+					onClick = {
+						clearHistoryConfirmOpen = false
+						manageHistory = false
+						viewModel.clearSearchHistory()
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("清空")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { clearHistoryConfirmOpen = false }) {
+					Text("取消")
+				}
+			}
+		)
 	}
 
 	QueueDuplicateDialog(

@@ -86,6 +86,7 @@ class ExoAudioGainProcessor : BaseAudioProcessor() {
 
 	override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
 		if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT ||
+			inputAudioFormat.encoding == C.ENCODING_PCM_24BIT ||
 			inputAudioFormat.encoding == C.ENCODING_PCM_32BIT ||
 			inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT) {
 			return inputAudioFormat
@@ -122,6 +123,22 @@ class ExoAudioGainProcessor : BaseAudioProcessor() {
 				}
 				inputBuffer.position(inputBuffer.position() + shortInput.position() * 2)
 				outputBuffer.position(outputBuffer.position() + shortOutput.position() * 2)
+			}
+			C.ENCODING_PCM_24BIT -> {
+				val vol = computedVolume.toDouble()
+				while (inputBuffer.remaining() >= 3) {
+					val b0 = inputBuffer.get().toInt() and 0xFF
+					val b1 = inputBuffer.get().toInt() and 0xFF
+					val b2 = inputBuffer.get().toInt()
+					val sample = b0 or (b1 shl 8) or (b2 shl 16)
+					val scaled = (sample * vol)
+						.toLong()
+						.coerceIn(-8_388_608L, 8_388_607L)
+						.toInt()
+					outputBuffer.put((scaled and 0xFF).toByte())
+					outputBuffer.put(((scaled ushr 8) and 0xFF).toByte())
+					outputBuffer.put(((scaled ushr 16) and 0xFF).toByte())
+				}
 			}
 			C.ENCODING_PCM_32BIT -> {
 				val intInput = inputBuffer.asIntBuffer()

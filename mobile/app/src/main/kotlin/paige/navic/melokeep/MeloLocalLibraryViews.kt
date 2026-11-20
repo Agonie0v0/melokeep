@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -167,11 +168,94 @@ private fun groupLocalArtists(items: List<LibraryLocalTrackItem>): List<LocalArt
 		}
 		.sortedBy { it.name.lowercase() }
 
+private data class LocalIndexedCatalog(
+	val allItems: List<LibraryLocalTrackItem>,
+	val albums: List<LocalAlbumGroup>,
+	val artists: List<LocalArtistGroup>,
+	val folderCount: Int
+)
+
+@Composable
+private fun rememberLocalIndexedCatalog(
+	studioState: MeloStudioUiState,
+	apiClient: MeloKeepApiClient
+): LocalIndexedCatalog {
+	val allItems = remember(studioState.libraryFiles) {
+		studioState.libraryFiles.map { file ->
+			val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+			LibraryLocalTrackItem(track, MeloTrackMapper.toDomainSong(track))
+		}
+	}
+	val albums = remember(allItems) { groupLocalAlbums(allItems) }
+	val artists = remember(allItems) { groupLocalArtists(allItems) }
+	val folderCount = remember(studioState.libraryFolders) {
+		studioState.libraryFolders.count { libraryNormalizeFolder(it.folder).isNotEmpty() }
+	}
+	return remember(allItems, albums, artists, folderCount) {
+		LocalIndexedCatalog(
+			allItems = allItems,
+			albums = albums,
+			artists = artists,
+			folderCount = folderCount
+		)
+	}
+}
+
+@Composable
+private fun LocalPlaylistMutationDialogs(
+	renameTarget: MeloLocalPlaylistSummary?,
+	deleteTarget: MeloLocalPlaylistSummary?,
+	onDismissRename: () -> Unit,
+	onDismissDelete: () -> Unit,
+	onConfirmRename: (MeloLocalPlaylistSummary, String) -> Unit,
+	onConfirmDelete: (MeloLocalPlaylistSummary) -> Unit
+) {
+	renameTarget?.let { target ->
+		LibraryLocalPlaylistNameDialog(
+			title = "重命名歌单",
+			confirmLabel = "保存",
+			initial = target.name,
+			onDismiss = onDismissRename,
+			onConfirm = { name -> onConfirmRename(target, name) }
+		)
+	}
+
+	deleteTarget?.let { target ->
+		AlertDialog(
+			onDismissRequest = onDismissDelete,
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error
+				)
+			},
+			title = { Text("删除歌单") },
+			text = { Text("确认删除「${target.name}」吗？仅删除歌单，不删除音乐文件。") },
+			confirmButton = {
+				Button(
+					onClick = { onConfirmDelete(target) },
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("删除")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = onDismissDelete) {
+					Text("取消")
+				}
+			}
+		)
+	}
+}
+
 @Composable
 internal fun LibraryLocalSection(
 	subTab: LibraryLocalSubTab,
-	detailRoute: LibraryLocalDetailRoute?,
-	onOpenRoute: (LibraryLocalDetailRoute?) -> Unit,
+	onOpenRoute: (LibraryLocalDetailRoute) -> Unit,
 	onSelectSubTab: (LibraryLocalSubTab) -> Unit,
 	studioState: MeloStudioUiState,
 	studioController: MeloStudioController,
@@ -191,22 +275,11 @@ internal fun LibraryLocalSection(
 	val deletionHandler = rememberDownloadDeletionHandler()
 	val scope = rememberCoroutineScope()
 
-	val allItems = remember(studioState.libraryFiles) {
-		studioState.libraryFiles.map { file ->
-			val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
-			LibraryLocalTrackItem(track, MeloTrackMapper.toDomainSong(track))
-		}
-	}
-	val favoriteItems = remember(localState.favorites) { localState.favorites.map { it.toLocalItem() } }
-	val albums = remember(allItems) { groupLocalAlbums(allItems) }
-	val artists = remember(allItems) { groupLocalArtists(allItems) }
-	var dailyMixSeed by remember { mutableIntStateOf(0) }
-	val dailyMixItems = remember(allItems, dailyMixSeed) {
-		allItems.shuffled(kotlin.random.Random(dailyMixSeed * 31 + allItems.size)).take(30)
-	}
-	val folderCount = remember(studioState.libraryFolders) {
-		studioState.libraryFolders.count { libraryNormalizeFolder(it.folder).isNotEmpty() }
-	}
+	val catalog = rememberLocalIndexedCatalog(studioState, apiClient)
+	val allItems = catalog.allItems
+	val albums = catalog.albums
+	val artists = catalog.artists
+	val folderCount = catalog.folderCount
 
 	var createPlaylistOpen by remember { mutableStateOf(false) }
 	var renameTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
@@ -223,131 +296,198 @@ internal fun LibraryLocalSection(
 		deletionHandler.requestDelete(DeleteDownloadTarget.Single(s.id, s.title))
 	}
 
-	LaunchedEffect(detailRoute) {
-		when (detailRoute) {
-			is LibraryLocalDetailRoute.Playlist -> localController.loadPlaylistDetail(detailRoute.id)
-			LibraryLocalDetailRoute.Favorites -> localController.refreshFavorites()
-			else -> localController.clearActivePlaylist()
+	Box(modifier = Modifier.fillMaxSize()) {
+		when (subTab) {
+			LibraryLocalSubTab.OVERVIEW -> LocalOverviewContent(
+				allItems = allItems,
+				albums = albums,
+				artists = artists,
+				folderCount = folderCount,
+				localState = localState,
+				downloadsMap = downloadsMap,
+				currentPlayingSongId = currentPlayingSongId,
+				filesLoading = studioState.filesLoading,
+				onOpenRoute = onOpenRoute,
+				onSelectSubTab = onSelectSubTab,
+				onPlaySongs = { songs, idx -> player.playNow(songs, idx) },
+				onToggleFavorite = toggleFavorite,
+				onDownloadSong = downloadOne,
+				onCancelSong = cancelOne,
+				onDeleteOffline = deleteOne,
+				onRefresh = {
+					localController.refreshAll()
+					onRefreshFiles()
+				}
+			)
+
+			LibraryLocalSubTab.SONGS -> LocalTrackListView(
+				items = allItems,
+				downloadsMap = downloadsMap,
+				favoriteIds = localState.favoriteIds,
+				currentPlayingSongId = currentPlayingSongId,
+				hostNavBottom = hostNavBottom,
+				emptyLabel = if (studioState.fileQuery.isNotBlank()) {
+					"未找到匹配「${studioState.fileQuery}」的曲目"
+				} else {
+					"本地库暂无已索引曲目"
+				},
+				loading = studioState.filesLoading,
+				title = null,
+				showOfflineAll = false,
+				hasMore = hasMore,
+				onLoadMore = studioController::loadMoreLibraryFiles,
+				onToggleFavorite = toggleFavorite,
+				onDownloadSong = downloadOne,
+				onCancelSong = cancelOne,
+				onDeleteOffline = deleteOne,
+				onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist
+			)
+
+			LibraryLocalSubTab.ALBUMS -> LocalAlbumsContent(
+				albums = albums,
+				loading = studioState.filesLoading,
+				hasMore = hasMore,
+				onLoadMore = studioController::loadMoreLibraryFiles,
+				onOpenAlbum = { onOpenRoute(LibraryLocalDetailRoute.Album(it.name)) }
+			)
+
+			LibraryLocalSubTab.ARTISTS -> LocalArtistsContent(
+				artists = artists,
+				loading = studioState.filesLoading,
+				hasMore = hasMore,
+				onLoadMore = studioController::loadMoreLibraryFiles,
+				onOpenArtist = { onOpenRoute(LibraryLocalDetailRoute.Artist(it.name)) }
+			)
+
+			LibraryLocalSubTab.PLAYLISTS -> LocalPlaylistsContent(
+				playlists = localState.playlists,
+				loading = localState.loading,
+				onCreate = { createPlaylistOpen = true },
+				onOpen = { onOpenRoute(LibraryLocalDetailRoute.Playlist(it.id)) },
+				onRename = { renameTarget = it },
+				onDelete = { deleteTarget = it }
+			)
+
+			LibraryLocalSubTab.FOLDERS -> LocalServerFilesSection(
+				studioState = studioState,
+				currentPlayingSongId = currentPlayingSongId,
+				isPlaybackPaused = currentPlayingPair.second,
+				onRefresh = onRefreshFiles,
+				onNavigateFolder = { folder ->
+					studioController.loadLibraryFiles(
+						query = studioState.fileQuery,
+						folder = folder,
+						reset = true
+					)
+				},
+				onLongClickFolder = onRenameFolder,
+				onToggleSelect = studioController::toggleFileSelection,
+				onSelectAll = studioController::selectAllFiles,
+				onClearSelection = studioController::clearFileSelection,
+				onPlayFile = { file ->
+					val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+					player.playNow(MeloTrackMapper.toDomainSong(track))
+				},
+				onEditTags = onEditTags,
+				onLoadMore = studioController::loadMoreLibraryFiles,
+				downloadsMap = downloadsMap,
+				onDownloadFile = { file ->
+					val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+					downloadOne(MeloTrackMapper.toDomainSong(track))
+				},
+				onCancelFileDownload = { file ->
+					val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+					cancelOne(MeloTrackMapper.toDomainSong(track))
+				},
+				onDeleteFileOffline = { file ->
+					val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+					deleteOne(MeloTrackMapper.toDomainSong(track))
+				}
+			)
 		}
 	}
 
-	Box(modifier = Modifier.fillMaxSize()) {
-		when (val route = detailRoute) {
-			null -> when (subTab) {
-				LibraryLocalSubTab.OVERVIEW -> LocalOverviewContent(
-					allItems = allItems,
-					albums = albums,
-					artists = artists,
-					folderCount = folderCount,
-					localState = localState,
-					downloadsMap = downloadsMap,
-					currentPlayingSongId = currentPlayingSongId,
-					filesLoading = studioState.filesLoading,
-					onOpenRoute = onOpenRoute,
-					onSelectSubTab = onSelectSubTab,
-					onPlaySongs = { songs, idx -> player.playNow(songs, idx) },
-					onToggleFavorite = toggleFavorite,
-					onDownloadSong = downloadOne,
-					onCancelSong = cancelOne,
-					onDeleteOffline = deleteOne,
-					onRefresh = {
-						localController.refreshAll()
-						onRefreshFiles()
-					}
-				)
-
-				LibraryLocalSubTab.SONGS -> LocalTrackListView(
-					items = allItems,
-					downloadsMap = downloadsMap,
-					favoriteIds = localState.favoriteIds,
-					currentPlayingSongId = currentPlayingSongId,
-					hostNavBottom = hostNavBottom,
-					emptyLabel = if (studioState.fileQuery.isNotBlank()) {
-						"未找到匹配「${studioState.fileQuery}」的曲目"
-					} else {
-						"本地库暂无已索引曲目"
-					},
-					loading = studioState.filesLoading,
-					title = null,
-					showOfflineAll = false,
-					hasMore = hasMore,
-					onLoadMore = studioController::loadMoreLibraryFiles,
-					onToggleFavorite = toggleFavorite,
-					onDownloadSong = downloadOne,
-					onCancelSong = cancelOne,
-					onDeleteOffline = deleteOne,
-					onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist
-				)
-
-				LibraryLocalSubTab.ALBUMS -> LocalAlbumsContent(
-					albums = albums,
-					loading = studioState.filesLoading,
-					hasMore = hasMore,
-					onLoadMore = studioController::loadMoreLibraryFiles,
-					onOpenAlbum = { onOpenRoute(LibraryLocalDetailRoute.Album(it.name)) }
-				)
-
-				LibraryLocalSubTab.ARTISTS -> LocalArtistsContent(
-					artists = artists,
-					loading = studioState.filesLoading,
-					hasMore = hasMore,
-					onLoadMore = studioController::loadMoreLibraryFiles,
-					onOpenArtist = { onOpenRoute(LibraryLocalDetailRoute.Artist(it.name)) }
-				)
-
-				LibraryLocalSubTab.PLAYLISTS -> LocalPlaylistsContent(
-					playlists = localState.playlists,
-					loading = localState.loading,
-					onCreate = { createPlaylistOpen = true },
-					onOpen = { onOpenRoute(LibraryLocalDetailRoute.Playlist(it.id)) },
-					onRename = { renameTarget = it },
-					onDelete = { deleteTarget = it }
-				)
-
-				LibraryLocalSubTab.FOLDERS -> LocalServerFilesSection(
-					studioState = studioState,
-					currentPlayingSongId = currentPlayingSongId,
-					isPlaybackPaused = currentPlayingPair.second,
-					onRefresh = onRefreshFiles,
-					onNavigateFolder = { folder ->
-						studioController.loadLibraryFiles(
-							query = studioState.fileQuery,
-							folder = folder,
-							reset = true
-						)
-					},
-					onLongClickFolder = onRenameFolder,
-					onToggleSelect = studioController::toggleFileSelection,
-					onSelectAll = studioController::selectAllFiles,
-					onClearSelection = studioController::clearFileSelection,
-					onPlayFile = { file ->
-						val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
-						player.playNow(MeloTrackMapper.toDomainSong(track))
-					},
-					onEditTags = onEditTags,
-					onLoadMore = studioController::loadMoreLibraryFiles,
-					downloadsMap = downloadsMap,
-					onDownloadFile = { file ->
-						val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
-						downloadOne(MeloTrackMapper.toDomainSong(track))
-					},
-					onCancelFileDownload = { file ->
-						val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
-						cancelOne(MeloTrackMapper.toDomainSong(track))
-					},
-					onDeleteFileOffline = { file ->
-						val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
-						deleteOne(MeloTrackMapper.toDomainSong(track))
-					}
-				)
+	if (createPlaylistOpen) {
+		LibraryLocalPlaylistNameDialog(
+			title = "新建歌单",
+			confirmLabel = "创建",
+			initial = "",
+			onDismiss = { createPlaylistOpen = false },
+			onConfirm = { name ->
+				createPlaylistOpen = false
+				localController.createPlaylist(name)
 			}
+		)
+	}
 
+	LocalPlaylistMutationDialogs(
+		renameTarget = renameTarget,
+		deleteTarget = deleteTarget,
+		onDismissRename = { renameTarget = null },
+		onDismissDelete = { deleteTarget = null },
+		onConfirmRename = { target, name ->
+			renameTarget = null
+			localController.renamePlaylist(target.id, name)
+		},
+		onConfirmDelete = { target ->
+			deleteTarget = null
+			localController.deletePlaylist(target.id)
+		}
+	)
+}
+
+@Composable
+internal fun LibraryLocalDetailView(
+	route: LibraryLocalDetailRoute,
+	onBack: () -> Unit,
+	studioState: MeloStudioUiState,
+	localState: MeloLocalLibraryUiState,
+	localController: MeloLocalLibraryController,
+	downloadsMap: Map<String, DownloadEntity>,
+	currentPlayingPair: Pair<String?, Boolean>,
+	hostNavBottom: Dp,
+	onRequestAddToLocalPlaylist: (List<String>) -> Unit
+) {
+	val apiClient = koinInject<MeloKeepApiClient>()
+	val downloadManager = koinInject<DownloadManager>()
+	val deletionHandler = rememberDownloadDeletionHandler()
+	val scope = rememberCoroutineScope()
+
+	val catalog = rememberLocalIndexedCatalog(studioState, apiClient)
+	val allItems = catalog.allItems
+	val albums = catalog.albums
+	val artists = catalog.artists
+	val favoriteItems = remember(localState.favorites) { localState.favorites.map { it.toLocalItem() } }
+	var dailyMixSeed by remember { mutableIntStateOf(0) }
+	val dailyMixItems = remember(allItems, dailyMixSeed) {
+		allItems.shuffled(kotlin.random.Random(dailyMixSeed * 31 + allItems.size)).take(30)
+	}
+
+	var renameTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
+	var deleteTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
+
+	val currentPlayingSongId = currentPlayingPair.first
+	val toggleFavorite: (MeloTrack) -> Unit = { localController.toggleFavorite(it) }
+	val downloadOne: (DomainSong) -> Unit = { s ->
+		scope.launch { queueSongsOffline(downloadManager, listOf(s)) }
+	}
+	val cancelOne: (DomainSong) -> Unit = { s -> downloadManager.cancelDownload(s.id) }
+	val deleteOne: (DomainSong) -> Unit = { s ->
+		deletionHandler.requestDelete(DeleteDownloadTarget.Single(s.id, s.title))
+	}
+
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
+	) {
+		when (route) {
 			LibraryLocalDetailRoute.Favorites -> Column(Modifier.fillMaxSize()) {
 				LocalDetailHeader(
 					title = "我喜欢",
 					subtitle = "${favoriteItems.size} 首",
 					cover = null,
-					onBack = { onOpenRoute(null) }
+					onBack = onBack
 				)
 				LocalTrackListView(
 					modifier = Modifier.weight(1f),
@@ -371,7 +511,7 @@ internal fun LibraryLocalSection(
 					title = "猜你喜欢",
 					subtitle = "${dailyMixItems.size} 首",
 					cover = null,
-					onBack = { onOpenRoute(null) },
+					onBack = onBack,
 					actions = {
 						IconButton(onClick = { dailyMixSeed += 1 }) {
 							Icon(Icons.Outlined.Refresh, contentDescription = "换一批")
@@ -408,7 +548,7 @@ internal fun LibraryLocalSection(
 						title = playlistName,
 						subtitle = "${playlistItems.size} 首",
 						cover = summary?.cover,
-						onBack = { onOpenRoute(null) },
+						onBack = onBack,
 						actions = {
 							IconButton(onClick = { renameTarget = target }) {
 								Icon(Icons.Outlined.Edit, contentDescription = "重命名歌单")
@@ -452,7 +592,7 @@ internal fun LibraryLocalSection(
 						title = route.name,
 						subtitle = group?.let { "${it.artist} · ${it.items.size} 首" },
 						cover = group?.cover,
-						onBack = { onOpenRoute(null) }
+						onBack = onBack
 					)
 					LocalTrackListView(
 						modifier = Modifier.weight(1f),
@@ -481,7 +621,7 @@ internal fun LibraryLocalSection(
 						title = route.name,
 						subtitle = group?.let { "${it.albumCount} 专辑 · ${it.items.size} 首" },
 						cover = group?.cover,
-						onBack = { onOpenRoute(null) }
+						onBack = onBack
 					)
 					LocalTrackListView(
 						modifier = Modifier.weight(1f),
@@ -503,68 +643,23 @@ internal fun LibraryLocalSection(
 		}
 	}
 
-	if (createPlaylistOpen) {
-		LibraryLocalPlaylistNameDialog(
-			title = "新建歌单",
-			confirmLabel = "创建",
-			initial = "",
-			onDismiss = { createPlaylistOpen = false },
-			onConfirm = { name ->
-				createPlaylistOpen = false
-				localController.createPlaylist(name)
+	LocalPlaylistMutationDialogs(
+		renameTarget = renameTarget,
+		deleteTarget = deleteTarget,
+		onDismissRename = { renameTarget = null },
+		onDismissDelete = { deleteTarget = null },
+		onConfirmRename = { target, name ->
+			renameTarget = null
+			localController.renamePlaylist(target.id, name)
+		},
+		onConfirmDelete = { target ->
+			deleteTarget = null
+			localController.deletePlaylist(target.id)
+			if ((route as? LibraryLocalDetailRoute.Playlist)?.id == target.id) {
+				onBack()
 			}
-		)
-	}
-
-	renameTarget?.let { target ->
-		LibraryLocalPlaylistNameDialog(
-			title = "重命名歌单",
-			confirmLabel = "保存",
-			initial = target.name,
-			onDismiss = { renameTarget = null },
-			onConfirm = { name ->
-				renameTarget = null
-				localController.renamePlaylist(target.id, name)
-			}
-		)
-	}
-
-	deleteTarget?.let { target ->
-		AlertDialog(
-			onDismissRequest = { deleteTarget = null },
-			icon = {
-				Icon(
-					imageVector = Icons.Outlined.Delete,
-					contentDescription = null,
-					tint = MaterialTheme.colorScheme.error
-				)
-			},
-			title = { Text("删除歌单") },
-			text = { Text("确认删除「${target.name}」吗？仅删除歌单，不删除音乐文件。") },
-			confirmButton = {
-				Button(
-					onClick = {
-						deleteTarget = null
-						localController.deletePlaylist(target.id)
-						if ((detailRoute as? LibraryLocalDetailRoute.Playlist)?.id == target.id) {
-							onOpenRoute(null)
-						}
-					},
-					colors = ButtonDefaults.buttonColors(
-						containerColor = MaterialTheme.colorScheme.error,
-						contentColor = MaterialTheme.colorScheme.onError
-					)
-				) {
-					Text("删除")
-				}
-			},
-			dismissButton = {
-				TextButton(onClick = { deleteTarget = null }) {
-					Text("取消")
-				}
-			}
-		)
-	}
+		}
+	)
 }
 
 @Composable
@@ -578,7 +673,8 @@ private fun LocalDetailHeader(
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 4.dp),
+			.statusBarsPadding()
+			.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(8.dp)
 	) {

@@ -471,7 +471,7 @@ fun App() {
 						}
 					}
 				}
-				if (preferenceManager.checkForUpdates && !BuildInfo.FDROID) {
+				if (!BuildInfo.FDROID) {
 					ChangelogSheet()
 				}
 			}

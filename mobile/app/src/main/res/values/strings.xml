@@ -24,7 +24,7 @@
 	<string name="title_bottom_app_bar">Bottom Bar</string>
 	<string name="title_playback">Playback</string>
 	<string name="title_data_storage">Data &amp; Storage</string>
-	<string name="title_sync_control">Synchronization control</string>
+	<string name="title_sync_control">Library sync</string>
 	<string name="title_cache_management">Cache management</string>
 	<string name="title_danger_zone">Danger zone</string>
 	<string name="title_developer">Developer options</string>
@@ -446,8 +446,8 @@
 	<string name="notice_deleted_downloads">Deleted downloads.</string>
 	<string name="notice_removed_from_playlist">Removed from playlist.</string>
 	<string name="notice_created_radio">Radio %1$s added.</string>
-	<string name="notice_added_to_queue">Added to queue.</string>
-	<string name="notice_play_next">Playing next.</string>
+	<string name="notice_added_to_queue">Added to end of queue.</string>
+	<string name="notice_play_next">Set to play next.</string>
 	<string name="notice_added_to_playlist">Added to %1$s.</string>
 	<string name="notice_added_to_multiple_playlists">Added to multiple playlists.</string>
 	<string name="notice_download_started">Download started.</string>
@@ -586,8 +586,8 @@
 	<string name="label_search_queue">Search title, artist or album</string>
 	<string name="action_clear_queue_search">Clear search</string>
 	<string name="info_no_queue_matches">No matching songs in this queue</string>
-	<string name="channel_library_sync">Library Synchronization</string>
-	<string name="channel_library_sync_description">Notifications for database synchronization updates</string>
+	<string name="channel_library_sync">Library Sync</string>
+	<string name="channel_library_sync_description">Progress notifications for initial or manual full library syncs</string>
 	<string name="channel_music_downloads">Music Downloads</string>
 	<string name="channel_music_downloads_description">Notifications for music file and media downloads</string>
 	<string name="notice_app_icon_changed">App icon changed. Closing the app.</string>

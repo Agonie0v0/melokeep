@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,6 +23,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
@@ -45,6 +47,7 @@ fun LyricsScreenToolbar(
 	toggleIsSelecting: () -> Unit,
 	windowInsets: WindowInsets,
 	selectedIndices: ImmutableList<Int>,
+	onOpenStyleSheet: (() -> Unit)? = null,
 	moreMenuContent: @Composable () -> Unit = {},
 	onOpenMoreMenu: (() -> Unit)? = null
 ) {
@@ -93,6 +96,19 @@ fun LyricsScreenToolbar(
 						contentDescription = stringResource(R.string.action_share_lyrics),
 						modifier = Modifier.size(26.dp)
 					)
+				}
+
+				if (!isSelecting && onOpenStyleSheet != null) {
+					Spacer(Modifier.width(6.dp))
+					TopBarButton(onClick = onOpenStyleSheet) {
+						Text(
+							text = "Aa",
+							style = MaterialTheme.typography.titleSmall.copy(
+								fontWeight = FontWeight.Bold,
+								fontSize = 15.sp
+							)
+						)
+					}
 				}
 
 				if (!isSelecting && onOpenMoreMenu != null) {

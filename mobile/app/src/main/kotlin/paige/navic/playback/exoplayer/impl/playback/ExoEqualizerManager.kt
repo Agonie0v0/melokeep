@@ -26,10 +26,19 @@ class ExoEqualizerManager(
 	private val equalizerManager: EqualizerManager,
 	private val context: Context
 ) : Player.Listener {
-	private var equalizerMode = EqualizerMode.Disabled
+	private var equalizerMode = equalizerManager.config.value.mode
 	private val scope = CoroutineScope(Dispatchers.Default)
 	private var currentAudioSessionId = C.AUDIO_SESSION_ID_UNSET
 	private var equalizer: Equalizer? = null
+
+	fun attachSession(audioSessionId: Int) {
+		if (audioSessionId == C.AUDIO_SESSION_ID_UNSET || audioSessionId == currentAudioSessionId) {
+			return
+		}
+		releaseEqualizer()
+		currentAudioSessionId = audioSessionId
+		applyEqualizerMode(equalizerMode, closeCurrentSession = false)
+	}
 
 	override fun onAudioSessionIdChanged(audioSessionId: Int) {
 		releaseEqualizer()

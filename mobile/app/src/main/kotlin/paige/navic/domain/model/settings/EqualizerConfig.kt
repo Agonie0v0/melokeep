@@ -16,5 +16,5 @@ data class EqualizerConfig(
 	val bandCount: Int = 0,
 	val bandLowerRange: Float = 0f,
 	val bandUpperRange: Float = 0f,
-	val mode: EqualizerMode = EqualizerMode.Disabled
+	val mode: EqualizerMode = EqualizerMode.External
 )

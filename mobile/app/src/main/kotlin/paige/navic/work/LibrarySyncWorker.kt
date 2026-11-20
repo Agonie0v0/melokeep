@@ -31,7 +31,8 @@ class LibrarySyncWorker(
 
 		val force = inputData.getBoolean(WorkKeys.FORCE, false)
 		val isPeriodic = inputData.getBoolean(WorkKeys.PERIODIC, false)
-		val showForeground = syncCoordinator.isFullSyncDue(force)
+		val manualSync = inputData.getBoolean(WorkKeys.MANUAL, false)
+		val showForeground = !isPeriodic && (manualSync || syncCoordinator.isInitialSyncDue())
 
 		if (showForeground) {
 			setForeground(createForegroundInfo(0f, R.string.info_syncing))
@@ -46,7 +47,9 @@ class LibrarySyncWorker(
 					)
 				)
 
-				setForeground(createForegroundInfo(progress, message))
+				if (showForeground) {
+					setForeground(createForegroundInfo(progress, message))
+				}
 			}
 
 			if (result.isSuccess) {

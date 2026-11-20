@@ -41,7 +41,7 @@ import paige.navic.ui.screen.settings.component.SettingsGroupDefaults
 import paige.navic.ui.screen.settings.component.SettingsNavItem
 import paige.navic.ui.screen.settings.component.SettingsToggleItem
 
-const val GITHUB_BASE_URL = "https://github.com/ssalggnikool/Navic/"
+const val GITHUB_BASE_URL = "https://github.com/Agonie0v0/melokeep/"
 
 @Composable
 fun SettingsAboutScreen() {

@@ -25,10 +25,14 @@ class SyncCoordinator(
 	private val sessionManager: SessionManager
 ) {
 	private val mutex = Mutex()
-	private val fullSyncThreshold = 1.hours
+	private val fullSyncThreshold = 6.hours
 
 	val isLoggedIn: Boolean
 		get() = sessionManager.sessionState.value is SessionState.Authenticated
+
+	fun isInitialSyncDue(): Boolean {
+		return preferenceManager.lastFullSyncTime <= 0L
+	}
 
 	fun isFullSyncDue(force: Boolean = false): Boolean {
 		return force || preferenceManager.lastFullSyncTime <= 0L ||

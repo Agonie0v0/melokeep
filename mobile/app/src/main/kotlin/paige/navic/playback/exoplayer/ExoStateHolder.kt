@@ -206,14 +206,14 @@ class ExoStateHolder : KoinComponent {
 
 		return RenderersFactory { eventHandler, _, eventListener, _, _ ->
 			arrayOf<BaseRenderer>(
-				FfmpegAudioRenderer(
+				MediaCodecAudioRenderer(
+					context,
+					MediaCodecSelector.DEFAULT,
 					eventHandler,
 					eventListener,
 					audioSink
 				),
-				MediaCodecAudioRenderer(
-					context,
-					MediaCodecSelector.DEFAULT,
+				FfmpegAudioRenderer(
 					eventHandler,
 					eventListener,
 					audioSink

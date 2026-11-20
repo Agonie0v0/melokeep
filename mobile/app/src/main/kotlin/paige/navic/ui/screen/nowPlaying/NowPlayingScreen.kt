@@ -64,6 +64,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
@@ -114,6 +115,7 @@ import paige.navic.ui.navigation.Screen
 import paige.navic.ui.screen.lyrics.component.LyricsScreenContent
 import paige.navic.ui.screen.lyrics.component.LyricsScreenLoadingView
 import paige.navic.ui.screen.lyrics.component.LyricsScreenPlaceholder
+import paige.navic.ui.screen.lyrics.component.LyricsStyleBottomSheet
 import paige.navic.ui.screen.lyrics.viewmodel.LyricsScreenViewModel
 import paige.navic.ui.screen.nowPlaying.component.controls.NowPlayingArtworkPager
 import paige.navic.ui.screen.nowPlaying.component.rows.NowPlayingControlsRow
@@ -195,6 +197,7 @@ fun NowPlayingScreen() {
 		lyricsMounted = true
 	}
 	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
+	var lyricsStyleSheetOpen by rememberSaveable { mutableStateOf(false) }
 	val lyricsOffsetMs = preferenceManager.playerLyricsOffsetMs
 
 	val sheetState = LocalSheetState.current
@@ -230,6 +233,7 @@ fun NowPlayingScreen() {
 				onOpenSleepTimer = { sleepTimerOpen = true },
 				onOpenQueue = dropUnlessResumed { backStack.add(Screen.Queue) },
 				onOpenFullLyrics = dropUnlessResumed { backStack.add(Screen.Lyrics) },
+				onOpenLyricsStyle = { lyricsStyleSheetOpen = true },
 				onAdjustLyricsOffset = { delta ->
 					preferenceManager.playerLyricsOffsetMs =
 						(preferenceManager.playerLyricsOffsetMs + delta).coerceIn(-5000, 5000)
@@ -341,6 +345,10 @@ fun NowPlayingScreen() {
 	if (sleepTimerOpen) {
 		SleepTimerSheet(onDismissRequest = { sleepTimerOpen = false })
 	}
+	LyricsStyleBottomSheet(
+		presented = lyricsStyleSheetOpen,
+		onDismissRequest = { lyricsStyleSheetOpen = false }
+	)
 }
 
 @Composable
@@ -355,6 +363,7 @@ private fun NowPlayingStageToolbar(
 	onOpenSleepTimer: () -> Unit,
 	onOpenQueue: () -> Unit,
 	onOpenFullLyrics: () -> Unit,
+	onOpenLyricsStyle: () -> Unit,
 	onAdjustLyricsOffset: (Int) -> Unit,
 	onResetLyricsOffset: () -> Unit,
 	modifier: Modifier = Modifier
@@ -478,6 +487,18 @@ private fun NowPlayingStageToolbar(
 			}
 
 			if (stageMode == NowPlayingStageMode.LYRICS) {
+				TopBarButton(
+					onClick = onOpenLyricsStyle,
+					content = {
+						Text(
+							text = "Aa",
+							style = MaterialTheme.typography.titleSmall.copy(
+								fontWeight = FontWeight.Bold,
+								fontSize = 14.sp
+							)
+						)
+					}
+				)
 				Box {
 					TopBarButton(
 						onClick = { moreMenuOpen = true },
@@ -544,6 +565,13 @@ private fun NowPlayingStageToolbar(
 							}
 						}
 						HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+						DropdownMenuItem(
+							text = { Text("歌词字号与样式") },
+							onClick = {
+								moreMenuOpen = false
+								onOpenLyricsStyle()
+							}
+						)
 						DropdownMenuItem(
 							text = { Text("全屏歌词与金句分享") },
 							onClick = {

@@ -191,7 +191,7 @@
     <string name="action_reorder">重新排序</string>
     <string name="info_unknown">未知</string>
     <string name="title_data_storage">数据&amp;存储</string>
-    <string name="title_sync_control">同步化控制</string>
+    <string name="title_sync_control">曲库同步</string>
     <string name="title_cache_management">缓存与存储管理</string>
     <string name="title_danger_zone">危险区</string>
     <string name="title_library_download">下载整个库</string>
@@ -236,7 +236,7 @@
     <string name="action_sleep_timer">睡眠定时器</string>
     <string name="action_sleep_timer_enabled">睡眠定时器 - 剩余 %1$s</string>
     <string name="action_disable_sleep_timer">关闭定时器</string>
-    <string name="action_add_to_queue">添加到队列</string>
+    <string name="action_add_to_queue">加入队尾</string>
     <string name="action_play_next">下一首播放</string>
     <string name="action_clear_image_cache">清理图像缓存</string>
     <string name="action_rebuild_database">重建数据库</string>
@@ -329,8 +329,8 @@
     <string name="notice_deleted_download">已删除下载。</string>
     <string name="notice_removed_from_playlist">已从播放列表中移除。</string>
     <string name="notice_created_radio">已创建电台 %1$s。</string>
-    <string name="notice_added_to_queue">已添加到队列。</string>
-    <string name="notice_play_next">接下来播放。</string>
+    <string name="notice_added_to_queue">已加入待播队尾</string>
+    <string name="notice_play_next">已设为下一首播放</string>
     <string name="notice_added_to_playlist">已添加到 %1$s。</string>
     <string name="notice_added_to_multiple_playlists">已添加到多个播放列表。</string>
     <string name="notice_download_started">下载已开始。</string>
@@ -471,8 +471,8 @@
 	<string name="label_search_queue">搜索歌曲、歌手或专辑</string>
 	<string name="action_clear_queue_search">清空搜索</string>
 	<string name="info_no_queue_matches">当前队列中没有匹配的歌曲</string>
-	<string name="channel_library_sync">音乐库同步</string>
-	<string name="channel_library_sync_description">音乐库同步进度通知</string>
+	<string name="channel_library_sync">曲库同步</string>
+	<string name="channel_library_sync_description">首次同步或手动全量同步的进度通知</string>
 	<string name="channel_music_downloads">音乐下载</string>
 	<string name="channel_music_downloads_description">音乐文件和媒体下载通知</string>
 	<string name="notice_app_icon_changed">应用图标已更改，正在关闭应用。</string>

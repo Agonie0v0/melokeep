@@ -60,6 +60,7 @@ import paige.navic.ui.screen.lyrics.component.LyricsScreenContent
 import paige.navic.ui.screen.lyrics.component.LyricsScreenLoadingView
 import paige.navic.ui.screen.lyrics.component.LyricsScreenPlaceholder
 import paige.navic.ui.screen.lyrics.component.LyricsScreenToolbar
+import paige.navic.ui.screen.lyrics.component.LyricsStyleBottomSheet
 import paige.navic.ui.screen.lyrics.dialog.LyricsShareSheet
 import paige.navic.ui.screen.lyrics.viewmodel.LyricsScreenViewModel
 import paige.navic.ui.theme.tabularNums
@@ -89,6 +90,7 @@ fun LyricsScreen(
 	var wasPlayingBeforeSelection by rememberSaveable { mutableStateOf(false) }
 	var shareSheetOpen by rememberSaveable { mutableStateOf(false) }
 	var moreMenuExpanded by rememberSaveable { mutableStateOf(false) }
+	var styleSheetOpen by rememberSaveable { mutableStateOf(false) }
 
 	val song = song ?: return LyricsScreenPlaceholder(
 		onRefresh = { viewModel.refreshResults() }
@@ -137,6 +139,7 @@ fun LyricsScreen(
 				toggleIsSelecting = toggleIsSelecting,
 				windowInsets = windowInsets,
 				selectedIndices = selectedIndices.toImmutableList(),
+				onOpenStyleSheet = { styleSheetOpen = true },
 				onOpenMoreMenu = { moreMenuExpanded = true },
 				moreMenuContent = {
 					// 歌词时间轴微调收纳进右上角 ⋯ 更多菜单内，不在顶栏暴露一级按钮
@@ -279,6 +282,11 @@ fun LyricsScreen(
 				)
 			}
 		}
+
+		LyricsStyleBottomSheet(
+			presented = styleSheetOpen,
+			onDismissRequest = { styleSheetOpen = false }
+		)
 	}
 }
 

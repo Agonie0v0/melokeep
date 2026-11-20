@@ -42,6 +42,7 @@ import paige.navic.domain.model.settings.StreamingQuality
 import paige.navic.domain.model.settings.Theme
 import paige.navic.domain.model.settings.ThemeMode
 import paige.navic.domain.model.settings.ToolbarPosition
+import paige.navic.domain.model.settings.UpdateCheckFrequency
 import com.russhwolf.settings.Settings as KmpSettings
 
 class PreferenceManager(
@@ -73,6 +74,10 @@ class PreferenceManager(
 	var statusBarLyricsEnabled by preference(true)
 	var statusBarLyricsOffsetMs by preference(0)
 	var playerLyricsOffsetMs by preference(0)
+	var lyricsFontSizeSp by preference(28f)
+	var lyricsActiveColorHex by preference("")
+	var lyricsInactiveAlpha by preference(0.45f)
+	var lyricsTextAlign by preference("start")
 	var dailyMixDateKey by preference("")
 	var dailyMixSongIds by jsonPreference<List<String>>(emptyList())
 	var dailyMixCuratorNote by preference("")
@@ -125,6 +130,9 @@ class PreferenceManager(
 	var nowPlayingShowTimeRemaining by preference(false)
 	var customHeaders by preference("")
 	var checkForUpdates by preference(true)
+	var updateCheckFrequency by preference(UpdateCheckFrequency.Daily)
+	var lastUpdateCheckTimeMs by preference(0L)
+	var ignoredUpdateTag by preference("")
 	var explicitContentPlayback by preference(ExplicitContentPlayback.Allowed)
 	var autoFillQueue by preference(false)
 	var shushQueueDuplicateDialog by preference(false)
