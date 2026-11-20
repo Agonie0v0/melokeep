@@ -105,9 +105,50 @@ jobs:
           echo "should_build_mobile=$should_build_mobile" >> "$GITHUB_OUTPUT"
           echo "Computed version: $version (prev=$prev_version, should_release=$should_release, should_build_mobile=$should_build_mobile)"
 
+  test-go:
+    name: 校验 Go 后端
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: go vet 与 go test
+        working-directory: go
+        run: |
+          CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test -p 4 -count=1 ./...
+
+  test-frontend:
+    name: 校验前端构建与单测
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖、格式检查、单测与构建
+        working-directory: frontend
+        run: |
+          npm ci && npm run format:check && npm test && npm run build
+
   build:
     name: 构建 ${{ matrix.arch }} 镜像
-    needs: prepare
+    needs: [prepare, test-go, test-frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -159,7 +200,7 @@ jobs:
 
   mobile:
     name: 构建移动端安装包
-    needs: prepare
+    needs: [prepare, test-go, test-frontend]
     if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.should_build_mobile == 'true'
     permissions:
       contents: write
