@@ -63,15 +63,23 @@ func WithInvokeTimeout(d time.Duration) ManagerOption {
 	}
 }
 
+// WithSkipAudioProbe disables live audio header probing during Resolve (for offline unit tests only).
+func WithSkipAudioProbe(skip bool) ManagerOption {
+	return func(m *Manager) {
+		m.skipAudioProbe = skip
+	}
+}
+
 // Manager coordinates plugin disk persistence, SQLite storage, inspection, testing, and Registry hot-reloading.
 type Manager struct {
-	mu            sync.Mutex
-	store         *store.Store
-	pool          *transport.Pool
-	reg           *provider.Registry
-	pluginDir     string
-	logFn         provider.LogFunc
-	invokeTimeout time.Duration
+	mu             sync.Mutex
+	store          *store.Store
+	pool           *transport.Pool
+	reg            *provider.Registry
+	pluginDir      string
+	logFn          provider.LogFunc
+	invokeTimeout  time.Duration
+	skipAudioProbe bool
 }
 
 // NewManager creates a Manager storing plugin scripts inside pluginDir and syncing enabled plugins into reg.
@@ -205,6 +213,7 @@ func (m *Manager) loadOneLocked(ctx context.Context, rec store.ProviderPluginRec
 		AllowedOrigins: allowedOrigins,
 		InvokeTimeout:  m.invokeTimeout,
 		LogFunc:        m.logFn,
+		SkipAudioProbe: m.skipAudioProbe,
 	})
 	if err != nil {
 		return err
@@ -300,6 +309,7 @@ func (m *Manager) Install(ctx context.Context, req InstallRequest) (model.Provid
 		AllowedOrigins: allowedOrigins,
 		InvokeTimeout:  m.invokeTimeout,
 		LogFunc:        m.logFn,
+		SkipAudioProbe: m.skipAudioProbe,
 	})
 	if err != nil {
 		return model.ProviderPluginDTO{}, err
@@ -459,6 +469,7 @@ func (m *Manager) Update(ctx context.Context, id string, req UpdateRequest) (mod
 				AllowedOrigins: nextOrigins,
 				InvokeTimeout:  m.invokeTimeout,
 				LogFunc:        m.logFn,
+				SkipAudioProbe: m.skipAudioProbe,
 			})
 			if err != nil {
 				return model.ProviderPluginDTO{}, err
@@ -550,6 +561,7 @@ func (m *Manager) Test(ctx context.Context, id string, req TestRequest) (model.P
 		AllowedOrigins: allowedOrigins,
 		InvokeTimeout:  m.invokeTimeout,
 		LogFunc:        m.logFn,
+		SkipAudioProbe: m.skipAudioProbe,
 	})
 	if err != nil {
 		return model.PluginTestResultDTO{}, err

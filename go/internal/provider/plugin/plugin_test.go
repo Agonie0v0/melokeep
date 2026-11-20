@@ -211,7 +211,7 @@ func TestProviderCapabilitiesSearchModesAndNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAndCompile: %v", err)
 	}
-	prov, err := plugin.NewProvider(compiled, plugin.ProviderOptions{})
+	prov, err := plugin.NewProvider(compiled, plugin.ProviderOptions{SkipAudioProbe: true})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
@@ -703,6 +703,13 @@ func TestTimeoutInterruptAndNoGoroutineLeak(t *testing.T) {
 
 func TestSSRFBlocksLoopbackAndAllowsWhitelist(t *testing.T) {
 	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/a.mp3" {
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Content-Length", "3200000")
+			hdr := []byte{'I', 'D', '3', 3, 0, 0, 0, 0, 0, 0, 0xFF, 0xFB, 0x90, 0x64, 0, 0}
+			_, _ = w.Write(hdr)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"title":"Internal NAS Track"}`))
 	}))
@@ -776,8 +783,8 @@ func TestSSRFBlocksLoopbackAndAllowsWhitelist(t *testing.T) {
 	}); err != nil || len(tracks) != 1 || tracks[0].Title != "Internal NAS Track" {
 		t.Fatalf("expected whitelisted origin to succeed, tracks=%+v err=%v", tracks, err)
 	}
-	if media, err := allowedProv.Resolve(context.Background(), model.ProviderTrack{SourceID: "1", Title: targetSrv.URL + "/a.mp3"}, model.QualityPolicy{}); err != nil || len(media) != 1 {
-		t.Fatalf("expected whitelisted origin in Resolve to succeed, media=%+v err=%v", media, err)
+	if media, err := allowedProv.Resolve(context.Background(), model.ProviderTrack{SourceID: "1", Title: targetSrv.URL + "/a.mp3"}, model.QualityPolicy{}); err != nil || len(media) != 1 || media[0].Variant.Availability != "verified" || media[0].Variant.Evidence != "probed_audio" {
+		t.Fatalf("expected whitelisted origin in Resolve to succeed and probe audio, media=%+v err=%v", media, err)
 	}
 	if _, err := allowedProv.Search(context.Background(), model.SearchOptions{Keyword: otherSrv.URL + "/api"}, nil); err == nil {
 		t.Fatal("expected non-whitelisted loopback server to remain blocked")
@@ -1119,7 +1126,7 @@ func TestDocsSpecCompatibleMockPluginIntegration(t *testing.T) {
 	pool := transport.NewPool()
 	defer pool.CloseAll()
 	reg := newTestRegistry(t, pool)
-	mgr := plugin.NewManager(st, pool, reg, filepath.Join(t.TempDir(), "plugins"), nil)
+	mgr := plugin.NewManager(st, pool, reg, filepath.Join(t.TempDir(), "plugins"), nil, plugin.WithSkipAudioProbe(true))
 
 	inspectRes, err := mgr.Inspect(ctx, specFixture, "")
 	if err != nil || inspectRes.Manifest.ID != "spec-rss-mock" {
@@ -1197,5 +1204,270 @@ func TestDocsSpecCompatibleMockPluginIntegration(t *testing.T) {
 	// Disabled plugin can still be tested.
 	if tr, err := remoteMgr.Test(ctx, "remote-ok", plugin.TestRequest{Action: "search", Keyword: "x"}); err != nil || !tr.OK {
 		t.Fatalf("expected disabled plugin Test to succeed, res=%+v err=%v", tr, err)
+	}
+}
+
+func TestProviderResolveAudioProbe(t *testing.T) {
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	var flacGotReferer atomic.Value
+	var flacGotCookie atomic.Value
+
+	audioSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cur := inFlight.Add(1)
+		for {
+			prev := maxInFlight.Load()
+			if cur <= prev || maxInFlight.CompareAndSwap(prev, cur) {
+				break
+			}
+		}
+		defer inFlight.Add(-1)
+
+		// Slight delay so concurrent probing overlaps measurably without slowing the suite.
+		time.Sleep(25 * time.Millisecond)
+
+		switch r.URL.Path {
+		case "/lossless.bin":
+			flacGotReferer.Store(r.Header.Get("Referer"))
+			flacGotCookie.Store(r.Header.Get("Cookie"))
+			w.Header().Set("Content-Type", "audio/flac")
+			w.Header().Set("Content-Length", "30000000")
+			_, _ = w.Write(append([]byte("fLaC"), make([]byte, 64)...))
+		case "/hq-mp3":
+			// Simulate CDN omitting Content-Length while exposing total size via Content-Range.
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Content-Range", "bytes 0-63/9600000")
+			w.WriteHeader(http.StatusPartialContent)
+			hdr := []byte{'I', 'D', '3', 3, 0, 0, 0, 0, 0, 10}
+			hdr = append(hdr, make([]byte, 10)...)
+			hdr = append(hdr, 0xFF, 0xFB, 0x90, 0x64)
+			_, _ = w.Write(hdr)
+		case "/std-128.mp3":
+			// Full 128k MP3 for 240s track (3,840,000 B = 128 kbps) -> must NOT be misclassified as trial.
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Content-Length", "3840000")
+			hdr := []byte{'I', 'D', '3', 3, 0, 0, 0, 0, 0, 10}
+			hdr = append(hdr, make([]byte, 10)...)
+			hdr = append(hdr, 0xFF, 0xFB, 0x90, 0x64)
+			_, _ = w.Write(hdr)
+		case "/trial-flac.flac":
+			// Short truncated FLAC preview for 240s track (3,000,000 B = 100 kbps < 250 kbps lossless threshold).
+			w.Header().Set("Content-Type", "audio/flac")
+			w.Header().Set("Content-Length", "3000000")
+			_, _ = w.Write(append([]byte("fLaC"), make([]byte, 64)...))
+		case "/trial.mp3":
+			// 240s track with only 400 KiB (~13.6 kbps < 64 kbps lossy threshold) -> must be flagged PreviewOnly.
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Content-Length", "409600")
+			hdr := []byte{'I', 'D', '3', 3, 0, 0, 0, 0, 0, 10}
+			hdr = append(hdr, make([]byte, 10)...)
+			hdr = append(hdr, 0xFF, 0xFB, 0x90, 0x64)
+			_, _ = w.Write(hdr)
+		case "/live/stream.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10.0,\nseg0.ts\n"))
+		case "/missing.flac":
+			w.WriteHeader(http.StatusNotFound)
+		case "/fake-html.flac":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<!DOCTYPE html><html><body>Access Denied</body></html>"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer audioSrv.Close()
+
+	// Production pool WITHOUT WithAllowTestLoopback: relies on AllowedOrigins -> DomainConfiguredInternal.
+	pool := transport.NewPool()
+	defer pool.CloseAll()
+
+	script := fmt.Sprintf(`
+		module.exports = {
+			manifest: {
+				apiVersion: 1,
+				id: "probe-audio-test",
+				name: "Probe Audio Test",
+				version: "1.0.0",
+				capabilities: { search: true }
+			},
+			search(ctx, opts) {
+				return [{ sourceId: "t-1", title: "Probe Song", artist: "Tester", duration: 240 }];
+			},
+			resolve(ctx, track, policy) {
+				if (track.sourceId === "only-broken") {
+					return [
+						{ variantId: "bad-404", url: %q + "/missing.flac", codec: "flac", bitrate: 999 },
+						{ variantId: "bad-html", url: %q + "/fake-html.flac", codec: "flac", bitrate: 999 }
+					];
+				}
+				if (track.sourceId === "only-trial") {
+					return [
+						{ variantId: "trial-only", url: %q + "/trial.mp3", codec: "mp3", bitrate: 320, label: "MP3 320k" }
+					];
+				}
+				// Intentionally return candidates out of quality order plus broken links and a duplicate URL.
+				return [
+					{ variantId: "bad-404", url: %q + "/missing.flac", codec: "flac", bitrate: 999 },
+					{ variantId: "bad-html", url: %q + "/fake-html.flac", codec: "flac", bitrate: 999 },
+					{ variantId: "short-trial", url: %q + "/trial.mp3", codec: "mp3", bitrate: 320, label: "MP3 320k" },
+					{ variantId: "short-trial-flac", url: %q + "/trial-flac.flac", codec: "flac", bitrate: 999 },
+					{ variantId: "hls-stream", url: %q + "/live/stream.m3u8", codec: "aac", bitrate: 128 },
+					{ variantId: "std-128", url: %q + "/std-128.mp3", codec: "mp3", bitrate: 128 },
+					{ variantId: "std-mp3", url: %q + "/hq-mp3", codec: "mp3", bitrate: 320 },
+					{
+						variantId: "dup-flac-1",
+						url: %q + "/lossless.bin",
+						codec: "flac",
+						bitrate: 999,
+						label: "Fake Label",
+						headers: { "Referer": "https://music.example.test/" },
+						cookies: { "cand_ck": "cand_val" }
+					},
+					{
+						variantId: "dup-flac-2",
+						url: %q + "/lossless.bin",
+						codec: "flac",
+						bitrate: 999
+					}
+				];
+			}
+		};
+	`, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL, audioSrv.URL)
+
+	compiled, err := plugin.ParseAndCompile(script)
+	if err != nil {
+		t.Fatalf("ParseAndCompile: %v", err)
+	}
+	prov, err := plugin.NewProvider(compiled, plugin.ProviderOptions{
+		Pool:           pool,
+		AllowedOrigins: []string{audioSrv.URL},
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	rt := config.DefaultRuntimeConfig()
+	rt.SourceSettings["probe-audio-test"] = model.SourceSettingDTO{Cookie: "cfg_ck=cfg_val"}
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+	ctx := provider.WithRequestContext(context.Background(), provider.RequestContext{Config: snap})
+
+	track := model.ProviderTrack{
+		Source:   "probe-audio-test",
+		SourceID: "t-1",
+		Title:    "Probe Song",
+		Artist:   "Tester",
+		Duration: 240,
+	}
+
+	// 1. AllowPreview=true: verifies magic detection, Content-Length & Content-Range sizing,
+	// bitrate calculation, broken/HTML filtering, HLS protocol, format-aware trial detection, concurrency, and ranking.
+	resolved, err := prov.Resolve(ctx, track, model.QualityPolicy{AllowPreview: true})
+	if err != nil {
+		t.Fatalf("Resolve(AllowPreview=true) failed: %v", err)
+	}
+	if len(resolved) != 6 {
+		t.Fatalf("expected 6 verified variants (flac, mp3-320, mp3-128, hls, trial-flac, trial-mp3), got %d: %+v", len(resolved), resolved)
+	}
+	if maxInFlight.Load() < 2 || maxInFlight.Load() > 4 {
+		t.Fatalf("expected concurrent probing in [2,4], got maxInFlight=%d", maxInFlight.Load())
+	}
+
+	// [0]: Verified FLAC lossless (ranked first by AudioRankBetter).
+	flac := resolved[0]
+	if flac.Codec != "flac" || !flac.Variant.Lossless || flac.Variant.Availability != "verified" || flac.Variant.Evidence != "probed_audio" {
+		t.Fatalf("unexpected verified flac variant: %+v", flac.Variant)
+	}
+	if flac.SizeBytes == nil || *flac.SizeBytes != 30000000 || flac.Variant.SizeBytes == nil || *flac.Variant.SizeBytes != 30000000 {
+		t.Fatalf("expected flac size 30000000, got rm=%v var=%v", flac.SizeBytes, flac.Variant.SizeBytes)
+	}
+	if flac.Bitrate == nil || *flac.Bitrate != 1000 || flac.Variant.Bitrate == nil || *flac.Variant.Bitrate != 1000 {
+		t.Fatalf("expected computed flac bitrate 1000 kbps (30MB/240s), got rm=%v var=%v", flac.Bitrate, flac.Variant.Bitrate)
+	}
+	if flac.PreviewOnly || flac.Variant.PreviewOnly || flac.Variant.Protocol != "http" || flac.Variant.Label != "FLAC 无损" {
+		t.Fatalf("unexpected flac metadata: preview=%v proto=%q label=%q", flac.PreviewOnly, flac.Variant.Protocol, flac.Variant.Label)
+	}
+	if gotRef, _ := flacGotReferer.Load().(string); gotRef != "https://music.example.test/" {
+		t.Fatalf("expected candidate Referer forwarded to probe, got %q", gotRef)
+	}
+	if gotCk, _ := flacGotCookie.Load().(string); !strings.Contains(gotCk, "cfg_ck=cfg_val") || !strings.Contains(gotCk, "cand_ck=cand_val") {
+		t.Fatalf("expected merged platform + candidate cookies forwarded to probe, got %q", gotCk)
+	}
+
+	// [1]: Verified ID3 MP3 320k with total size parsed from Content-Range.
+	mp3 := resolved[1]
+	if mp3.Codec != "mp3" || mp3.Variant.Lossless || mp3.Variant.Availability != "verified" || mp3.Variant.Evidence != "probed_audio" {
+		t.Fatalf("unexpected verified mp3 variant: %+v", mp3.Variant)
+	}
+	if mp3.SizeBytes == nil || *mp3.SizeBytes != 9600000 {
+		t.Fatalf("expected mp3 size 9600000 from Content-Range, got %v", mp3.SizeBytes)
+	}
+	if mp3.Bitrate == nil || *mp3.Bitrate != 320 || mp3.PreviewOnly {
+		t.Fatalf("unexpected mp3 bitrate/preview: br=%v preview=%v", mp3.Bitrate, mp3.PreviewOnly)
+	}
+
+	// [2]: Full 128k MP3 (240s / 3,840,000 B = 128 kbps) must remain full verified audio, never flagged as trial.
+	mp3128 := resolved[2]
+	if mp3128.Codec != "mp3" || mp3128.PreviewOnly || mp3128.Variant.PreviewOnly || mp3128.Variant.Availability != "verified" || mp3128.Variant.Evidence != "probed_audio" {
+		t.Fatalf("expected full 128k mp3 to be verified non-preview, got %+v", mp3128.Variant)
+	}
+	if mp3128.SizeBytes == nil || *mp3128.SizeBytes != 3840000 || mp3128.Bitrate == nil || *mp3128.Bitrate != 128 || strings.Contains(mp3128.Variant.Label, "试听") {
+		t.Fatalf("unexpected full 128k mp3 fields: size=%v br=%v label=%q", mp3128.SizeBytes, mp3128.Bitrate, mp3128.Variant.Label)
+	}
+
+	// [3]: Verified HLS stream (#EXTM3U -> protocol="hls", codec="m4a").
+	hls := resolved[3]
+	if hls.Variant.Protocol != "hls" || hls.Variant.Availability != "verified" || hls.Variant.Evidence != "probed_audio" || hls.Codec != "m4a" || hls.PreviewOnly {
+		t.Fatalf("unexpected verified hls variant: %+v (codec=%q)", hls.Variant, hls.Codec)
+	}
+
+	// [4]: Truncated FLAC trial (240s / 3,000,000 B = 100 kbps < 250 kbps lossless threshold) ranked after full variants.
+	trialFlac := resolved[4]
+	if !trialFlac.PreviewOnly || !trialFlac.Variant.PreviewOnly || trialFlac.Variant.Availability != "preview" || trialFlac.Codec != "flac" || !strings.Contains(trialFlac.Variant.Label, "试听") {
+		t.Fatalf("expected truncated flac flagged as preview, got %+v", trialFlac.Variant)
+	}
+
+	// [5]: Truncated trial MP3 (240s / 409,600 B < 64 kbps lossy threshold), ranked last.
+	trial := resolved[5]
+	if !trial.PreviewOnly || !trial.Variant.PreviewOnly || trial.Variant.Availability != "preview" || trial.Variant.Evidence != "probed_audio" {
+		t.Fatalf("expected trial mp3 flagged as preview, got %+v", trial.Variant)
+	}
+	if trial.SizeBytes == nil || *trial.SizeBytes != 409600 || !strings.Contains(trial.Variant.Label, "试听") {
+		t.Fatalf("expected trial size 409600 and trial label, got size=%v label=%q", trial.SizeBytes, trial.Variant.Label)
+	}
+
+	// 2. AllowPreview=false filters out both trial candidates while preserving full 128k MP3 and higher variants.
+	fullOnly, err := prov.Resolve(ctx, track, model.QualityPolicy{AllowPreview: false})
+	if err != nil || len(fullOnly) != 4 {
+		t.Fatalf("expected 4 full variants (flac, mp3-320, mp3-128, hls) with AllowPreview=false, got len=%d err=%v", len(fullOnly), err)
+	}
+	var sawFull128 bool
+	for _, item := range fullOnly {
+		if item.PreviewOnly {
+			t.Fatalf("unexpected preview variant when AllowPreview=false: %+v", item)
+		}
+		if item.Codec == "mp3" && item.SizeBytes != nil && *item.SizeBytes == 3840000 {
+			sawFull128 = true
+		}
+	}
+	if !sawFull128 {
+		t.Fatalf("expected full 128k MP3 preserved when AllowPreview=false, got %+v", fullOnly)
+	}
+
+	// 3. PreferredQuality="lossless" filters down to verified FLAC only.
+	losslessOnly, err := prov.Resolve(ctx, track, model.QualityPolicy{PreferredQuality: "lossless"})
+	if err != nil || len(losslessOnly) != 1 || !losslessOnly[0].Variant.Lossless {
+		t.Fatalf("expected 1 lossless variant for PreferredQuality=lossless, got %+v err=%v", losslessOnly, err)
+	}
+
+	// 4. All broken (404 + 200 HTML) returns a clear error instead of fake links.
+	if _, err := prov.Resolve(ctx, model.ProviderTrack{Source: "probe-audio-test", SourceID: "only-broken", Duration: 240}, model.QualityPolicy{AllowPreview: true}); err == nil {
+		t.Fatal("expected error when all candidates are 404/HTML")
+	}
+
+	// 5. Only trial candidate with AllowPreview=false returns ErrAuthRequired.
+	if _, err := prov.Resolve(ctx, model.ProviderTrack{Source: "probe-audio-test", SourceID: "only-trial", Duration: 240}, model.QualityPolicy{AllowPreview: false}); err == nil {
+		t.Fatal("expected ErrAuthRequired when only trial candidate exists and AllowPreview=false")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrAuthRequired {
+		t.Fatalf("expected ErrAuthRequired for trial-only track, got %v", err)
 	}
 }

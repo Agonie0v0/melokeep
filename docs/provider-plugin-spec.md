@@ -213,6 +213,8 @@ const manifest = {
   ];
   ```
   > 若音源仅提供官方片段试听（如 30 秒试听），必须显式设置 `previewOnly: true`。
+  >
+  > 宿主在收到 `resolve` 返回的候选地址后，会自动执行受控并发音频头探测（校验魔数头、HTTP `Content-Length` / `Content-Range` 体积、码率与试听识别），自动剔除 404/HTML/JSON 等无效假链，仅对真实探测通过的无损流标记 `lossless: true` 与 `availability: "verified"`。
 
 ### 4.3 `playlist(ctx, locator)`（可选）
 
@@ -267,7 +269,76 @@ const manifest = {
 
 ---
 
-## 6. 参考示例
+## 6. ZIP 插件压缩包批量导入
+
+除单文件 `.js` 上传、源码粘贴与远程 URL 导入外，MeloKeep 支持将多个独立 `.js` 插件按任意子目录组织打包为标准 `.zip` 压缩包，通过接口完成一次性安全预检与批量选择安装。
+
+### 6.1 压缩包结构与安全限制
+
+| 限制项 | 上限 / 规则 |
+| --- | --- |
+| 压缩包体积（`MaxArchiveBytes`） | 不超过 **16 MiB** |
+| 有效 `.js` 插件数量（`MaxArchivePlugins`） | 不超过 **100 个** |
+| 累计解压体积（`MaxArchiveUncompressedBytes`） | 不超过 **32 MiB**（防 Zip Bomb） |
+| 单个 `.js` 插件源码体积（`MaxSourceBytes`） | 不超过 **512 KiB**（超出时仅标记该条目失败，不中断其余条目预检） |
+| 自动忽略条目 | 目录、`__MACOSX/` 下文件、任意路径段以 `.` 开头的隐藏文件/目录（如 `._demo.js`、`.DS_Store`）、以及非 `.js`（大小写不敏感）文件（如 `README.md`、`*.mjs`） |
+| 路径安全校验 | 拒绝包含 `..` 路径穿越或绝对路径（如 `/etc/...`、`C:\...`）的条目；有效条目统一规范化为 `/` 分隔的相对路径 `entry_path` 并按字典序排序 |
+| 冲突与去重 | 单条目与内置音源 ID 冲突或与包内前序条目 `manifest.id` 重复时，仅将该条目记为 `ok: false` 并返回具体 `error` 说明 |
+
+### 6.2 HTTP 接口契约
+
+1. **静态预检压缩包：`POST /api/plugins/inspect-archive`**
+   - 请求体支持 `multipart/form-data`（文件字段 `file`）或直接提交原始 `application/zip` / `application/octet-stream` 二进制流；需携带标准认证信息及 `X-MeloKeep-Request: 1` CSRF 头。
+   - 在只读模式下仍可执行预检；不写盘、不修改数据库、不注册到运行时音源列表。
+   - 返回 `200 OK` JSON：
+     ```json
+     {
+       "total": 2,
+       "valid_count": 1,
+       "invalid_count": 1,
+       "entries": [
+         {
+           "entry_path": "b1/demo.js",
+           "ok": true,
+           "sha256": "...",
+           "manifest": { "api_version": 1, "id": "demo", "name": "Demo", "version": "1.0.0", "capabilities": { "search": true } },
+           "permissions": ["..."],
+           "warnings": ["..."]
+         },
+         {
+           "entry_path": "b1/broken.js",
+           "ok": false,
+           "error": "插件源码体积超过 512 KiB 上限"
+         }
+       ]
+     }
+     ```
+
+2. **批量安装压缩包：`POST /api/plugins/install-archive`**
+   - 受只读模式写保护、登录鉴权与 `X-MeloKeep-Request: 1` CSRF 校验保护。
+   - 请求体为 `multipart/form-data`（或 raw `application/zip` 配合查询参数）：
+     - `file`（必需）：`.zip` 插件压缩包文件
+     - `enabled`（可选）：`"true"` 或 `"false"`，默认 `true`（安装后是否立即启用并热注册到音源注册表）
+     - `selected_ids`（可选）：JSON 字符串数组（如 `["demo-a","demo-b"]`）或逗号分隔列表（如 `"demo-a,demo-b"`）；传入非空集合时仅安装对应有效条目，未传入或为空时尝试安装压缩包内全部 `.js` 条目
+     - `allowed_origins`（可选）：JSON 字符串数组或逗号分隔的内网 Origin 白名单
+   - 每个有效待安装条目均执行原子写盘 + SQLite 持久化 + Registry 热注册（覆盖安装同 ID 插件时保留已配置的敏感凭据），只要至少成功安装 1 个插件即自动失效搜索/解析缓存并写入插件审计日志。
+   - 返回 `200 OK` JSON：
+     ```json
+     {
+       "total": 2,
+       "installed_count": 1,
+       "failed_count": 1,
+       "installed": [ { "id": "demo", "enabled": true, "manifest": { "...": "..." } } ],
+       "results": [
+         { "entry_path": "b1/demo.js", "id": "demo", "ok": true, "plugin": { "...": "..." } },
+         { "entry_path": "b1/broken.js", "ok": false, "error": "插件源码体积超过 512 KiB 上限" }
+       ]
+     }
+     ```
+
+---
+
+## 7. 参考示例
 
 仓库内置两个开箱即用的合规参考插件：
 

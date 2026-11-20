@@ -90,6 +90,35 @@ export interface PluginInspectResult {
   permissions: string[];
   warnings: string[];
 }
+export interface PluginArchiveEntryInspect {
+  entry_path: string;
+  ok: boolean;
+  error?: string;
+  sha256?: string;
+  manifest?: PluginManifest;
+  permissions?: string[];
+  warnings?: string[];
+}
+export interface PluginArchiveInspectResult {
+  total: number;
+  valid_count: number;
+  invalid_count: number;
+  entries: PluginArchiveEntryInspect[];
+}
+export interface PluginArchiveInstallItem {
+  entry_path: string;
+  id?: string;
+  ok: boolean;
+  error?: string;
+  plugin?: ProviderPlugin;
+}
+export interface PluginArchiveInstallResult {
+  total: number;
+  installed_count: number;
+  failed_count: number;
+  installed: ProviderPlugin[];
+  results: PluginArchiveInstallItem[];
+}
 export interface PluginLogEntry {
   level: string;
   message: string;

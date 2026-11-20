@@ -41,18 +41,25 @@ export async function api<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
+  const isFormData =
+    typeof FormData !== "undefined" && body instanceof FormData;
+  const headers: Record<string, string> = { "X-MeloKeep-Request": "1" };
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
   const response = await fetch(`/api${path}`, {
     method,
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", "X-MeloKeep-Request": "1" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers,
+    body:
+      body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
     signal,
   });
   const data = await response
     .json()
     .catch(() => ({ detail: "服务未返回有效数据，请检查服务状态" }));
   if (!response.ok) {
-    if (response.status === 401)
+    if (response.status === 401 && typeof window !== "undefined")
       window.dispatchEvent(new Event("melokeep-login"));
     throw new ApiError(
       formatApiDetail(data.detail) || `请求失败 (${response.status})`,

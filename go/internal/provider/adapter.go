@@ -15,7 +15,10 @@ import (
 	"github.com/agonie0v0/melokeep/internal/transport"
 )
 
-const maxID3ProbeBytes = 1024 * 1024 // 1 MiB cap matching native_engine.probe_audio
+const (
+	maxID3ProbeBytes     = 1024 * 1024 // 1 MiB cap matching native_engine.probe_audio
+	maxAudioProbeTimeout = 8 * time.Second
+)
 
 // TransportAdapter binds a provider to transport.Pool with immutable per-request
 // snapshot, proxy, and account isolation.
@@ -187,24 +190,46 @@ var (
 
 // ProbeAudio validates a playable media URL by reading only the leading audio header bytes.
 func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL string, headers, cookies map[string]string, includePlatformAuth bool) (ProbeResult, error) {
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+	return a.ProbeAudioWithAllowedOrigins(ctx, engineName, rawURL, headers, cookies, includePlatformAuth, nil)
+}
+
+// ProbeAudioWithAllowedOrigins validates a playable media URL by reading only the leading audio header bytes,
+// permitting configured internal origins explicitly whitelisted in allowedInternalOrigins.
+func (a *TransportAdapter) ProbeAudioWithAllowedOrigins(ctx context.Context, engineName, rawURL string, headers, cookies map[string]string, includePlatformAuth bool, allowedInternalOrigins []string) (ProbeResult, error) {
+	trimmedURL := strings.TrimSpace(rawURL)
+	parsedRaw, parseErr := url.Parse(trimmedURL)
+	if parseErr != nil || parsedRaw.Hostname() == "" || (strings.ToLower(parsedRaw.Scheme) != "http" && strings.ToLower(parsedRaw.Scheme) != "https") {
 		return ProbeResult{}, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "无效音频地址")
 	}
 	rc := RequestContextFrom(ctx)
 	proxyURL, cfgCookies, acct := SourceRequestOptions(rc, engineName)
+
 	domain := transport.DomainPublicMedia
-	if includePlatformAuth && (len(cfgCookies) > 0 || len(cookies) > 0 || acct.AccountID != "") {
+	var matchedAllowed []string
+	if len(allowedInternalOrigins) > 0 {
+		reqOrigin := probeOriginKey(parsedRaw)
+		for _, rawOrig := range allowedInternalOrigins {
+			if ou, err := url.Parse(strings.TrimSpace(rawOrig)); err == nil && reqOrigin != "" && probeOriginKey(ou) == reqOrigin {
+				matchedAllowed = allowedInternalOrigins
+				break
+			}
+		}
+	}
+	if len(matchedAllowed) > 0 {
+		domain = transport.DomainConfiguredInternal
+	} else if includePlatformAuth && (len(cfgCookies) > 0 || len(cookies) > 0 || acct.AccountID != "") {
 		domain = transport.DomainAccountProvider
 	}
-	timeout := 15 * time.Second
+
+	timeout := maxAudioProbeTimeout
 	if rc.Config.Runtime.PlaybackTimeoutSeconds > 0 {
-		timeout = time.Duration(rc.Config.Runtime.PlaybackTimeoutSeconds) * time.Second
-		if !includePlatformAuth && timeout > 15*time.Second {
-			timeout = 15 * time.Second
+		cfgTimeout := time.Duration(rc.Config.Runtime.PlaybackTimeoutSeconds) * time.Second
+		if cfgTimeout < timeout {
+			timeout = cfgTimeout
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimmedURL, nil)
 	if err != nil {
 		return ProbeResult{}, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效音频地址", err)
 	}
@@ -224,20 +249,21 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 		for k, v := range cookies {
 			merged[k] = v
 		}
-		if len(merged) > 0 {
+		if len(merged) > 0 && req.Header.Get("Cookie") == "" {
 			req.Header.Set("Cookie", FormatCookieHeader(merged))
 		}
 	}
 
 	opts := transport.RequestOptions{
-		Domain:              domain,
-		ConfigRevision:      rc.Config.Revision,
-		ProxyURL:            proxyURL,
-		Account:             acct,
-		Timeout:             timeout,
-		MaxResponseBytes:    -1, // Bounded manually during header read below.
-		Idempotent:          true,
-		AllowHTTPSDowngrade: true,
+		Domain:                 domain,
+		ConfigRevision:         rc.Config.Revision,
+		ProxyURL:               proxyURL,
+		Account:                acct,
+		Timeout:                timeout,
+		MaxResponseBytes:       -1, // Bounded manually during header read below.
+		AllowedInternalOrigins: matchedAllowed,
+		Idempotent:             true,
+		AllowHTTPSDowngrade:    true,
 	}
 	resp, err := a.pool.Do(ctx, req, opts)
 	if err != nil {
@@ -251,9 +277,15 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 
 	buf := make([]byte, 0, 8192)
 	tmp := make([]byte, 4096)
-	n, readErr := resp.Body.Read(tmp)
-	if n > 0 {
-		buf = append(buf, tmp[:n]...)
+	var readErr error
+	for len(buf) < 16 && readErr == nil {
+		var n int
+		n, readErr = resp.Body.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		} else if readErr == nil {
+			break
+		}
 	}
 	if len(buf) == 0 && readErr != nil {
 		return ProbeResult{}, ClassifyError(engineName, resp.StatusCode, "", readErr)
@@ -263,7 +295,7 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 		return ProbeResult{}, model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "解析地址未返回音频")
 	}
 
-	finalURL := rawURL
+	finalURL := trimmedURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
@@ -285,9 +317,12 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 			ext = "mp3"
 		}
 		for len(buf) < 10 && readErr == nil {
+			var n int
 			n, readErr = resp.Body.Read(tmp)
 			if n > 0 {
 				buf = append(buf, tmp[:n]...)
+			} else if readErr == nil {
+				break
 			}
 		}
 		if len(buf) >= 10 && (buf[6]&0x80) == 0 && (buf[7]&0x80) == 0 && (buf[8]&0x80) == 0 && (buf[9]&0x80) == 0 {
@@ -297,9 +332,12 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 			}
 			if tagSize <= maxID3ProbeBytes {
 				for len(buf) < tagSize+16 && readErr == nil {
+					var n int
 					n, readErr = resp.Body.Read(tmp)
 					if n > 0 {
 						buf = append(buf, tmp[:n]...)
+					} else if readErr == nil {
+						break
 					}
 				}
 				if len(buf) > tagSize {
@@ -328,6 +366,13 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 			break
 		}
 	}
+	if !recognized {
+		noBOM := bytes.TrimPrefix(trimmed, []byte{0xEF, 0xBB, 0xBF})
+		if bytes.HasPrefix(noBOM, []byte("#EXTM3U")) {
+			ext = "m3u8"
+			recognized = true
+		}
+	}
 	if !recognized && len(audioPrefix) >= 2 && audioPrefix[0] == 0xFF && (audioPrefix[1]&0xE0) == 0xE0 {
 		if (audioPrefix[1] & 0xF6) == 0xF0 {
 			ext = "aac"
@@ -350,9 +395,14 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 		return ProbeResult{}, model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "无法确认音频格式")
 	}
 	var sizeBytes int64
-	if cl := strings.TrimSpace(resp.Header.Get("Content-Length")); cl != "" {
-		if parsed, err := strconv.ParseInt(cl, 10, 64); err == nil && parsed > 0 {
-			sizeBytes = parsed
+	if crTotal := parseContentRangeTotal(resp.Header.Get("Content-Range")); crTotal > 0 {
+		sizeBytes = crTotal
+	}
+	if sizeBytes == 0 {
+		if cl := strings.TrimSpace(resp.Header.Get("Content-Length")); cl != "" {
+			if parsed, err := strconv.ParseInt(cl, 10, 64); err == nil && parsed > 0 {
+				sizeBytes = parsed
+			}
 		}
 	}
 	protocol := "HTTP"
@@ -367,4 +417,44 @@ func (a *TransportAdapter) ProbeAudio(ctx context.Context, engineName, rawURL st
 		SizeBytes: sizeBytes,
 		Protocol:  protocol,
 	}, nil
+}
+
+func probeOriginKey(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	if (scheme != "http" && scheme != "https") || host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return scheme + "://" + host + ":" + port
+}
+
+func parseContentRangeTotal(hdr string) int64 {
+	hdr = strings.TrimSpace(hdr)
+	if hdr == "" {
+		return 0
+	}
+	_, totalPart, ok := strings.Cut(hdr, "/")
+	if !ok {
+		return 0
+	}
+	totalPart = strings.TrimSpace(totalPart)
+	if totalPart == "" || totalPart == "*" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(totalPart, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
 }

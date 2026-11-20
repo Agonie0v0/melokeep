@@ -90,7 +90,9 @@ type NavidromeGateway interface {
 type PluginGateway interface {
 	List(ctx context.Context) ([]model.ProviderPluginDTO, error)
 	Inspect(ctx context.Context, code, sourceURL string) (model.PluginInspectResultDTO, error)
+	InspectArchive(ctx context.Context, archiveBytes []byte) (model.PluginArchiveInspectResultDTO, error)
 	Install(ctx context.Context, req plugin.InstallRequest) (model.ProviderPluginDTO, error)
+	InstallArchive(ctx context.Context, req plugin.InstallArchiveRequest) (model.PluginArchiveInstallResultDTO, error)
 	Update(ctx context.Context, id string, req plugin.UpdateRequest) (model.ProviderPluginDTO, error)
 	Delete(ctx context.Context, id string) (bool, error)
 	Test(ctx context.Context, id string, req plugin.TestRequest) (model.PluginTestResultDTO, error)

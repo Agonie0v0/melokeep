@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agonie0v0/melokeep/internal/model"
@@ -26,7 +27,14 @@ var (
 	_ provider.MetadataProvider = (*Provider)(nil)
 )
 
-const defaultResolvedMediaTTL = 15 * time.Minute
+const (
+	defaultResolvedMediaTTL = 15 * time.Minute
+	maxResolveCandidates    = 16
+	resolveProbeConcurrency = 4
+	resolveProbeTimeout     = 8 * time.Second
+	trialMinBPSLossless     = 250000.0
+	trialMinBPSLossy        = 64000.0
+)
 
 // ProviderOptions configures a runtime plugin provider adapter.
 type ProviderOptions struct {
@@ -35,17 +43,20 @@ type ProviderOptions struct {
 	AllowedOrigins []string
 	InvokeTimeout  time.Duration
 	LogFunc        provider.LogFunc
+	SkipAudioProbe bool
 }
 
 // Provider adapts a compiled JS plugin to MeloKeep provider interfaces.
 type Provider struct {
 	compiled       *CompiledPlugin
 	pool           *transport.Pool
+	adapter        *provider.TransportAdapter
 	settings       map[string]string
 	allowedOrigins []string
 	allowedSet     map[string]bool
 	invokeTimeout  time.Duration
 	logFn          provider.LogFunc
+	skipAudioProbe bool
 }
 
 // NewProvider constructs a Provider adapter from a compiled plugin.
@@ -68,11 +79,13 @@ func NewProvider(compiled *CompiledPlugin, opts ProviderOptions) (*Provider, err
 	return &Provider{
 		compiled:       compiled,
 		pool:           pool,
+		adapter:        provider.NewTransportAdapter(pool),
 		settings:       settingsCopy,
 		allowedOrigins: normOrigins,
 		allowedSet:     buildOriginSet(normOrigins),
 		invokeTimeout:  opts.InvokeTimeout,
 		logFn:          opts.LogFunc,
+		skipAudioProbe: opts.SkipAudioProbe,
 	}, nil
 }
 
@@ -233,7 +246,23 @@ func (p *Provider) Resolve(ctx context.Context, track model.ProviderTrack, polic
 		}
 	}
 
-	var out []model.ResolvedMedia
+	type resolveCandidate struct {
+		rawURL      string
+		codec       string
+		bitrate     int
+		sizeBytes   int64
+		duration    float64
+		upstreamID  string
+		protocol    string
+		label       string
+		previewOnly bool
+		headers     map[string]string
+		cookies     map[string]string
+		lyrics      string
+	}
+
+	candidates := make([]resolveCandidate, 0, min(len(rawItems), maxResolveCandidates))
+	seenURLs := make(map[string]bool, len(rawItems))
 	var sawForbidden, sawInvalid, sawPreviewSkipped bool
 	for _, item := range rawItems {
 		rawURL := strings.TrimSpace(anyToString(item["url"]))
@@ -245,6 +274,10 @@ func (p *Provider) Resolve(ctx context.Context, track model.ProviderTrack, polic
 			}
 			continue
 		}
+		if seenURLs[rawURL] {
+			continue
+		}
+		seenURLs[rawURL] = true
 
 		previewOnly := anyToBool(firstNonNil(item["previewOnly"], item["preview_only"]))
 		if previewOnly && !policy.AllowPreview {
@@ -253,9 +286,6 @@ func (p *Provider) Resolve(ctx context.Context, track model.ProviderTrack, polic
 		}
 
 		codec := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(anyToString(item["codec"])), "."))
-		if codec == "" {
-			codec = inferExtFromURL(rawURL)
-		}
 		bitrate := anyToInt(item["bitrate"])
 		sizeBytes := anyToInt64(firstNonNil(item["sizeBytes"], item["size_bytes"]))
 		duration := provider.ParseDurationSeconds(item["duration"])
@@ -263,39 +293,192 @@ func (p *Provider) Resolve(ctx context.Context, track model.ProviderTrack, polic
 			duration = track.Duration
 		}
 		upstreamID := strings.TrimSpace(anyToString(firstNonNil(item["upstreamId"], item["upstream_id"], item["variantId"], item["variant_id"])))
-		protocol := strings.TrimSpace(anyToString(item["protocol"]))
-		if protocol == "" {
-			protocol = "http"
-		}
+		protocol := strings.ToLower(strings.TrimSpace(anyToString(item["protocol"])))
 		label := strings.TrimSpace(anyToString(item["label"]))
-		if label == "" {
-			label = formatVariantLabel(codec, bitrate, previewOnly)
-		}
 
-		vid := provider.MakeVariantID(p.ID(), track.SourceID, upstreamID, codec, bitrate, previewOnly, sizeBytes)
-		sizePtr := provider.PtrInt64Positive(sizeBytes)
-		variant := provider.NewMediaVariant(vid, upstreamID, label, codec, bitrate, false, previewOnly, protocol, sizePtr, duration)
-
-		headers := anyToStringMap(item["headers"])
-		cookies := anyToStringMap(item["cookies"])
-		lyrics := strings.TrimSpace(anyToString(item["lyrics"]))
-
-		out = append(out, model.ResolvedMedia{
-			VariantID:   vid,
-			Variant:     variant,
-			URL:         rawURL,
-			Expiry:      time.Now().UTC().Add(defaultResolvedMediaTTL),
-			Headers:     headers,
-			Cookies:     cookies,
-			PreviewOnly: previewOnly,
-			Codec:       codec,
-			Bitrate:     variant.Bitrate,
-			SizeBytes:   sizePtr,
-			Lyrics:      lyrics,
+		candidates = append(candidates, resolveCandidate{
+			rawURL:      rawURL,
+			codec:       codec,
+			bitrate:     bitrate,
+			sizeBytes:   sizeBytes,
+			duration:    duration,
+			upstreamID:  upstreamID,
+			protocol:    protocol,
+			label:       label,
+			previewOnly: previewOnly,
+			headers:     anyToStringMap(item["headers"]),
+			cookies:     anyToStringMap(item["cookies"]),
+			lyrics:      strings.TrimSpace(anyToString(item["lyrics"])),
 		})
+		if len(candidates) >= maxResolveCandidates {
+			break
+		}
+	}
+
+	var out []model.ResolvedMedia
+	var lastProbeErr error
+	if p.skipAudioProbe {
+		for _, cand := range candidates {
+			codec := cand.codec
+			if codec == "" {
+				codec = inferExtFromURL(cand.rawURL)
+			}
+			protocol := cand.protocol
+			if protocol == "" {
+				protocol = "http"
+			}
+			label := cand.label
+			if label == "" {
+				label = formatVariantLabel(codec, cand.bitrate, cand.previewOnly)
+			}
+			vid := provider.MakeVariantID(p.ID(), track.SourceID, cand.upstreamID, codec, cand.bitrate, cand.previewOnly, cand.sizeBytes)
+			sizePtr := provider.PtrInt64Positive(cand.sizeBytes)
+			variant := provider.NewMediaVariant(vid, cand.upstreamID, label, codec, cand.bitrate, false, cand.previewOnly, protocol, sizePtr, cand.duration)
+
+			out = append(out, model.ResolvedMedia{
+				VariantID:   vid,
+				Variant:     variant,
+				URL:         cand.rawURL,
+				Expiry:      time.Now().UTC().Add(defaultResolvedMediaTTL),
+				Headers:     cand.headers,
+				Cookies:     cand.cookies,
+				PreviewOnly: cand.previewOnly,
+				Codec:       codec,
+				Bitrate:     variant.Bitrate,
+				SizeBytes:   sizePtr,
+				Lyrics:      cand.lyrics,
+			})
+		}
+	} else if len(candidates) > 0 {
+		type probeOutcome struct {
+			probe provider.ProbeResult
+			err   error
+		}
+		outcomes := make([]probeOutcome, len(candidates))
+		sem := make(chan struct{}, resolveProbeConcurrency)
+		var wg sync.WaitGroup
+		for i, cand := range candidates {
+			wg.Add(1)
+			go func(idx int, c resolveCandidate) {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					outcomes[idx].err = ctx.Err()
+					return
+				}
+				defer func() { <-sem }()
+
+				probeCtx, cancel := context.WithTimeout(ctx, resolveProbeTimeout)
+				defer cancel()
+				res, probeErr := p.adapter.ProbeAudioWithAllowedOrigins(
+					probeCtx,
+					p.EngineName(),
+					c.rawURL,
+					c.headers,
+					c.cookies,
+					true,
+					p.allowedOrigins,
+				)
+				outcomes[idx] = probeOutcome{probe: res, err: probeErr}
+			}(i, cand)
+		}
+		wg.Wait()
+
+		seenQuality := make(map[string]bool, len(candidates))
+		for i, cand := range candidates {
+			oc := outcomes[i]
+			if oc.err != nil {
+				lastProbeErr = oc.err
+				if de, ok := model.AsDomainError(oc.err); ok && de.Code == model.ErrForbidden {
+					sawForbidden = true
+				}
+				continue
+			}
+
+			probe := oc.probe
+			finalURL := strings.TrimSpace(probe.FinalURL)
+			if finalURL == "" {
+				finalURL = cand.rawURL
+			}
+			ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(probe.Ext), "."))
+			if ext == "" {
+				ext = cand.codec
+			}
+			if ext == "" {
+				ext = inferExtFromURL(finalURL)
+			}
+
+			finalSize := probe.SizeBytes
+			if finalSize <= 0 {
+				finalSize = cand.sizeBytes
+			}
+			br := provider.NormalizeResolvedBitrate(ext, probe.Bitrate, cand.bitrate, finalSize, cand.duration)
+			trialMinBPS := trialMinBPSLossy
+			if provider.IsLosslessExt(ext) {
+				trialMinBPS = trialMinBPSLossless
+			}
+			isTrial := cand.previewOnly || provider.IsTrialAudio(finalURL, finalSize, cand.duration, trialMinBPS)
+			if isTrial && !policy.AllowPreview {
+				sawPreviewSkipped = true
+				continue
+			}
+
+			protocol := strings.ToLower(strings.TrimSpace(probe.Protocol))
+			if protocol == "" {
+				protocol = cand.protocol
+			}
+			if protocol == "" {
+				protocol = "http"
+			}
+
+			label := cand.label
+			if label == "" ||
+				isTrial != cand.previewOnly ||
+				provider.IsLosslessExt(ext) ||
+				(cand.codec != "" && cand.codec != ext) ||
+				(br > 0 && br != cand.bitrate) {
+				label = formatVariantLabel(ext, br, isTrial)
+			}
+
+			vid := provider.MakeVariantID(p.ID(), track.SourceID, cand.upstreamID, ext, br, isTrial, finalSize)
+			sizePtr := provider.PtrInt64Positive(finalSize)
+			variant := provider.NewMediaVariant(vid, cand.upstreamID, label, ext, br, true, isTrial, protocol, sizePtr, cand.duration)
+
+			matchPolicy := policy
+			if pref := strings.TrimSpace(policy.PreferredVariantID); pref != "" && variant.UpstreamID == pref {
+				matchPolicy.PreferredVariantID = ""
+			}
+			if !provider.MatchQualityPolicy(variant, matchPolicy) {
+				continue
+			}
+
+			qKey := fmt.Sprintf("%s|%d|%d|%v", ext, br, finalSize, isTrial)
+			if seenQuality[qKey] {
+				continue
+			}
+			seenQuality[qKey] = true
+
+			out = append(out, model.ResolvedMedia{
+				VariantID:   vid,
+				Variant:     variant,
+				URL:         finalURL,
+				Expiry:      time.Now().UTC().Add(defaultResolvedMediaTTL),
+				Headers:     cand.headers,
+				Cookies:     cand.cookies,
+				PreviewOnly: isTrial,
+				Codec:       ext,
+				Bitrate:     variant.Bitrate,
+				SizeBytes:   sizePtr,
+				Lyrics:      cand.lyrics,
+			})
+		}
 	}
 
 	if len(out) == 0 {
+		if ctx.Err() != nil {
+			return nil, provider.ClassifyError(p.EngineName(), 0, "", ctx.Err())
+		}
 		if sawForbidden {
 			return nil, model.NewError(model.ErrForbidden, http.StatusForbidden, "解析结果包含禁止访问的内网地址")
 		}
@@ -305,16 +488,26 @@ func (p *Provider) Resolve(ctx context.Context, track model.ProviderTrack, polic
 		if sawInvalid {
 			return nil, model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "插件返回的媒体地址格式无效")
 		}
+		if lastProbeErr != nil {
+			return nil, lastProbeErr
+		}
 		return nil, model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "插件未能解析到可用音频地址")
 	}
 
-	if pref := strings.TrimSpace(policy.PreferredVariantID); pref != "" {
-		sort.SliceStable(out, func(i, j int) bool {
+	pref := strings.TrimSpace(policy.PreferredVariantID)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].PreviewOnly != out[j].PreviewOnly {
+			return !out[i].PreviewOnly
+		}
+		if pref != "" {
 			iMatch := out[i].VariantID == pref || out[i].Variant.UpstreamID == pref
 			jMatch := out[j].VariantID == pref || out[j].Variant.UpstreamID == pref
-			return iMatch && !jMatch
-		})
-	}
+			if iMatch != jMatch {
+				return iMatch
+			}
+		}
+		return provider.AudioRankBetter(out[i], out[j])
+	})
 	return out, nil
 }
 

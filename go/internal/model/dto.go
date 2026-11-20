@@ -311,6 +311,43 @@ type PluginTestResultDTO struct {
 	Error      string              `json:"error,omitempty"`
 }
 
+// PluginArchiveEntryInspectDTO describes the static inspection result for a single .js file inside a plugin ZIP archive.
+type PluginArchiveEntryInspectDTO struct {
+	EntryPath   string             `json:"entry_path"`
+	OK          bool               `json:"ok"`
+	Error       string             `json:"error,omitempty"`
+	SHA256      string             `json:"sha256,omitempty"`
+	Manifest    *PluginManifestDTO `json:"manifest,omitempty"`
+	Permissions []string           `json:"permissions,omitempty"`
+	Warnings    []string           `json:"warnings,omitempty"`
+}
+
+// PluginArchiveInspectResultDTO summarizes static inspection results for all .js entries inside a plugin ZIP archive.
+type PluginArchiveInspectResultDTO struct {
+	Total        int                            `json:"total"`
+	ValidCount   int                            `json:"valid_count"`
+	InvalidCount int                            `json:"invalid_count"`
+	Entries      []PluginArchiveEntryInspectDTO `json:"entries"`
+}
+
+// PluginArchiveInstallItemDTO describes the installation outcome for a single .js entry from a plugin ZIP archive.
+type PluginArchiveInstallItemDTO struct {
+	EntryPath string             `json:"entry_path"`
+	ID        string             `json:"id,omitempty"`
+	OK        bool               `json:"ok"`
+	Error     string             `json:"error,omitempty"`
+	Plugin    *ProviderPluginDTO `json:"plugin,omitempty"`
+}
+
+// PluginArchiveInstallResultDTO summarizes batch installation outcomes for a plugin ZIP archive.
+type PluginArchiveInstallResultDTO struct {
+	Total          int                           `json:"total"`
+	InstalledCount int                           `json:"installed_count"`
+	FailedCount    int                           `json:"failed_count"`
+	Installed      []ProviderPluginDTO           `json:"installed"`
+	Results        []PluginArchiveInstallItemDTO `json:"results"`
+}
+
 // ConfigDTO matches frontend/src/types.ts Config and contracts/v1/config/samples.json.
 type ConfigDTO struct {
 	AvailableSources       []AvailableSourceDTO        `json:"available_sources,omitempty"`

@@ -180,12 +180,53 @@ func TestCapabilityAndPluginDTOSerialization(t *testing.T) {
 			{Level: "info", Message: "done", Time: "2026-01-01T00:00:00Z"},
 		},
 	}
+	archiveInspectDTO := model.PluginArchiveInspectResultDTO{
+		Total:        2,
+		ValidCount:   1,
+		InvalidCount: 1,
+		Entries: []model.PluginArchiveEntryInspectDTO{
+			{
+				EntryPath:   "b1/sample.js",
+				OK:          true,
+				SHA256:      "deadbeef",
+				Manifest:    &pluginDTO.Manifest,
+				Permissions: []string{"声明能力：搜索"},
+				Warnings:    []string{},
+			},
+			{
+				EntryPath: "b1/broken.js",
+				OK:        false,
+				Error:     "插件脚本解析失败",
+			},
+		},
+	}
+	archiveInstallDTO := model.PluginArchiveInstallResultDTO{
+		Total:          2,
+		InstalledCount: 1,
+		FailedCount:    1,
+		Installed:      []model.ProviderPluginDTO{pluginDTO},
+		Results: []model.PluginArchiveInstallItemDTO{
+			{
+				EntryPath: "b1/sample.js",
+				ID:        pluginDTO.ID,
+				OK:        true,
+				Plugin:    &pluginDTO,
+			},
+			{
+				EntryPath: "b1/broken.js",
+				OK:        false,
+				Error:     "插件脚本解析失败",
+			},
+		},
+	}
 
 	for name, val := range map[string]any{
-		"AvailableSourceDTO":     src,
-		"ProviderPluginDTO":      pluginDTO,
-		"PluginInspectResultDTO": inspectDTO,
-		"PluginTestResultDTO":    testDTO,
+		"AvailableSourceDTO":            src,
+		"ProviderPluginDTO":             pluginDTO,
+		"PluginInspectResultDTO":        inspectDTO,
+		"PluginTestResultDTO":           testDTO,
+		"PluginArchiveInspectResultDTO": archiveInspectDTO,
+		"PluginArchiveInstallResultDTO": archiveInstallDTO,
 	} {
 		data, err := json.Marshal(val)
 		if err != nil {

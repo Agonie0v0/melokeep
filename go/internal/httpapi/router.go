@@ -504,6 +504,8 @@ func (s *Server) registerRoutes() {
 	// Provider plugin endpoints.
 	s.addRoute(http.MethodGet, "/api/plugins", "engine_api.plugins_list", s.handlePluginsList)
 	s.addRoute(http.MethodPost, "/api/plugins/inspect", "engine_api.plugins_inspect", s.handlePluginsInspect)
+	s.addRoute(http.MethodPost, "/api/plugins/inspect-archive", "engine_api.plugins_inspect_archive", s.handlePluginsInspectArchive)
+	s.addRoute(http.MethodPost, "/api/plugins/install-archive", "engine_api.plugins_install_archive", s.handlePluginsInstallArchive)
 	s.addRoute(http.MethodPost, "/api/plugins", "engine_api.plugins_install", s.handlePluginsInstall)
 	s.addRoute(http.MethodPatch, "/api/plugins/{ident}", "engine_api.plugins_update", s.handlePluginsUpdate)
 	s.addRoute(http.MethodDelete, "/api/plugins/{ident}", "engine_api.plugins_delete", s.handlePluginsDelete)

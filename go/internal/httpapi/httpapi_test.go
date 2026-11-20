@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -10,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1886,14 +1888,294 @@ func TestPluginHTTPAPILifecycle(t *testing.T) {
 	}
 }
 
+func buildPluginZipBytes(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create %q: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("zip write %q: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func multipartArchiveRequest(t *testing.T, path string, fileField string, fileName string, zipBytes []byte, fields map[string]string, withCSRF bool) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if fileField != "" {
+		fw, err := mw.CreateFormFile(fileField, fileName)
+		if err != nil {
+			t.Fatalf("CreateFormFile: %v", err)
+		}
+		if _, err := fw.Write(zipBytes); err != nil {
+			t.Fatalf("write zip part: %v", err)
+		}
+	}
+	for k, v := range fields {
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("WriteField %q: %v", k, err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if withCSRF {
+		req.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	}
+	return req
+}
+
+func TestPluginArchiveHTTPAPILifecycle(t *testing.T) {
+	srv := newPluginTestServer(t, false)
+
+	archiveBytes := buildPluginZipBytes(t, map[string]string{
+		"b1/zip-alpha.js":        demoPluginScript("zip-alpha"),
+		"b2/zip-beta.js":         demoPluginScript("zip-beta"),
+		"b2/broken.js":           "this is broken {{{",
+		"b3/builtin-clash.js":    demoPluginScript("audius"),
+		"b4/dup-alpha.js":        demoPluginScript("zip-alpha"),
+		"__MACOSX/b1/._alpha.js": "mac junk",
+		"README.md":              "# plugins",
+	})
+
+	// 1. Missing CSRF header is rejected on multipart POST routes.
+	noCSRFInspect := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "plugins.zip", archiveBytes, nil, false)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, noCSRFInspect)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without CSRF on inspect-archive, got %d %s", rec.Code, rec.Body.String())
+	}
+	noCSRFInstall := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, nil, false)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, noCSRFInstall)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without CSRF on install-archive, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Inspect via multipart/form-data.
+	inspReq := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "plugins.zip", archiveBytes, nil, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, inspReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("inspect-archive multipart failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var inspRes model.PluginArchiveInspectResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &inspRes); err != nil {
+		t.Fatalf("decode inspect-archive: %v", err)
+	}
+	if inspRes.Total != 5 || inspRes.ValidCount != 2 || inspRes.InvalidCount != 3 || len(inspRes.Entries) != 5 {
+		t.Fatalf("unexpected inspect-archive summary: %+v", inspRes)
+	}
+
+	// 3. Inspect via raw application/zip body.
+	rawReq := httptest.NewRequest(http.MethodPost, "/api/plugins/inspect-archive", bytes.NewReader(archiveBytes))
+	rawReq.Header.Set("Content-Type", "application/zip")
+	rawReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, rawReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("inspect-archive application/zip failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var rawInspRes model.PluginArchiveInspectResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawInspRes); err != nil {
+		t.Fatalf("decode raw inspect-archive: %v", err)
+	}
+	if rawInspRes.Total != 5 || rawInspRes.ValidCount != 2 || rawInspRes.InvalidCount != 3 {
+		t.Fatalf("unexpected raw inspect-archive result: %+v", rawInspRes)
+	}
+
+	// 4. Error cases: missing file field, corrupt zip, unsupported content type.
+	missingFileReq := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "", "", nil, map[string]string{"note": "empty"}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, missingFileReq)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing file field, got %d %s", rec.Code, rec.Body.String())
+	}
+	corruptReq := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "bad.zip", []byte("not-a-zip"), nil, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, corruptReq)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for corrupt zip, got %d %s", rec.Code, rec.Body.String())
+	}
+	badCTReq := httptest.NewRequest(http.MethodPost, "/api/plugins/inspect-archive", strings.NewReader(`{}`))
+	badCTReq.Header.Set("Content-Type", "application/json")
+	badCTReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, badCTReq)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unsupported content-type, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Partial install with selected_ids JSON array + enabled=true; verify cache invalidation & hot registration.
+	srv.resolveMu.Lock()
+	srv.resolveCache["dummy-key"] = resolvedCacheEntry{ExpiresAt: time.Now().Add(time.Minute)}
+	srv.resolveMu.Unlock()
+
+	selReq := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, map[string]string{
+		"enabled":      "true",
+		"selected_ids": `["zip-alpha"]`,
+	}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, selReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install-archive selected failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var selRes model.PluginArchiveInstallResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &selRes); err != nil {
+		t.Fatalf("decode install-archive selected: %v", err)
+	}
+	if selRes.Total != 1 || selRes.InstalledCount != 1 || selRes.FailedCount != 0 || len(selRes.Installed) != 1 || selRes.Installed[0].ID != "zip-alpha" {
+		t.Fatalf("unexpected selected install result: %+v", selRes)
+	}
+	srv.resolveMu.Lock()
+	cacheLen := len(srv.resolveCache)
+	srv.resolveMu.Unlock()
+	if cacheLen != 0 {
+		t.Fatalf("expected resolveCache invalidated after archive install, still has %d entries", cacheLen)
+	}
+	if !listedIDs(t, srv, "/api/config", "available_sources")["zip-alpha"] {
+		t.Fatalf("zip-alpha missing from /api/config available_sources after install-archive")
+	}
+	if listedIDs(t, srv, "/api/config", "available_sources")["zip-beta"] {
+		t.Fatalf("unselected zip-beta must not be installed")
+	}
+	if !listedIDs(t, srv, "/api/library/settings", "metadata_sources")["zip-alpha"] {
+		t.Fatalf("zip-alpha missing from /api/library/settings metadata_sources")
+	}
+
+	// Verify audit log recorded batch install.
+	var foundAudit bool
+	for _, entry := range srv.deps.Logs.List() {
+		if entry.Category == "plugin" && strings.Contains(entry.Message, "zip-alpha") {
+			foundAudit = true
+			break
+		}
+	}
+	if !foundAudit {
+		t.Fatalf("expected audit log entry for archive install, got %+v", srv.deps.Logs.List())
+	}
+
+	// 6. Comma-separated selected_ids + enabled=false installs zip-beta disabled.
+	csvReq := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, map[string]string{
+		"enabled":      "false",
+		"selected_ids": "zip-beta",
+	}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, csvReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install-archive csv failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var csvRes model.PluginArchiveInstallResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &csvRes); err != nil {
+		t.Fatalf("decode csv install-archive: %v", err)
+	}
+	if csvRes.Total != 1 || csvRes.InstalledCount != 1 || csvRes.Installed[0].Enabled {
+		t.Fatalf("expected zip-beta installed disabled, got %+v", csvRes)
+	}
+	if listedIDs(t, srv, "/api/config", "available_sources")["zip-beta"] {
+		t.Fatalf("disabled zip-beta must not appear in /api/config available_sources")
+	}
+
+	// 7. Install all (no selected_ids) with enabled=true and allowed_origins enables both valid plugins and reports 3 failed items.
+	allReq := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, map[string]string{
+		"enabled":         "true",
+		"allowed_origins": `["http://192.168.1.20:8080"]`,
+	}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, allReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install-archive all failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var allRes model.PluginArchiveInstallResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &allRes); err != nil {
+		t.Fatalf("decode all install-archive: %v", err)
+	}
+	if allRes.Total != 5 || allRes.InstalledCount != 2 || allRes.FailedCount != 3 || len(allRes.Installed) != 2 || len(allRes.Results) != 5 {
+		t.Fatalf("unexpected install-all result: %+v", allRes)
+	}
+	avail := listedIDs(t, srv, "/api/config", "available_sources")
+	if !avail["zip-alpha"] || !avail["zip-beta"] {
+		t.Fatalf("expected both zip-alpha and zip-beta active in /api/config, got %v", avail)
+	}
+
+	// 8. Invalid form parameter values return 400.
+	badEnabledReq := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, map[string]string{
+		"enabled": "maybe",
+	}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, badEnabledReq)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid enabled value, got %d %s", rec.Code, rec.Body.String())
+	}
+	badSelReq := multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "plugins.zip", archiveBytes, map[string]string{
+		"selected_ids": "[invalid-json",
+	}, true)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, badSelReq)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid selected_ids JSON, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 9. Auth-enabled server accepts authenticated multipart upload with CSRF header and rejects unauthenticated upload.
+	authSrv, _, _ := newTestServer(t, func(d *Dependencies, _ string) {
+		d.AuthEnabled = true
+		d.AuthUserDigest = sha256.Sum256([]byte("admin"))
+		d.AuthPassDigest = sha256.Sum256([]byte("pass"))
+		d.Plugins = plugin.NewManager(d.Store, d.Transport, d.Providers, t.TempDir(), nil)
+	})
+	unauthReq := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "plugins.zip", archiveBytes, nil, true)
+	rec = httptest.NewRecorder()
+	authSrv.ServeHTTP(rec, unauthReq)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated multipart inspect-archive, got %d %s", rec.Code, rec.Body.String())
+	}
+	tok, err := authSrv.deps.Sessions.Create("admin")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	authReq := multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "plugins.zip", archiveBytes, nil, true)
+	authReq.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: tok})
+	rec = httptest.NewRecorder()
+	authSrv.ServeHTTP(rec, authReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated multipart inspect-archive with CSRF, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPluginHTTPAPIReadOnlyGuard(t *testing.T) {
 	srv := newPluginTestServer(t, true)
+	archiveBytes := buildPluginZipBytes(t, map[string]string{
+		"ro-demo.js": demoPluginScript("ro-demo"),
+	})
 
 	if code, _ := jsonCall(t, srv, http.MethodGet, "/api/plugins", nil); code != http.StatusOK {
 		t.Fatalf("GET /api/plugins must stay readable in read-only mode, got %d", code)
 	}
 	if code, _ := jsonCall(t, srv, http.MethodPost, "/api/plugins/inspect", map[string]any{"code": demoPluginScript("ro-demo")}); code != http.StatusOK {
 		t.Fatalf("inspect must stay available in read-only mode, got %d", code)
+	}
+	inspArchRec := httptest.NewRecorder()
+	srv.ServeHTTP(inspArchRec, multipartArchiveRequest(t, "/api/plugins/inspect-archive", "file", "ro.zip", archiveBytes, nil, true))
+	if inspArchRec.Code != http.StatusOK {
+		t.Fatalf("inspect-archive must stay available in read-only mode, got %d %s", inspArchRec.Code, inspArchRec.Body.String())
+	}
+	instArchRec := httptest.NewRecorder()
+	srv.ServeHTTP(instArchRec, multipartArchiveRequest(t, "/api/plugins/install-archive", "file", "ro.zip", archiveBytes, nil, true))
+	var instArchOut map[string]any
+	_ = json.Unmarshal(instArchRec.Body.Bytes(), &instArchOut)
+	if instArchRec.Code != http.StatusForbidden || instArchOut["detail"] != "只读验证模式禁止修改插件" {
+		t.Fatalf("POST /api/plugins/install-archive expected 403 read-only guard, got %d %v", instArchRec.Code, instArchOut)
 	}
 	for _, tc := range []struct {
 		method, path string
