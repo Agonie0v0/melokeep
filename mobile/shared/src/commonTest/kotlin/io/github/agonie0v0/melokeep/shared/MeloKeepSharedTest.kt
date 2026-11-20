@@ -9,14 +9,18 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.writeStringUtf8
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -1580,6 +1584,420 @@ class MeloKeepSharedTest {
 			),
 			engineKeys,
 		)
+		client.close()
+	}
+
+	@Test
+	fun settingsStoreSearchAndLibraryHistoryManageMax20AndSingleRemoval() {
+		val backing = InMemorySettings()
+		val store = MeloSettingsStore(backing)
+		assertEquals(20, MeloSettingsStore.MAX_SEARCH_HISTORY)
+		assertTrue(store.searchHistory.value.isEmpty())
+		assertTrue(store.librarySearchHistory.value.isEmpty())
+
+		// Record 22 distinct online search queries -> capped at 20, latest first
+		for (i in 1..22) {
+			store.recordSearchHistory("  query-$i  ")
+		}
+		assertEquals(20, store.searchHistory.value.size)
+		assertEquals("query-22", store.searchHistory.value.first())
+		assertEquals("query-3", store.searchHistory.value.last())
+
+		// Deduplicate case-insensitively and move to front
+		store.recordSearchHistory("QUERY-10")
+		assertEquals(20, store.searchHistory.value.size)
+		assertEquals("QUERY-10", store.searchHistory.value.first())
+
+		// Blank removal is a no-op; matching query is removed case-insensitively and persisted
+		store.removeSearchHistory("   ")
+		assertEquals(20, store.searchHistory.value.size)
+		store.removeSearchHistory(" query-10 ")
+		assertEquals(19, store.searchHistory.value.size)
+		assertFalse(store.searchHistory.value.any { it.equals("query-10", ignoreCase = true) })
+
+		val reloadedOnline = MeloSettingsStore(backing)
+		assertEquals(19, reloadedOnline.searchHistory.value.size)
+		assertFalse(reloadedOnline.searchHistory.value.any { it.equals("query-10", ignoreCase = true) })
+
+		// Library search history: record, deduplicate, cap 20, single remove, persist under melo_library_search_history, clear
+		for (i in 1..22) {
+			store.recordLibrarySearchHistory("  lib-$i  ")
+		}
+		assertEquals(20, store.librarySearchHistory.value.size)
+		assertEquals("lib-22", store.librarySearchHistory.value.first())
+		assertEquals("lib-3", store.librarySearchHistory.value.last())
+		assertTrue(backing.hasKey("melo_library_search_history"))
+
+		store.recordLibrarySearchHistory("LIB-5")
+		assertEquals(20, store.librarySearchHistory.value.size)
+		assertEquals("LIB-5", store.librarySearchHistory.value.first())
+
+		store.removeLibrarySearchHistory("   ")
+		assertEquals(20, store.librarySearchHistory.value.size)
+		store.removeLibrarySearchHistory(" lib-5 ")
+		assertEquals(19, store.librarySearchHistory.value.size)
+		assertFalse(store.librarySearchHistory.value.any { it.equals("lib-5", ignoreCase = true) })
+
+		val reloadedLib = MeloSettingsStore(backing)
+		assertEquals(19, reloadedLib.librarySearchHistory.value.size)
+		assertFalse(reloadedLib.librarySearchHistory.value.any { it.equals("lib-5", ignoreCase = true) })
+
+		reloadedLib.clearLibrarySearchHistory()
+		assertTrue(reloadedLib.librarySearchHistory.value.isEmpty())
+		assertFalse(backing.hasKey("melo_library_search_history"))
+	}
+
+	@Test
+	fun searchStreamHandlesCrossDispatcherEmissionWithoutFlowInvariantViolation() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "",
+			bearerToken = "",
+			tokenId = "",
+			mediaToken = "",
+			mediaTokenExpiresAt = 0L,
+			authEnabled = false,
+		)
+
+		val sseScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			when {
+				request.method == HttpMethod.Post && path == "/api/search/jobs" -> respond(
+					content = """{"id":"job-cross-thread"}""",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Get && path == "/api/search/jobs/job-cross-thread/events" -> {
+					val byteChannel = ByteChannel(autoFlush = true)
+					sseScope.launch(Dispatchers.IO) {
+						try {
+							byteChannel.writeStringUtf8(
+								"id: 1\nevent: candidate\ndata: {\"id\":\"t-1\",\"source\":\"AudiusMusicClient\",\"source_id\":\"1\",\"title\":\"Cross Thread Song\",\"artist\":\"Synth\",\"album\":\"Live\",\"duration\":180.0,\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/t-1\"}}\n\n"
+							)
+							byteChannel.writeStringUtf8(
+								"id: 2\nevent: source\ndata: {\"id\":\"AudiusMusicClient\",\"status\":{\"state\":\"complete\",\"count\":1}}\n\n"
+							)
+							byteChannel.writeStringUtf8(
+								"id: 3\nevent: done\ndata: {\"cancelled\":false}\n\n"
+							)
+						} finally {
+							byteChannel.close()
+						}
+					}
+					respond(
+						content = byteChannel,
+						status = HttpStatusCode.OK,
+						headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+					)
+				}
+				request.method == HttpMethod.Delete && path == "/api/search/jobs/job-cross-thread" -> respond(
+					content = """{"cancelled":true}""",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val collectorDispatcher = Dispatchers.Default.limitedParallelism(1)
+		val events = withContext(collectorDispatcher) {
+			withTimeout(5_000L) {
+				client.searchStream("Cross Thread Song", sources = listOf("AudiusMusicClient")).toList()
+			}
+		}
+
+		assertEquals(3, events.size)
+		val cand = assertIs<MeloSearchEvent.Candidate>(events[0])
+		assertEquals("t-1", cand.track.id)
+		assertEquals("https://melo.example.com/api/stream/t-1", cand.track.playback.url)
+		assertIs<MeloSearchEvent.Source>(events[1])
+		assertIs<MeloSearchEvent.Done>(events[2])
+
+		sseScope.cancel()
+		client.close()
+	}
+
+	@Test
+	fun studioControllerSupportsScopeDirSearchCandidatesKeepExistingApplyStatusesAndPolling() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "http://127.0.0.1:8765",
+			username = "",
+			bearerToken = "",
+			tokenId = "",
+			mediaToken = "",
+			mediaTokenExpiresAt = 0L,
+			authEnabled = false,
+		)
+
+		var createdScopeDir: String? = null
+		var createdPathsSize = -1
+		var searchQuerySent = ""
+		var searchItemSent = ""
+		var searchSourcesSent: List<String> = emptyList()
+		var previewChoicesSent: Map<String, String> = emptyMap()
+		var jobDetailPollCount = 0
+		var jobsListPollCount = 0
+		var nextApplyStatus = "applying"
+		var scanCount = 0
+		var pollListPhase = "initial"
+
+		val pendingItem = MeloLibraryJobItem(
+			id = "item-review",
+			name = "mystery.flac",
+			status = "needs_review",
+			before = mapOf("title" to "Old Title", "artist" to "Old Artist"),
+		)
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			when {
+				request.method == HttpMethod.Get && path == "/api/downloads" -> respond(
+					content = "[]",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Post && path == "/api/library/jobs" -> {
+					val reqObj = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					createdPathsSize = reqObj["paths"]?.jsonArray?.size ?: -1
+					createdScopeDir = reqObj["scope_dir"]?.jsonPrimitive?.contentOrNull
+					respond(
+						content = """{"id":"job-scope","action":"both","status":"scanning","total":5,"processed":0,"detail":"正在扫描分析（0 / 5）"}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Get && path == "/api/library/jobs" -> {
+					jobsListPollCount++
+					val status = when (pollListPhase) {
+						"applying_bg" -> if (jobsListPollCount >= 4) "complete" else "applying"
+						else -> if (jobsListPollCount >= 2) "needs_review" else "scanning"
+					}
+					respond(
+						content = """{"jobs":[{"id":"job-scope","action":"both","status":"$status","total":5,"processed":5}],"has_more":false,"total":1}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Get && path == "/api/library/jobs/job-scope" -> {
+					jobDetailPollCount++
+					val jobStatus = if (jobDetailPollCount >= 1) "needs_review" else "scanning"
+					val itemJson = meloJson.encodeToString(MeloLibraryJobItem.serializer(), pendingItem)
+					respond(
+						content = """{"id":"job-scope","action":"both","status":"$jobStatus","total":1,"processed":1,"items":[$itemJson]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Post && path == "/api/library/jobs/job-scope/search" -> {
+					val reqObj = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					searchItemSent = reqObj["item"]?.jsonPrimitive?.contentOrNull.orEmpty()
+					searchQuerySent = reqObj["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
+					searchSourcesSent = reqObj["sources"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+					respond(
+						content = """{"id":"job-scope","action":"both","status":"needs_review","total":1,"processed":1,"items":[{"id":"item-review","name":"mystery.flac","status":"needs_review","candidates":[{"id":"cand-new","source":"ITunesMusicClient","title":"Found Song","artist":"Real Artist","album":"Real Album","score":0.95,"reasons":[],"conflicts":[]}]}]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Post && path == "/api/library/jobs/job-scope/preview" -> {
+					val reqObj = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					previewChoicesSent = reqObj["choices"]?.jsonObject
+						?.mapValues { (_, v) -> v.jsonPrimitive.contentOrNull.orEmpty() }
+						.orEmpty()
+					respond(
+						content = """{"id":"job-scope","action":"both","status":"preview_ready","total":1,"processed":1,"items":[{"id":"item-review","name":"mystery.flac","status":"preview_ready","chosen":"existing"}]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Post && path == "/api/library/jobs/job-scope/apply" -> {
+					when (nextApplyStatus) {
+						"error_400" -> respond(
+							content = """{"detail":"仍有 1 首曲目待确认候选"}""",
+							status = HttpStatusCode.BadRequest,
+							headers = jsonHeaders,
+						)
+						else -> respond(
+							content = """{"id":"job-scope","action":"both","status":"$nextApplyStatus","total":1,"processed":1}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					}
+				}
+				request.method == HttpMethod.Post && path == "/api/navidrome/scan" -> {
+					scanCount++
+					respond("""{"scanning":true,"count":$scanCount,"folderCount":1}""", HttpStatusCode.OK, jsonHeaders)
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloStudioController(client, controllerScope)
+
+		// Validation when both scopeDir == null and paths is empty
+		controller.createScrapeJob(paths = emptyList(), scopeDir = null)
+		assertEquals("请先选择需要刮削或整理的文件", controller.state.value.errorMessage)
+		controller.clearError()
+
+		// scopeDir = "" allows empty paths and sends scope_dir = ""
+		controller.createScrapeJob(paths = emptyList(), action = "both", autoApply = false, scopeDir = "")
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.activeJobDetail?.id == "job-scope" }
+			}
+		}
+		assertEquals(0, createdPathsSize)
+		assertEquals("", createdScopeDir)
+		assertEquals("scanning", controller.state.value.activeJobDetail?.status)
+
+		// Polling updates both libraryJobs and activeJobDetail when scanning
+		controller.startDownloadPolling(intervalMs = 800L)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					it.activeJobDetail?.status == "needs_review" &&
+						it.libraryJobs.firstOrNull { j -> j.id == "job-scope" }?.status == "needs_review"
+				}
+			}
+		}
+		controller.stopPolling()
+		assertTrue(jobsListPollCount >= 1)
+		assertTrue(jobDetailPollCount >= 1)
+
+		// Manual candidate search updates activeJobDetail, libraryJobs and noticeMessage
+		controller.searchJobItemCandidates(
+			jobId = "job-scope",
+			itemId = "item-review",
+			query = "  Found Song  ",
+			sources = listOf("ITunesMusicClient"),
+		)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.noticeMessage == "已重新搜索候选" }
+			}
+		}
+		assertEquals("item-review", searchItemSent)
+		assertEquals("Found Song", searchQuerySent)
+		assertEquals(listOf("ITunesMusicClient"), searchSourcesSent)
+		assertEquals(
+			"cand-new",
+			controller.state.value.activeJobDetail?.items?.firstOrNull()?.candidates?.firstOrNull()?.id,
+		)
+
+		// When activeJobDetail is cleared and libraryJobs only holds summary (no items),
+		// keepExistingForPendingItems fetches detail first and submits "existing" choices
+		controller.clearJobDetail()
+		previewChoicesSent = emptyMap()
+		controller.keepExistingForPendingItems("job-scope")
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					!it.jobsLoading &&
+						it.libraryJobs.firstOrNull { j -> j.id == "job-scope" }?.status == "preview_ready"
+				}
+			}
+		}
+		assertEquals(mapOf("item-review" to "existing"), previewChoicesSent)
+		assertEquals("已为 1 首待确认曲目保留现有标签", controller.state.value.noticeMessage)
+
+		// Calling keepExistingForPendingItems when no needs_review items exist gives clear notice
+		controller.keepExistingForPendingItems("job-scope")
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.noticeMessage == "当前没有待确认候选的曲目" }
+			}
+		}
+
+		// applyScrapeJob status notices & Navidrome scan gating
+		nextApplyStatus = "applying"
+		controller.applyScrapeJob("job-scope", autoTriggerScan = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.activeJobDetail?.status == "applying" }
+			}
+		}
+		assertEquals("已提交后台写入，正在归档处理...", controller.state.value.noticeMessage)
+		assertEquals(0, scanCount)
+
+		// Even with activeJobDetail cleared, polling refreshes libraryJobs while any job is in "applying"
+		controller.clearJobDetail()
+		pollListPhase = "applying_bg"
+		controller.startDownloadPolling(intervalMs = 800L)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					it.libraryJobs.firstOrNull { j -> j.id == "job-scope" }?.status == "complete"
+				}
+			}
+		}
+		controller.stopPolling()
+
+		nextApplyStatus = "needs_review"
+		controller.applyScrapeJob("job-scope", autoTriggerScan = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.activeJobDetail?.status == "needs_review" }
+			}
+		}
+		assertEquals("仍有曲目待确认候选，请先选择后再归档", controller.state.value.noticeMessage)
+		assertEquals(0, scanCount)
+
+		nextApplyStatus = "partial"
+		controller.applyScrapeJob("job-scope", autoTriggerScan = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					!it.jobsLoading &&
+						it.activeJobDetail?.status == "partial" &&
+						it.scanStatus?.count == 1L
+				}
+			}
+		}
+		assertEquals("部分条目已完成归档", controller.state.value.noticeMessage)
+		assertEquals(1, scanCount)
+
+		nextApplyStatus = "complete"
+		controller.applyScrapeJob("job-scope", autoTriggerScan = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					!it.jobsLoading &&
+						it.activeJobDetail?.status == "complete" &&
+						it.scanStatus?.count == 2L
+				}
+			}
+		}
+		assertEquals("归档完成", controller.state.value.noticeMessage)
+		assertEquals(2, scanCount)
+
+		nextApplyStatus = "error_400"
+		controller.applyScrapeJob("job-scope", autoTriggerScan = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.jobsLoading && it.errorMessage == "仍有 1 首曲目待确认候选" }
+			}
+		}
+
+		// SearchController removeHistory removes single entry cleanly
+		val searchController = MeloSearchController(client, controllerScope)
+		store.recordSearchHistory("Alpha")
+		store.recordSearchHistory("Beta")
+		searchController.removeHistory("alpha")
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				searchController.state.first { it.searchHistory == listOf("Beta") }
+			}
+		}
+
+		controllerScope.cancel()
 		client.close()
 	}
 }

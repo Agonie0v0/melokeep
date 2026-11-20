@@ -320,6 +320,10 @@ class MeloSearchController(
 		}
 	}
 
+	fun removeHistory(query: String) {
+		apiClient.settingsStore.removeSearchHistory(query)
+	}
+
 	fun clearHistory() {
 		apiClient.settingsStore.clearSearchHistory()
 	}
@@ -523,15 +527,17 @@ data class MeloStudioUiState(
 			"pending",
 			"processing",
 		)
-		val ACTIVE_LIBRARY_JOB_STATUSES = setOf(
+		val RUNNING_LIBRARY_JOB_STATUSES = setOf(
 			"queued",
 			"scanning",
 			"identifying",
 			"tagging",
 			"organizing",
 			"indexing",
-			"restoring",
 			"applying",
+			"restoring",
+		)
+		val ACTIVE_LIBRARY_JOB_STATUSES = RUNNING_LIBRARY_JOB_STATUSES + setOf(
 			"preview_ready",
 			"ready",
 			"needs_review",
@@ -588,20 +594,55 @@ class MeloStudioController(
 		pollingJob = scope.launch {
 			while (isActive) {
 				if (apiClient.settingsStore.currentConfig().isConfigured) {
-					runCatching {
+					try {
 						val list = apiClient.getDownloads()
 						_state.update { it.copy(downloads = list) }
+					} catch (e: CancellationException) {
+						throw e
+					} catch (_: Throwable) {
 					}
-					val detailId = _state.value.activeJobDetail?.id
-					if (!detailId.isNullOrBlank()) {
-						runCatching {
-							val detail = apiClient.getLibraryJobDetail(detailId)
+					val snapshot = _state.value
+					val hasRunningJob = snapshot.libraryJobs.any {
+						it.status in MeloStudioUiState.RUNNING_LIBRARY_JOB_STATUSES
+					}
+					val activeDetail = snapshot.activeJobDetail
+					val activeDetailRunning = activeDetail != null &&
+						activeDetail.status in MeloStudioUiState.RUNNING_LIBRARY_JOB_STATUSES
+
+					if (hasRunningJob) {
+						try {
+							val page = apiClient.getLibraryJobs()
 							_state.update { current ->
-								current.copy(
-									activeJobDetail = if (current.activeJobDetail?.id == detail.id) detail else current.activeJobDetail,
-									libraryJobs = current.libraryJobs.map { if (it.id == detail.id) detail else it },
-								)
+								val currentDetail = current.activeJobDetail
+								val mergedJobs = page.jobs.map { summary ->
+									if (currentDetail != null &&
+										summary.id == currentDetail.id &&
+										summary.items.isEmpty() &&
+										currentDetail.items.isNotEmpty() &&
+										summary.status == currentDetail.status
+									) {
+										currentDetail
+									} else {
+										summary
+									}
+								}
+								current.copy(libraryJobs = mergedJobs)
 							}
+						} catch (e: CancellationException) {
+							throw e
+						} catch (_: Throwable) {
+						}
+					}
+
+					if (activeDetailRunning) {
+						try {
+							val detail = apiClient.getLibraryJobDetail(activeDetail.id)
+							_state.update { current ->
+								mergeJobIntoState(current, detail)
+							}
+						} catch (e: CancellationException) {
+							throw e
+						} catch (_: Throwable) {
 						}
 					}
 				}
@@ -1131,17 +1172,20 @@ class MeloStudioController(
 		action: String = "both",
 		autoApply: Boolean = false,
 		sourceDownloadId: String? = null,
+		scopeDir: String? = null,
 	) {
-		if (paths.isEmpty()) {
+		if (scopeDir == null && paths.isEmpty()) {
 			_state.update { it.copy(errorMessage = "请先选择需要刮削或整理的文件") }
 			return
 		}
+		val effectivePaths = if (scopeDir != null) emptyList() else paths
 		scope.launch {
 			_state.update { it.copy(jobsLoading = true, errorMessage = null) }
 			try {
 				val job = apiClient.createScrapeJob(
-					paths = paths,
+					paths = effectivePaths,
 					action = action,
+					scopeDir = scopeDir,
 					autoApply = autoApply,
 					sourceDownloadId = sourceDownloadId,
 				)
@@ -1178,19 +1222,96 @@ class MeloStudioController(
 			try {
 				val updated = apiClient.previewScrapeJob(jobId, mapOf(itemKey to candidateId))
 				_state.update { current ->
-					current.copy(
-						activeJobDetail = if (current.activeJobDetail?.id == updated.id) {
-							updated
-						} else {
-							current.activeJobDetail
-						},
-						libraryJobs = current.libraryJobs.map { if (it.id == updated.id) updated else it },
-					)
+					mergeJobIntoState(current, updated)
 				}
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: Throwable) {
 				_state.update { it.copy(errorMessage = e.message ?: "切换候选版本预览失败") }
+			}
+		}
+	}
+
+	fun searchJobItemCandidates(
+		jobId: String,
+		itemId: String,
+		query: String,
+		sources: List<String>? = null,
+	) {
+		if (jobId.isBlank() || itemId.isBlank()) return
+		val cleanQuery = query.trim()
+		if (cleanQuery.isEmpty()) {
+			_state.update { it.copy(errorMessage = "请输入搜索关键词") }
+			return
+		}
+		scope.launch {
+			_state.update { it.copy(jobsLoading = true, errorMessage = null) }
+			try {
+				val updated = apiClient.searchScrapeJobCandidates(
+					jobId = jobId,
+					itemId = itemId,
+					query = cleanQuery,
+					sources = sources,
+				)
+				_state.update { current ->
+					mergeJobIntoState(current, updated).copy(
+						jobsLoading = false,
+						noticeMessage = "已重新搜索候选",
+					)
+				}
+			} catch (e: CancellationException) {
+				_state.update { it.copy(jobsLoading = false) }
+				throw e
+			} catch (e: Throwable) {
+				_state.update {
+					it.copy(
+						jobsLoading = false,
+						errorMessage = e.message ?: "重新搜索候选失败",
+					)
+				}
+			}
+		}
+	}
+
+	fun keepExistingForPendingItems(jobId: String) {
+		if (jobId.isBlank()) return
+		scope.launch {
+			_state.update { it.copy(jobsLoading = true, errorMessage = null) }
+			try {
+				val snapshot = _state.value
+				val localJob = snapshot.activeJobDetail?.takeIf { it.id == jobId && it.items.isNotEmpty() }
+					?: snapshot.libraryJobs.firstOrNull { it.id == jobId && it.items.isNotEmpty() }
+				val job = localJob ?: apiClient.getLibraryJobDetail(jobId)
+				val pendingIds = job.items
+					.filter { it.status == "needs_review" && it.id.isNotBlank() }
+					.map { it.id }
+				if (pendingIds.isEmpty()) {
+					_state.update { current ->
+						mergeJobIntoState(current, job).copy(
+							jobsLoading = false,
+							noticeMessage = "当前没有待确认候选的曲目",
+						)
+					}
+					return@launch
+				}
+				val choices = pendingIds.associateWith { "existing" }
+				val updated = apiClient.previewScrapeJob(jobId, choices)
+				_state.update { current ->
+					mergeJobIntoState(current, updated).copy(
+						jobsLoading = false,
+						noticeMessage = "已为 ${pendingIds.size} 首待确认曲目保留现有标签",
+					)
+				}
+			} catch (e: CancellationException) {
+				_state.update { it.copy(jobsLoading = false) }
+				throw e
+			} catch (e: Throwable) {
+				_state.update {
+					it.copy(
+						jobsLoading = false,
+						errorMessage = e.message ?: "批量保留现有标签失败",
+					)
+				}
 			}
 		}
 	}
@@ -1204,15 +1325,22 @@ class MeloStudioController(
 			_state.update { it.copy(jobsLoading = true, errorMessage = null) }
 			try {
 				val updated = apiClient.applyScrapeJob(id, choices)
+				val notice = when (updated.status) {
+					"applying" -> "已提交后台写入，正在归档处理..."
+					"complete" -> "归档完成"
+					"partial" -> "部分条目已完成归档"
+					"needs_review" -> "仍有曲目待确认候选，请先选择后再归档"
+					else -> "已确认应用归档"
+				}
 				_state.update { current ->
 					current.copy(
 						jobsLoading = false,
 						activeJobDetail = updated,
 						libraryJobs = current.libraryJobs.map { if (it.id == updated.id) updated else it },
-						noticeMessage = "已确认应用归档",
+						noticeMessage = notice,
 					)
 				}
-				if (autoTriggerScan) {
+				if (autoTriggerScan && updated.status in setOf("complete", "partial")) {
 					try {
 						val scan = apiClient.triggerNavidromeScan()
 						_state.update { it.copy(scanStatus = scan) }
@@ -1560,6 +1688,12 @@ class MeloStudioController(
 	fun clearNotice() {
 		_state.update { it.copy(noticeMessage = null) }
 	}
+
+	private fun mergeJobIntoState(current: MeloStudioUiState, updated: MeloLibraryJob): MeloStudioUiState =
+		current.copy(
+			activeJobDetail = if (current.activeJobDetail?.id == updated.id) updated else current.activeJobDetail,
+			libraryJobs = current.libraryJobs.map { if (it.id == updated.id) updated else it },
+		)
 }
 
 data class MeloAiUiState(

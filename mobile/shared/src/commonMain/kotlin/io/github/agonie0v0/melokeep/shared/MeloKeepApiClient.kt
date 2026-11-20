@@ -30,9 +30,12 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.LineEnding
 import io.ktor.utils.io.readLine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -63,8 +66,8 @@ class MeloKeepApiClient(
 		}
 		install(HttpTimeout) {
 			connectTimeoutMillis = 15_000L
-			socketTimeoutMillis = 60_000L
-			requestTimeoutMillis = 60_000L
+			socketTimeoutMillis = 120_000L
+			requestTimeoutMillis = 120_000L
 		}
 	}
 
@@ -250,10 +253,10 @@ class MeloKeepApiClient(
 		sources: List<String> = emptyList(),
 		refresh: Boolean = false,
 		limit: Int? = null,
-	): Flow<MeloSearchEvent> = flow {
+	): Flow<MeloSearchEvent> = channelFlow {
 		val trimmedKeyword = keyword.trim()
 		if (trimmedKeyword.isEmpty()) {
-			return@flow
+			return@channelFlow
 		}
 		val base = requireBaseUrl()
 		val createResp = httpClient.post("$base/api/search/jobs") {
@@ -298,7 +301,7 @@ class MeloKeepApiClient(
 						is MeloSearchEvent.Track -> rawEvent.copy(track = rawEvent.track.withResolvedUrls())
 						else -> rawEvent
 					}
-					emit(resolvedEvent)
+					send(resolvedEvent)
 					if (resolvedEvent is MeloSearchEvent.Done) {
 						shouldStop = true
 					}
@@ -309,7 +312,7 @@ class MeloKeepApiClient(
 				runCatching { deleteSearchJob(jobId) }
 			}
 		}
-	}
+	}.flowOn(Dispatchers.IO)
 
 	suspend fun cancelSearchJob(jobId: String) {
 		deleteSearchJob(jobId)
@@ -627,6 +630,26 @@ class MeloKeepApiClient(
 			applyMeloHeaders()
 			contentType(ContentType.Application.Json)
 			setBody(MeloLibraryApplyRequest(choices = choices))
+		}
+		return decodeResponse(response)
+	}
+
+	suspend fun searchScrapeJobCandidates(
+		jobId: String,
+		itemId: String,
+		query: String,
+		sources: List<String>? = null,
+	): MeloLibraryJob {
+		val response = httpClient.post(buildUrl("/api/library/jobs/${jobId.encodeURLPathPart()}/search")) {
+			applyMeloHeaders()
+			contentType(ContentType.Application.Json)
+			setBody(
+				MeloLibraryCandidateSearchRequest(
+					item = itemId,
+					query = query.trim(),
+					sources = sources?.takeIf { it.isNotEmpty() },
+				)
+			)
 		}
 		return decodeResponse(response)
 	}

@@ -433,6 +433,13 @@ data class MeloLibraryApplyRequest(
 )
 
 @Serializable
+internal data class MeloLibraryCandidateSearchRequest(
+	val item: String,
+	val query: String,
+	val sources: List<String>? = null,
+)
+
+@Serializable
 data class MeloNavidromeScanStatus(
 	val scanning: Boolean = false,
 	val count: Long = 0L,
