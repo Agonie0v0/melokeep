@@ -2,6 +2,7 @@ import { useSyncExternalStore, type CSSProperties } from "react";
 import { Lyrics } from "./components";
 import { clock, type LyricLine } from "./lyrics";
 import { playbackClock } from "./playback-clock";
+import type { LyricsAlign } from "./preferences";
 
 export function usePlaybackTime(): number {
   return useSyncExternalStore(
@@ -55,6 +56,10 @@ export function SyncedLyrics({
   large = false,
   follow = true,
   size = false,
+  lyricsFontSize,
+  lyricsActiveColor,
+  lyricsInactiveOpacity,
+  lyricsAlign,
 }: {
   lines: LyricLine[];
   text: string;
@@ -62,6 +67,10 @@ export function SyncedLyrics({
   large?: boolean;
   follow?: boolean;
   size?: boolean;
+  lyricsFontSize?: number;
+  lyricsActiveColor?: string;
+  lyricsInactiveOpacity?: number;
+  lyricsAlign?: LyricsAlign;
 }) {
   const time = usePlaybackTime();
   return (
@@ -73,6 +82,10 @@ export function SyncedLyrics({
       large={large}
       follow={follow}
       size={size}
+      lyricsFontSize={lyricsFontSize}
+      lyricsActiveColor={lyricsActiveColor}
+      lyricsInactiveOpacity={lyricsInactiveOpacity}
+      lyricsAlign={lyricsAlign}
     />
   );
 }

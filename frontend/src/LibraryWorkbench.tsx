@@ -8,6 +8,9 @@ export function LibraryWorkbench({
   busy,
   start,
   rules,
+  initialDirectoryMode,
+  initialDirectory,
+  initialDirectoryKey,
 }: {
   count: number;
   busy: boolean;
@@ -16,13 +19,26 @@ export function LibraryWorkbench({
     options: Record<string, unknown>,
   ) => void;
   rules: () => void;
+  initialDirectoryMode?: boolean;
+  initialDirectory?: string;
+  initialDirectoryKey?: number | string;
 }) {
   const [config, setConfig] = useState<LibraryConfig | null>(null);
   const [error, setError] = useState("");
   const [action, setAction] = useState<"scrape" | "organize" | "both">("both");
-  const [directoryMode, setDirectoryMode] = useState(false);
-  const [directory, setDirectory] = useState("incoming");
+  const [directoryMode, setDirectoryMode] = useState(
+    Boolean(initialDirectoryMode),
+  );
+  const [directory, setDirectory] = useState(initialDirectory ?? "incoming");
   const [previewOnly, setPreviewOnly] = useState(false);
+  useEffect(() => {
+    if (initialDirectoryMode !== undefined) {
+      setDirectoryMode(initialDirectoryMode);
+    }
+    if (initialDirectory !== undefined) {
+      setDirectory(initialDirectory);
+    }
+  }, [initialDirectoryMode, initialDirectory, initialDirectoryKey]);
   const load = () =>
     api<LibraryConfig>("/library/settings")
       .then(setConfig)
@@ -160,7 +176,7 @@ export function LibraryWorkbench({
           <div className="management-toolbar workbench-submit">
             <span aria-live="polite">
               {directoryMode
-                ? `目录：${directory || "音乐根目录"}`
+                ? `目录：${directory.trim() || "音乐根目录"}`
                 : `已选 ${count} 首歌曲`}
             </span>
             <button
@@ -172,7 +188,7 @@ export function LibraryWorkbench({
               }
               onClick={() =>
                 start(action, {
-                  ...(directoryMode ? { scope_dir: directory } : {}),
+                  ...(directoryMode ? { scope_dir: directory.trim() } : {}),
                   auto_apply: !previewOnly,
                 })
               }

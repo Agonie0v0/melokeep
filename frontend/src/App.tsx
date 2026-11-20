@@ -43,14 +43,19 @@ import { playbackErrorMessage } from "./playback-errors";
 import { selectResults } from "./results";
 import { parseLrc, clock, type LyricLine } from "./lyrics";
 import {
+  DEFAULT_PLAYER_PREFS,
   fetchServerPreferences,
   getDirtyPreferenceKeys,
   getPreferencesMutationSeq,
   loadInitialPlayerPrefs,
+  normalizePlayerPrefs,
+  parsePlayerPreferences,
+  sanitizeLyricsFontSize,
   saveLocalPlayerPrefs,
   scheduleSavePreferences,
   subscribePreferencesPatch,
   toAppearancePreferences,
+  toPlayerPreferences,
   type LocalPlayerState,
   type NavidromeViewPreferences,
   type UIPreferences,
@@ -318,6 +323,11 @@ export function App() {
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [queueStatus, setQueueStatus] = useState("all");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [workbenchTarget, setWorkbenchTarget] = useState<{
+    directoryMode: boolean;
+    directory: string;
+    nonce: number;
+  } | null>(null);
   const [assistantTracks, setAssistantTracks] = useState<Track[]>([]);
   const [libraryTab, setLibraryTab] = useState("local");
   const [processingTab, setProcessingTab] = useState("workbench");
@@ -373,10 +383,30 @@ export function App() {
   const [lyricText, setLyricText] = useState(""),
     [lines, setLines] = useState<LyricLine[]>([]),
     [follow, setFollow] = useState(initialPlayer.follow),
-    [largeLyrics, setLargeLyrics] = useState(initialPlayer.largeLyrics);
+    [largeLyrics, setLargeLyrics] = useState(initialPlayer.largeLyrics),
+    [lyricsFontSize, setLyricsFontSize] = useState(
+      initialPlayer.lyricsFontSize,
+    ),
+    [lyricsActiveColor, setLyricsActiveColor] = useState(
+      initialPlayer.lyricsActiveColor,
+    ),
+    [lyricsInactiveOpacity, setLyricsInactiveOpacity] = useState(
+      initialPlayer.lyricsInactiveOpacity,
+    ),
+    [lyricsAlign, setLyricsAlign] = useState(initialPlayer.lyricsAlign);
   const playerPrefsRef = useRef<LocalPlayerState>(initialPlayer);
   const lastLocalPrefAtRef = useRef(0);
-  playerPrefsRef.current = { volume, shuffle, repeat, follow, largeLyrics };
+  playerPrefsRef.current = {
+    volume,
+    shuffle,
+    repeat,
+    follow,
+    largeLyrics,
+    lyricsFontSize,
+    lyricsActiveColor,
+    lyricsInactiveOpacity,
+    lyricsAlign,
+  };
   useEffect(() => {
     return subscribePreferencesPatch((patch) => {
       lastLocalPrefAtRef.current = Date.now();
@@ -394,29 +424,66 @@ export function App() {
       }
     });
   }, []);
-  const updatePlayerPrefs = useCallback((patch: Partial<LocalPlayerState>) => {
-    const next: LocalPlayerState = { ...playerPrefsRef.current, ...patch };
-    playerPrefsRef.current = next;
-    if (patch.volume !== undefined) setVolume(next.volume);
-    if (patch.shuffle !== undefined) setShuffle(next.shuffle);
-    if (patch.repeat !== undefined) setRepeat(next.repeat);
-    if (patch.follow !== undefined) setFollow(next.follow);
-    if (patch.largeLyrics !== undefined) setLargeLyrics(next.largeLyrics);
-    saveLocalPlayerPrefs(next);
-    lastLocalPrefAtRef.current = Date.now();
-    scheduleSavePreferences(
-      {
-        player: {
-          volume: next.volume,
-          shuffle: next.shuffle,
-          repeat: next.repeat,
-          follow_lyrics: next.follow,
-          large_lyrics: next.largeLyrics,
+  const updatePlayerPrefs = useCallback(
+    (
+      patch: Partial<LocalPlayerState>,
+      options: { debounceMs?: number } = {},
+    ) => {
+      const merged: Partial<LocalPlayerState> = {
+        ...playerPrefsRef.current,
+        ...patch,
+      };
+      if (
+        patch.lyricsFontSize !== undefined &&
+        patch.largeLyrics === undefined
+      ) {
+        merged.largeLyrics = sanitizeLyricsFontSize(patch.lyricsFontSize) >= 28;
+      } else if (
+        patch.largeLyrics !== undefined &&
+        patch.lyricsFontSize === undefined
+      ) {
+        merged.lyricsFontSize = patch.largeLyrics ? 28 : 24;
+      }
+      const next = normalizePlayerPrefs(merged, playerPrefsRef.current);
+      playerPrefsRef.current = next;
+      if (patch.volume !== undefined) setVolume(next.volume);
+      if (patch.shuffle !== undefined) setShuffle(next.shuffle);
+      if (patch.repeat !== undefined) setRepeat(next.repeat);
+      if (patch.follow !== undefined) setFollow(next.follow);
+      if (
+        patch.largeLyrics !== undefined ||
+        patch.lyricsFontSize !== undefined
+      ) {
+        setLargeLyrics(next.largeLyrics);
+        setLyricsFontSize(next.lyricsFontSize);
+      }
+      if (patch.lyricsActiveColor !== undefined) {
+        setLyricsActiveColor(next.lyricsActiveColor);
+      }
+      if (patch.lyricsInactiveOpacity !== undefined) {
+        setLyricsInactiveOpacity(next.lyricsInactiveOpacity);
+      }
+      if (patch.lyricsAlign !== undefined) {
+        setLyricsAlign(next.lyricsAlign);
+      }
+      saveLocalPlayerPrefs(next);
+      lastLocalPrefAtRef.current = Date.now();
+      const defaultDebounce =
+        patch.volume !== undefined ||
+        patch.lyricsFontSize !== undefined ||
+        patch.lyricsInactiveOpacity !== undefined ||
+        patch.lyricsActiveColor !== undefined
+          ? 180
+          : 0;
+      scheduleSavePreferences(
+        {
+          player: toPlayerPreferences(next),
         },
-      },
-      { debounceMs: patch.volume !== undefined ? 180 : 0 },
-    );
-  }, []);
+        { debounceMs: options.debounceMs ?? defaultDebounce },
+      );
+    },
+    [],
+  );
   const [notice, setNotice] = useState(""),
     [authEnabled, setAuthEnabled] = useState(false),
     [loginRequired, setLoginRequired] = useState(false),
@@ -559,14 +626,7 @@ export function App() {
         }
       }
       if (dirtyKeys.has("player")) {
-        const cur = playerPrefsRef.current;
-        pendingFlush.player = {
-          volume: cur.volume,
-          shuffle: cur.shuffle,
-          repeat: cur.repeat,
-          follow_lyrics: cur.follow,
-          large_lyrics: cur.largeLyrics,
-        };
+        pendingFlush.player = toPlayerPreferences(playerPrefsRef.current);
       }
       if (dirtyKeys.has("library_tree_width")) {
         try {
@@ -622,37 +682,20 @@ export function App() {
           setServerNavOrder(prefs.navigation_order);
         }
         if (prefs.player && !dirtyKeys.has("player")) {
-          const cur = playerPrefsRef.current;
-          const nextPlayer: LocalPlayerState = {
-            volume:
-              typeof prefs.player.volume === "number" &&
-              prefs.player.volume >= 0 &&
-              prefs.player.volume <= 1
-                ? prefs.player.volume
-                : cur.volume,
-            shuffle:
-              typeof prefs.player.shuffle === "boolean"
-                ? prefs.player.shuffle
-                : cur.shuffle,
-            repeat:
-              typeof prefs.player.repeat === "boolean"
-                ? prefs.player.repeat
-                : cur.repeat,
-            follow:
-              typeof prefs.player.follow_lyrics === "boolean"
-                ? prefs.player.follow_lyrics
-                : cur.follow,
-            largeLyrics:
-              typeof prefs.player.large_lyrics === "boolean"
-                ? prefs.player.large_lyrics
-                : cur.largeLyrics,
-          };
+          const nextPlayer = parsePlayerPreferences(
+            prefs.player,
+            playerPrefsRef.current,
+          );
           playerPrefsRef.current = nextPlayer;
           setVolume(nextPlayer.volume);
           setShuffle(nextPlayer.shuffle);
           setRepeat(nextPlayer.repeat);
           setFollow(nextPlayer.follow);
           setLargeLyrics(nextPlayer.largeLyrics);
+          setLyricsFontSize(nextPlayer.lyricsFontSize);
+          setLyricsActiveColor(nextPlayer.lyricsActiveColor);
+          setLyricsInactiveOpacity(nextPlayer.lyricsInactiveOpacity);
+          setLyricsAlign(nextPlayer.lyricsAlign);
           saveLocalPlayerPrefs(nextPlayer);
         }
         if (
@@ -728,6 +771,23 @@ export function App() {
         const dismissed = localStorage.getItem("melokeep-dismissed-update");
         if (patch.dismissed_update === undefined && dismissed) {
           patch.dismissed_update = dismissed;
+        }
+        const curPlayer = playerPrefsRef.current;
+        if (
+          !patch.player &&
+          (curPlayer.volume !== DEFAULT_PLAYER_PREFS.volume ||
+            curPlayer.shuffle !== DEFAULT_PLAYER_PREFS.shuffle ||
+            curPlayer.repeat !== DEFAULT_PLAYER_PREFS.repeat ||
+            curPlayer.follow !== DEFAULT_PLAYER_PREFS.follow ||
+            curPlayer.largeLyrics !== DEFAULT_PLAYER_PREFS.largeLyrics ||
+            curPlayer.lyricsFontSize !== DEFAULT_PLAYER_PREFS.lyricsFontSize ||
+            curPlayer.lyricsActiveColor !==
+              DEFAULT_PLAYER_PREFS.lyricsActiveColor ||
+            curPlayer.lyricsInactiveOpacity !==
+              DEFAULT_PLAYER_PREFS.lyricsInactiveOpacity ||
+            curPlayer.lyricsAlign !== DEFAULT_PLAYER_PREFS.lyricsAlign)
+        ) {
+          patch.player = toPlayerPreferences(curPlayer);
         }
       } catch {
         /* Storage is optional. */
@@ -2831,6 +2891,10 @@ export function App() {
               lyricText={lyricText}
               follow={follow}
               largeLyrics={largeLyrics}
+              lyricsFontSize={lyricsFontSize}
+              lyricsActiveColor={lyricsActiveColor}
+              lyricsInactiveOpacity={lyricsInactiveOpacity}
+              lyricsAlign={lyricsAlign}
               lyricsOffsetMs={lyricsOffsetMs}
               sleepTimer={sleepTimer}
               playlist={playlist}
@@ -2853,6 +2917,31 @@ export function App() {
               onToggleFollow={() => updatePlayerPrefs({ follow: !follow })}
               onToggleLargeLyrics={() =>
                 updatePlayerPrefs({ largeLyrics: !largeLyrics })
+              }
+              onChangeLyricsFontSize={(nextSize) =>
+                updatePlayerPrefs({ lyricsFontSize: nextSize })
+              }
+              onChangeLyricsActiveColor={(nextColor) =>
+                updatePlayerPrefs({ lyricsActiveColor: nextColor })
+              }
+              onChangeLyricsInactiveOpacity={(nextOpacity) =>
+                updatePlayerPrefs({ lyricsInactiveOpacity: nextOpacity })
+              }
+              onChangeLyricsAlign={(nextAlign) =>
+                updatePlayerPrefs({ lyricsAlign: nextAlign })
+              }
+              onResetLyricsStyle={() =>
+                updatePlayerPrefs(
+                  {
+                    largeLyrics: DEFAULT_PLAYER_PREFS.largeLyrics,
+                    lyricsFontSize: DEFAULT_PLAYER_PREFS.lyricsFontSize,
+                    lyricsActiveColor: DEFAULT_PLAYER_PREFS.lyricsActiveColor,
+                    lyricsInactiveOpacity:
+                      DEFAULT_PLAYER_PREFS.lyricsInactiveOpacity,
+                    lyricsAlign: DEFAULT_PLAYER_PREFS.lyricsAlign,
+                  },
+                  { debounceMs: 0 },
+                )
               }
               onChangeLyricsOffsetMs={handleChangeLyricsOffsetMs}
               onSetSleepTimer={handleSetSleepTimer}
@@ -3320,8 +3409,25 @@ export function App() {
               tab={view === "files" ? libraryTab : processingTab}
               setTab={view === "files" ? setLibraryTab : setProcessingTab}
               openSettings={openSettings}
+              initialDirectoryMode={workbenchTarget?.directoryMode}
+              initialDirectory={workbenchTarget?.directory}
+              initialDirectoryKey={workbenchTarget?.nonce}
               process={(items) => {
                 setSelectedFiles(items.map((file) => file.path));
+                setWorkbenchTarget((prev) => ({
+                  directoryMode: false,
+                  directory: prev?.directory ?? "incoming",
+                  nonce: (prev?.nonce ?? 0) + 1,
+                }));
+                setProcessingTab("workbench");
+                setView("organize");
+              }}
+              processDirectory={(scopeDir) => {
+                setWorkbenchTarget((prev) => ({
+                  directoryMode: true,
+                  directory: scopeDir,
+                  nonce: (prev?.nonce ?? 0) + 1,
+                }));
                 setProcessingTab("workbench");
                 setView("organize");
               }}
@@ -3472,6 +3578,10 @@ export function App() {
             lyricText={lyricText}
             follow={follow}
             largeLyrics={largeLyrics}
+            lyricsFontSize={lyricsFontSize}
+            lyricsActiveColor={lyricsActiveColor}
+            lyricsInactiveOpacity={lyricsInactiveOpacity}
+            lyricsAlign={lyricsAlign}
             lyricsOffsetMs={lyricsOffsetMs}
             playbackLabel={playbackLabel}
             drawerOpen={drawerOpen}

@@ -1,5 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import {
+  AlignCenter,
+  AlignLeft,
   ArrowLeft,
   Check,
   Download,
@@ -14,6 +23,7 @@ import {
   Play,
   Plus,
   Repeat,
+  RotateCcw,
   Search,
   Shuffle,
   SkipBack,
@@ -24,6 +34,16 @@ import {
 import { Button, Cover } from "./components";
 import { type LyricLine } from "./lyrics";
 import { PlaybackTimeline, SyncedLyrics } from "./PlaybackWidgets";
+import {
+  DEFAULT_LYRICS_ALIGN,
+  DEFAULT_LYRICS_FONT_SIZE,
+  DEFAULT_LYRICS_INACTIVE_OPACITY,
+  LARGE_LYRICS_FONT_SIZE,
+  LYRICS_ACTIVE_COLOR_PRESETS,
+  LYRICS_FONT_SIZE_MAX,
+  LYRICS_FONT_SIZE_MIN,
+  type LyricsAlign,
+} from "./preferences";
 import type { Track } from "./types";
 
 export interface SleepTimerState {
@@ -63,6 +83,10 @@ export function NowPlayingStage({
   lyricText,
   follow,
   largeLyrics,
+  lyricsFontSize,
+  lyricsActiveColor = "",
+  lyricsInactiveOpacity = DEFAULT_LYRICS_INACTIVE_OPACITY,
+  lyricsAlign = DEFAULT_LYRICS_ALIGN,
   lyricsOffsetMs = 0,
   sleepTimer = null,
   playlist,
@@ -82,6 +106,11 @@ export function NowPlayingStage({
   onAddToPlaylist,
   onToggleFollow,
   onToggleLargeLyrics,
+  onChangeLyricsFontSize,
+  onChangeLyricsActiveColor,
+  onChangeLyricsInactiveOpacity,
+  onChangeLyricsAlign,
+  onResetLyricsStyle,
   onChangeLyricsOffsetMs,
   onSetSleepTimer,
   onToggleQueueManaging,
@@ -105,6 +134,10 @@ export function NowPlayingStage({
   lyricText: string;
   follow: boolean;
   largeLyrics: boolean;
+  lyricsFontSize?: number;
+  lyricsActiveColor?: string;
+  lyricsInactiveOpacity?: number;
+  lyricsAlign?: LyricsAlign;
   lyricsOffsetMs?: number;
   sleepTimer?: SleepTimerState | null;
   playlist: Track[];
@@ -124,6 +157,11 @@ export function NowPlayingStage({
   onAddToPlaylist: () => void;
   onToggleFollow: () => void;
   onToggleLargeLyrics: () => void;
+  onChangeLyricsFontSize?: (size: number) => void;
+  onChangeLyricsActiveColor?: (color: string) => void;
+  onChangeLyricsInactiveOpacity?: (opacity: number) => void;
+  onChangeLyricsAlign?: (align: LyricsAlign) => void;
+  onResetLyricsStyle?: () => void;
   onChangeLyricsOffsetMs?: (nextMs: number) => void;
   onSetSleepTimer?: (minutes: number, stopAfterCurrent: boolean) => void;
   onToggleQueueManaging: () => void;
@@ -137,12 +175,14 @@ export function NowPlayingStage({
   const [queueFilter, setQueueFilter] = useState("");
   const [sleepMenuOpen, setSleepMenuOpen] = useState(false);
   const [lyricsTuneOpen, setLyricsTuneOpen] = useState(false);
+  const [lyricsStyleOpen, setLyricsStyleOpen] = useState(false);
   const [selectedSleepMinutes, setSelectedSleepMinutes] = useState<
     number | null
   >(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const sleepMenuRef = useRef<HTMLDivElement>(null);
   const lyricsTuneRef = useRef<HTMLDivElement>(null);
+  const lyricsStyleRef = useRef<HTMLDivElement>(null);
   const queueWrapRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -153,7 +193,7 @@ export function NowPlayingStage({
   }, [sleepTimer]);
 
   useEffect(() => {
-    if (!sleepMenuOpen && !lyricsTuneOpen) return;
+    if (!sleepMenuOpen && !lyricsTuneOpen && !lyricsStyleOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (
@@ -170,11 +210,19 @@ export function NowPlayingStage({
       ) {
         setLyricsTuneOpen(false);
       }
+      if (
+        lyricsStyleOpen &&
+        lyricsStyleRef.current &&
+        !lyricsStyleRef.current.contains(target)
+      ) {
+        setLyricsStyleOpen(false);
+      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSleepMenuOpen(false);
         setLyricsTuneOpen(false);
+        setLyricsStyleOpen(false);
       }
     };
     window.addEventListener("pointerdown", onPointerDown);
@@ -183,7 +231,7 @@ export function NowPlayingStage({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [sleepMenuOpen, lyricsTuneOpen]);
+  }, [sleepMenuOpen, lyricsTuneOpen, lyricsStyleOpen]);
 
   if (playlist.length !== prevPlaylistLen) {
     setPrevPlaylistLen(playlist.length);
@@ -240,6 +288,30 @@ export function NowPlayingStage({
       : "睡眠定时";
   const offsetLabel =
     lyricsOffsetMs > 0 ? `+${lyricsOffsetMs}ms` : `${lyricsOffsetMs}ms`;
+  const effectiveFontSize =
+    lyricsFontSize ??
+    (largeLyrics ? LARGE_LYRICS_FONT_SIZE : DEFAULT_LYRICS_FONT_SIZE);
+  const opacityPct = Math.round(lyricsInactiveOpacity * 100);
+  const fontRangePct =
+    ((effectiveFontSize - LYRICS_FONT_SIZE_MIN) /
+      (LYRICS_FONT_SIZE_MAX - LYRICS_FONT_SIZE_MIN)) *
+    100;
+  const opacityRangePct = ((opacityPct - 20) / (90 - 20)) * 100;
+  const matchedColorPreset = LYRICS_ACTIVE_COLOR_PRESETS.find(
+    (preset) =>
+      preset.color.toLowerCase() === lyricsActiveColor.trim().toLowerCase(),
+  );
+  const activeColorLabel =
+    lyricsActiveColor.trim() === ""
+      ? "跟随主题"
+      : matchedColorPreset
+        ? matchedColorPreset.label
+        : lyricsActiveColor.toUpperCase();
+  const hasCustomLyricsStyle =
+    effectiveFontSize !== DEFAULT_LYRICS_FONT_SIZE ||
+    lyricsActiveColor.trim() !== "" ||
+    Math.abs(lyricsInactiveOpacity - DEFAULT_LYRICS_INACTIVE_OPACITY) > 0.001 ||
+    lyricsAlign !== DEFAULT_LYRICS_ALIGN;
 
   return (
     <section className="view full-player np-stage">
@@ -260,16 +332,199 @@ export function NowPlayingStage({
         <div className="playback-top-tools">
           {current && (
             <>
-              <button
-                type="button"
-                className={`np-tool-btn np-tool-icon ${largeLyrics ? "active" : ""}`}
-                aria-label="调整歌词字号"
-                aria-pressed={largeLyrics}
-                title="调整歌词字号"
-                onClick={onToggleLargeLyrics}
-              >
-                Aa
-              </button>
+              <div className="np-lyrics-style-menu" ref={lyricsStyleRef}>
+                <button
+                  type="button"
+                  className={`np-tool-btn np-tool-icon np-lyrics-style-trigger ${lyricsStyleOpen ? "is-open" : ""} ${hasCustomLyricsStyle ? "active" : ""}`}
+                  aria-label="歌词外观设置"
+                  aria-expanded={lyricsStyleOpen}
+                  aria-haspopup="dialog"
+                  title="歌词外观设置"
+                  onClick={() => {
+                    setSleepMenuOpen(false);
+                    setLyricsTuneOpen(false);
+                    setLyricsStyleOpen((prev) => !prev);
+                  }}
+                >
+                  Aa
+                </button>
+                {lyricsStyleOpen && (
+                  <div
+                    className="np-lyrics-popover np-lyrics-style-popover"
+                    role="dialog"
+                    aria-label="歌词外观设置"
+                  >
+                    <div className="np-lyrics-popover-head">
+                      <span>歌词外观</span>
+                      <button
+                        type="button"
+                        className="np-lyrics-popover-reset"
+                        onClick={() => {
+                          if (onResetLyricsStyle) {
+                            onResetLyricsStyle();
+                          } else if (largeLyrics) {
+                            onToggleLargeLyrics();
+                          }
+                        }}
+                      >
+                        <RotateCcw aria-hidden="true" />
+                        恢复默认
+                      </button>
+                    </div>
+
+                    <label className="np-lyrics-style-field">
+                      <span className="np-lyrics-style-row">
+                        <span>字号</span>
+                        <strong className="np-lyrics-style-val">
+                          {effectiveFontSize}px
+                        </strong>
+                      </span>
+                      <input
+                        type="range"
+                        aria-label="歌词字号"
+                        min={LYRICS_FONT_SIZE_MIN}
+                        max={LYRICS_FONT_SIZE_MAX}
+                        step={1}
+                        value={effectiveFontSize}
+                        style={
+                          { "--progress": `${fontRangePct}%` } as CSSProperties
+                        }
+                        onChange={(e) => {
+                          const nextSize = Number(e.target.value);
+                          if (onChangeLyricsFontSize) {
+                            onChangeLyricsFontSize(nextSize);
+                          } else if (
+                            nextSize >= LARGE_LYRICS_FONT_SIZE !==
+                            largeLyrics
+                          ) {
+                            onToggleLargeLyrics();
+                          }
+                        }}
+                      />
+                    </label>
+
+                    <div className="np-lyrics-style-field">
+                      <span className="np-lyrics-style-row">
+                        <span>高亮歌词颜色</span>
+                        <strong className="np-lyrics-style-val">
+                          {activeColorLabel}
+                        </strong>
+                      </span>
+                      <div
+                        className="np-lyrics-color-row"
+                        role="group"
+                        aria-label="高亮歌词颜色预设"
+                      >
+                        {LYRICS_ACTIVE_COLOR_PRESETS.map((preset) => {
+                          const selected =
+                            preset.color === ""
+                              ? lyricsActiveColor.trim() === ""
+                              : lyricsActiveColor.trim().toLowerCase() ===
+                                preset.color.toLowerCase();
+                          if (preset.color === "") {
+                            return (
+                              <button
+                                key="theme-default"
+                                type="button"
+                                className={`np-lyrics-color-chip ${selected ? "active" : ""}`}
+                                aria-label={`高亮颜色：${preset.label}`}
+                                aria-pressed={selected}
+                                title={preset.label}
+                                onClick={() => onChangeLyricsActiveColor?.("")}
+                              >
+                                {preset.label}
+                              </button>
+                            );
+                          }
+                          return (
+                            <button
+                              key={preset.color}
+                              type="button"
+                              className={`accent-dot np-lyrics-color-dot ${selected ? "active" : ""}`}
+                              style={{ backgroundColor: preset.color }}
+                              aria-label={`高亮颜色：${preset.label}`}
+                              aria-pressed={selected}
+                              title={`${preset.label} (${preset.color})`}
+                              onClick={() =>
+                                onChangeLyricsActiveColor?.(preset.color)
+                              }
+                            />
+                          );
+                        })}
+                        <label
+                          className="accent-custom-pick"
+                          title="自定义高亮歌词颜色"
+                        >
+                          <input
+                            type="color"
+                            aria-label="自定义高亮歌词颜色"
+                            value={lyricsActiveColor || "#ffffff"}
+                            onChange={(e) =>
+                              onChangeLyricsActiveColor?.(e.target.value)
+                            }
+                          />
+                          <span>自定义</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <label className="np-lyrics-style-field">
+                      <span className="np-lyrics-style-row">
+                        <span>非高亮行透明度</span>
+                        <strong className="np-lyrics-style-val">
+                          {opacityPct}%
+                        </strong>
+                      </span>
+                      <input
+                        type="range"
+                        aria-label="非高亮行透明度"
+                        min={20}
+                        max={90}
+                        step={1}
+                        value={opacityPct}
+                        style={
+                          {
+                            "--progress": `${opacityRangePct}%`,
+                          } as CSSProperties
+                        }
+                        onChange={(e) =>
+                          onChangeLyricsInactiveOpacity?.(
+                            Number(e.target.value) / 100,
+                          )
+                        }
+                      />
+                    </label>
+
+                    <div className="np-lyrics-style-field">
+                      <span className="np-lyrics-style-row">
+                        <span>对齐方式</span>
+                      </span>
+                      <div
+                        className="theme-density-switch np-lyrics-align-switch"
+                        role="group"
+                        aria-label="歌词对齐方式"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={lyricsAlign === "center"}
+                          onClick={() => onChangeLyricsAlign?.("center")}
+                        >
+                          <AlignCenter aria-hidden="true" />
+                          <span>居中对齐</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={lyricsAlign === "left"}
+                          onClick={() => onChangeLyricsAlign?.("left")}
+                        >
+                          <AlignLeft aria-hidden="true" />
+                          <span>左对齐</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               {onChangeLyricsOffsetMs && (
                 <div className="np-lyrics-tune-menu" ref={lyricsTuneRef}>
                   <button
@@ -285,6 +540,7 @@ export function NowPlayingStage({
                     }
                     onClick={() => {
                       setSleepMenuOpen(false);
+                      setLyricsStyleOpen(false);
                       setLyricsTuneOpen((prev) => !prev);
                     }}
                   >
@@ -379,6 +635,7 @@ export function NowPlayingStage({
                     }
                     onClick={() => {
                       setLyricsTuneOpen(false);
+                      setLyricsStyleOpen(false);
                       setSleepMenuOpen((prev) => !prev);
                     }}
                   >
@@ -515,6 +772,10 @@ export function NowPlayingStage({
                 large
                 follow={follow}
                 size={largeLyrics}
+                lyricsFontSize={effectiveFontSize}
+                lyricsActiveColor={lyricsActiveColor}
+                lyricsInactiveOpacity={lyricsInactiveOpacity}
+                lyricsAlign={lyricsAlign}
               />
             </section>
 

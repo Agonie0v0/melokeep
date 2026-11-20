@@ -1,7 +1,23 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { Music2, X, Play, Plus, ListMusic, MoreHorizontal } from "lucide-react";
 import { activeLine, clock, type LyricLine } from "./lyrics";
+import {
+  DEFAULT_LYRICS_FONT_SIZE,
+  DEFAULT_PLAYER_PREFS,
+  LARGE_LYRICS_FONT_SIZE,
+  sanitizeLyricsActiveColor,
+  sanitizeLyricsAlign,
+  sanitizeLyricsFontSize,
+  sanitizeLyricsInactiveOpacity,
+  type LyricsAlign,
+} from "./preferences";
 import type { Track } from "./types";
 export function Cover({
   track,
@@ -174,6 +190,10 @@ export function Lyrics({
   large = false,
   follow = true,
   size = false,
+  lyricsFontSize,
+  lyricsActiveColor,
+  lyricsInactiveOpacity,
+  lyricsAlign,
 }: {
   lines: LyricLine[];
   text: string;
@@ -182,11 +202,38 @@ export function Lyrics({
   large?: boolean;
   follow?: boolean;
   size?: boolean;
+  lyricsFontSize?: number;
+  lyricsActiveColor?: string;
+  lyricsInactiveOpacity?: number;
+  lyricsAlign?: LyricsAlign;
 }) {
   const current = activeLine(lines, time);
   const container = useRef<HTMLDivElement>(null);
   const userPausedUntil = useRef(0);
   const lastCenteredIndex = useRef(-1);
+
+  const cleanFontSize = sanitizeLyricsFontSize(
+    lyricsFontSize,
+    size ? LARGE_LYRICS_FONT_SIZE : DEFAULT_LYRICS_FONT_SIZE,
+  );
+  const cleanActiveColor = sanitizeLyricsActiveColor(
+    lyricsActiveColor,
+    DEFAULT_PLAYER_PREFS.lyricsActiveColor,
+  );
+  const cleanInactiveOpacity = sanitizeLyricsInactiveOpacity(
+    lyricsInactiveOpacity,
+    DEFAULT_PLAYER_PREFS.lyricsInactiveOpacity,
+  );
+  const cleanAlign = sanitizeLyricsAlign(
+    lyricsAlign,
+    DEFAULT_PLAYER_PREFS.lyricsAlign,
+  );
+  const lyricsStyle = {
+    "--lyrics-font-size": `${cleanFontSize}px`,
+    "--lyrics-active-color": cleanActiveColor || "var(--ink)",
+    "--lyrics-inactive-opacity": String(cleanInactiveOpacity),
+    "--lyrics-align": cleanAlign,
+  } as CSSProperties;
 
   useEffect(() => {
     userPausedUntil.current = 0;
@@ -231,12 +278,14 @@ export function Lyrics({
     const observer = new ResizeObserver(() => center(false));
     if (container.current) observer.observe(container.current);
     return () => observer.disconnect();
-  }, [current, follow, size, lines, large]);
+  }, [current, follow, size, lines, large, cleanFontSize, cleanAlign]);
 
   return (
     <div
       ref={container}
       className={`${large ? "full-lyrics" : "compact-lyrics"} ${size ? "large" : ""} ${lines.length ? "" : "untimed"}`}
+      data-align={cleanAlign}
+      style={lyricsStyle}
       onWheel={() => {
         userPausedUntil.current = Date.now() + 3500;
       }}

@@ -39,6 +39,9 @@ export function LibraryWorkspace({
   setTab,
   remoteDeleted,
   serverNavidromeView,
+  initialDirectoryMode,
+  initialDirectory,
+  initialDirectoryKey,
   ...props
 }: LibraryProps & {
   openSettings: (tab: "library" | "navidrome") => void;
@@ -47,8 +50,28 @@ export function LibraryWorkspace({
   setTab: (tab: string) => void;
   remoteDeleted?: (ids: string[]) => void;
   serverNavidromeView?: NavidromeViewPreferences | null;
+  initialDirectoryMode?: boolean;
+  initialDirectory?: string;
+  initialDirectoryKey?: number | string;
 }) {
   const [focus, setFocus] = useState("");
+  const [localDirRequest, setLocalDirRequest] = useState<{
+    mode: boolean;
+    dir: string;
+    key: number;
+  } | null>(null);
+  const handleProcessDirectory = (scopeDir: string) => {
+    if (props.processDirectory) {
+      props.processDirectory(scopeDir);
+      return;
+    }
+    setLocalDirRequest((prev) => ({
+      mode: true,
+      dir: scopeDir,
+      key: (prev?.key ?? 0) + 1,
+    }));
+    setTab("workbench");
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [operation, setOperation] = useState<{
@@ -169,6 +192,7 @@ export function LibraryWorkspace({
         {tab === "local" && (
           <MusicLibrary
             {...props}
+            processDirectory={handleProcessDirectory}
             remoteDeleted={remoteDeleted}
             busy={props.busy || busy}
           />
@@ -177,6 +201,7 @@ export function LibraryWorkspace({
           <div className="processing-workflow">
             <MusicLibrary
               {...props}
+              processDirectory={handleProcessDirectory}
               remoteDeleted={remoteDeleted}
               busy={props.busy || busy}
               manage={manage}
@@ -190,6 +215,15 @@ export function LibraryWorkspace({
               }
               busy={props.busy || busy}
               rules={() => openSettings("library")}
+              initialDirectoryMode={
+                localDirRequest?.mode ?? initialDirectoryMode
+              }
+              initialDirectory={localDirRequest?.dir ?? initialDirectory}
+              initialDirectoryKey={
+                localDirRequest
+                  ? `local:${localDirRequest.key}`
+                  : initialDirectoryKey
+              }
               start={(action, options) =>
                 void submit(
                   action,

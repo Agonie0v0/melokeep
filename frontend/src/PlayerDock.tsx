@@ -22,6 +22,7 @@ import {
 import { Button, Cover } from "./components";
 import { PlaybackTimeline, SyncedLyrics } from "./PlaybackWidgets";
 import type { LyricLine } from "./lyrics";
+import type { LyricsAlign } from "./preferences";
 import type { Track } from "./types";
 
 function useMediaMatches(query: string): boolean {
@@ -69,6 +70,10 @@ export function PlayerDock({
   lyricText,
   follow,
   largeLyrics,
+  lyricsFontSize,
+  lyricsActiveColor,
+  lyricsInactiveOpacity,
+  lyricsAlign,
   lyricsOffsetMs = 0,
   playbackLabel,
   drawerOpen,
@@ -110,6 +115,10 @@ export function PlayerDock({
   lyricText: string;
   follow: boolean;
   largeLyrics: boolean;
+  lyricsFontSize?: number;
+  lyricsActiveColor?: string;
+  lyricsInactiveOpacity?: number;
+  lyricsAlign?: LyricsAlign;
   lyricsOffsetMs?: number;
   playbackLabel: string;
   drawerOpen: boolean;
@@ -500,6 +509,10 @@ export function PlayerDock({
                     onSeek={onSeek}
                     follow={follow}
                     size={largeLyrics}
+                    lyricsFontSize={lyricsFontSize}
+                    lyricsActiveColor={lyricsActiveColor}
+                    lyricsInactiveOpacity={lyricsInactiveOpacity}
+                    lyricsAlign={lyricsAlign}
                   />
                 ) : (
                   queueListContent

@@ -15,12 +15,36 @@ export interface AppearancePreferences {
   density?: "modern" | "compact";
 }
 
+export type LyricsAlign = "center" | "left";
+
+export const LYRICS_FONT_SIZE_MIN = 14;
+export const LYRICS_FONT_SIZE_MAX = 32;
+export const DEFAULT_LYRICS_FONT_SIZE = 24;
+export const LARGE_LYRICS_FONT_SIZE = 28;
+export const LYRICS_INACTIVE_OPACITY_MIN = 0.2;
+export const LYRICS_INACTIVE_OPACITY_MAX = 0.9;
+export const DEFAULT_LYRICS_INACTIVE_OPACITY = 0.45;
+export const DEFAULT_LYRICS_ALIGN: LyricsAlign = "center";
+
+export const LYRICS_ACTIVE_COLOR_PRESETS = [
+  { label: "跟随主题", color: "" },
+  { label: "纯净白", color: "#FFFFFF" },
+  { label: "流金琥珀", color: "#F59E0B" },
+  { label: "晴空蓝", color: "#38BDF8" },
+  { label: "薄荷绿", color: "#34D399" },
+  { label: "玫瑰粉", color: "#FB7185" },
+] as const;
+
 export interface PlayerPreferences {
   volume?: number;
   shuffle?: boolean;
   repeat?: boolean;
   follow_lyrics?: boolean;
   large_lyrics?: boolean;
+  lyrics_font_size?: number;
+  lyrics_active_color?: string;
+  lyrics_inactive_opacity?: number;
+  lyrics_align?: LyricsAlign;
 }
 
 export interface NavidromeViewPreferences {
@@ -45,6 +69,10 @@ export interface LocalPlayerState {
   repeat: boolean;
   follow: boolean;
   largeLyrics: boolean;
+  lyricsFontSize: number;
+  lyricsActiveColor: string;
+  lyricsInactiveOpacity: number;
+  lyricsAlign: LyricsAlign;
 }
 
 const PLAYER_STORAGE_KEY = "melokeep-player";
@@ -55,7 +83,152 @@ export const DEFAULT_PLAYER_PREFS: LocalPlayerState = {
   repeat: true,
   follow: true,
   largeLyrics: false,
+  lyricsFontSize: DEFAULT_LYRICS_FONT_SIZE,
+  lyricsActiveColor: "",
+  lyricsInactiveOpacity: DEFAULT_LYRICS_INACTIVE_OPACITY,
+  lyricsAlign: DEFAULT_LYRICS_ALIGN,
 };
+
+export function sanitizeLyricsFontSize(
+  value: unknown,
+  fallback: number = DEFAULT_LYRICS_FONT_SIZE,
+): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "boolean") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(
+    LYRICS_FONT_SIZE_MAX,
+    Math.max(LYRICS_FONT_SIZE_MIN, Math.round(n)),
+  );
+}
+
+export function sanitizeLyricsActiveColor(
+  value: unknown,
+  fallback = "",
+): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  return HEX_ACCENT_COLOR.test(trimmed) ? trimmed : fallback;
+}
+
+export function sanitizeLyricsInactiveOpacity(
+  value: unknown,
+  fallback: number = DEFAULT_LYRICS_INACTIVE_OPACITY,
+): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "boolean") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const clamped = Math.min(
+    LYRICS_INACTIVE_OPACITY_MAX,
+    Math.max(LYRICS_INACTIVE_OPACITY_MIN, n),
+  );
+  return Math.round(clamped * 100) / 100;
+}
+
+export function sanitizeLyricsAlign(
+  value: unknown,
+  fallback: LyricsAlign = DEFAULT_LYRICS_ALIGN,
+): LyricsAlign {
+  return value === "center" || value === "left" ? value : fallback;
+}
+
+export function normalizePlayerPrefs(
+  raw: Partial<LocalPlayerState> | null | undefined,
+  fallback: LocalPlayerState = DEFAULT_PLAYER_PREFS,
+): LocalPlayerState {
+  if (!raw || typeof raw !== "object") {
+    return { ...fallback };
+  }
+  const vol = Number(raw.volume);
+  const rawFontSize: unknown = raw.lyricsFontSize;
+  const hasFontSize =
+    rawFontSize !== undefined &&
+    rawFontSize !== null &&
+    rawFontSize !== "" &&
+    typeof rawFontSize !== "boolean" &&
+    Number.isFinite(Number(rawFontSize));
+  const rawLargeLyrics =
+    typeof raw.largeLyrics === "boolean" ? raw.largeLyrics : undefined;
+
+  const lyricsFontSize = hasFontSize
+    ? sanitizeLyricsFontSize(raw.lyricsFontSize, fallback.lyricsFontSize)
+    : rawLargeLyrics !== undefined
+      ? rawLargeLyrics
+        ? LARGE_LYRICS_FONT_SIZE
+        : DEFAULT_LYRICS_FONT_SIZE
+      : fallback.lyricsFontSize;
+
+  const largeLyrics = hasFontSize
+    ? lyricsFontSize >= LARGE_LYRICS_FONT_SIZE
+    : (rawLargeLyrics ?? fallback.largeLyrics);
+
+  return {
+    volume:
+      typeof raw.volume !== "boolean" &&
+      raw.volume !== null &&
+      raw.volume !== undefined &&
+      Number.isFinite(vol) &&
+      vol >= 0 &&
+      vol <= 1
+        ? vol
+        : fallback.volume,
+    shuffle: typeof raw.shuffle === "boolean" ? raw.shuffle : fallback.shuffle,
+    repeat: typeof raw.repeat === "boolean" ? raw.repeat : fallback.repeat,
+    follow: typeof raw.follow === "boolean" ? raw.follow : fallback.follow,
+    largeLyrics,
+    lyricsFontSize,
+    lyricsActiveColor: sanitizeLyricsActiveColor(
+      raw.lyricsActiveColor,
+      fallback.lyricsActiveColor,
+    ),
+    lyricsInactiveOpacity: sanitizeLyricsInactiveOpacity(
+      raw.lyricsInactiveOpacity,
+      fallback.lyricsInactiveOpacity,
+    ),
+    lyricsAlign: sanitizeLyricsAlign(raw.lyricsAlign, fallback.lyricsAlign),
+  };
+}
+
+export function parsePlayerPreferences(
+  dto?: PlayerPreferences | null,
+  fallback: LocalPlayerState = DEFAULT_PLAYER_PREFS,
+): LocalPlayerState {
+  if (!dto || typeof dto !== "object") return { ...fallback };
+  return normalizePlayerPrefs(
+    {
+      volume: dto.volume,
+      shuffle: dto.shuffle,
+      repeat: dto.repeat,
+      follow: dto.follow_lyrics,
+      largeLyrics: dto.large_lyrics,
+      lyricsFontSize: dto.lyrics_font_size,
+      lyricsActiveColor: dto.lyrics_active_color,
+      lyricsInactiveOpacity: dto.lyrics_inactive_opacity,
+      lyricsAlign: dto.lyrics_align,
+    },
+    fallback,
+  );
+}
+
+export function toPlayerPreferences(
+  state: LocalPlayerState,
+): PlayerPreferences {
+  const clean = normalizePlayerPrefs(state);
+  return {
+    volume: clean.volume,
+    shuffle: clean.shuffle,
+    repeat: clean.repeat,
+    follow_lyrics: clean.follow,
+    large_lyrics: clean.largeLyrics,
+    lyrics_font_size: clean.lyricsFontSize,
+    lyrics_active_color: clean.lyricsActiveColor,
+    lyrics_inactive_opacity: clean.lyricsInactiveOpacity,
+    lyrics_align: clean.lyricsAlign,
+  };
+}
 
 export function loadInitialPlayerPrefs(): LocalPlayerState {
   try {
@@ -63,29 +236,7 @@ export function loadInitialPlayerPrefs(): LocalPlayerState {
       globalThis.localStorage?.getItem(PLAYER_STORAGE_KEY) || "null",
     );
     if (raw && typeof raw === "object") {
-      const vol = Number(raw.volume);
-      return {
-        volume:
-          Number.isFinite(vol) && vol >= 0 && vol <= 1
-            ? vol
-            : DEFAULT_PLAYER_PREFS.volume,
-        shuffle:
-          typeof raw.shuffle === "boolean"
-            ? raw.shuffle
-            : DEFAULT_PLAYER_PREFS.shuffle,
-        repeat:
-          typeof raw.repeat === "boolean"
-            ? raw.repeat
-            : DEFAULT_PLAYER_PREFS.repeat,
-        follow:
-          typeof raw.follow === "boolean"
-            ? raw.follow
-            : DEFAULT_PLAYER_PREFS.follow,
-        largeLyrics:
-          typeof raw.largeLyrics === "boolean"
-            ? raw.largeLyrics
-            : DEFAULT_PLAYER_PREFS.largeLyrics,
-      };
+      return normalizePlayerPrefs(raw, DEFAULT_PLAYER_PREFS);
     }
   } catch {
     /* Optional local preferences. */
@@ -95,7 +246,10 @@ export function loadInitialPlayerPrefs(): LocalPlayerState {
 
 export function saveLocalPlayerPrefs(next: LocalPlayerState) {
   try {
-    globalThis.localStorage?.setItem(PLAYER_STORAGE_KEY, JSON.stringify(next));
+    globalThis.localStorage?.setItem(
+      PLAYER_STORAGE_KEY,
+      JSON.stringify(normalizePlayerPrefs(next)),
+    );
   } catch {
     /* Storage may be unavailable. */
   }

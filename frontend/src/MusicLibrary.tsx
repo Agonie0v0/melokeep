@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button, Cover, Modal, SongTitle, SongActions } from "./components";
 import { api } from "./api";
+import { extractScopeDirFromFolderKey } from "./library-utils";
 import { clock } from "./lyrics";
 import { scheduleSavePreferences } from "./preferences";
 import type { LibraryFile, Track } from "./types";
@@ -282,6 +283,7 @@ export function MusicLibrary({
   changed,
   manage,
   process,
+  processDirectory,
   processing = false,
   hasMore = false,
   loadingMore = false,
@@ -309,6 +311,7 @@ export function MusicLibrary({
   manage?: (action: LibraryAction, files: LibraryFile[]) => void;
   processing?: boolean;
   process?: (files: LibraryFile[]) => void;
+  processDirectory?: (scopeDir: string) => void;
   hasMore?: boolean;
   loadingMore?: boolean;
   indexing?: boolean;
@@ -550,6 +553,13 @@ export function MusicLibrary({
   const rootCandidates = [...distinctRoots];
   const defaultRoot =
     activeNode?.root || rootCandidates[0] || files[0]?.root || "";
+  const currentFolderEntry =
+    folder === "all" ? undefined : knownFolders[folder];
+  const currentScopeDir = extractScopeDirFromFolderKey(folder, {
+    root: activeNode?.root ?? currentFolderEntry?.root,
+    folder: activeNode?.folder ?? currentFolderEntry?.name,
+    hasMultipleRoots,
+  });
 
   function openMkdirModal(root: string, parent: string, parentLabel: string) {
     setFolderInput("");
@@ -1101,7 +1111,9 @@ export function MusicLibrary({
                   )
                 }
               />
-              全选当前结果
+              {hasMore
+                ? `全选已加载 (${visible.length} 首)`
+                : `全选当前结果 (${visible.length} 首)`}
             </label>
             <span>已选 {chosen.length} 项</span>
             {!processing && (
@@ -1124,6 +1136,22 @@ export function MusicLibrary({
               >
                 <WandSparkles />
                 送往刮削整理
+              </button>
+            )}
+            {processDirectory && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || (!songs && !hasMore && folders.length === 0)}
+                title={
+                  currentScopeDir
+                    ? `将目录「${currentScopeDir}」全部歌曲送往刮削工作台（单次最多 1000 首）`
+                    : "将整个音乐根目录送往刮削工作台（单次最多 1000 首）"
+                }
+                onClick={() => processDirectory(currentScopeDir)}
+              >
+                <FolderInput />
+                整目录送往刮削
               </button>
             )}
             <details className="library-batch-actions">
@@ -1156,6 +1184,19 @@ export function MusicLibrary({
                   >
                     <WandSparkles />
                     送往刮削整理
+                  </button>
+                )}
+                {!processing && processDirectory && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      busy || (!songs && !hasMore && folders.length === 0)
+                    }
+                    onClick={() => processDirectory(currentScopeDir)}
+                  >
+                    <FolderInput />
+                    整目录送往刮削
                   </button>
                 )}
                 {manage && (
@@ -1216,6 +1257,16 @@ export function MusicLibrary({
               </div>
             </details>
           </div>
+          {hasMore && (
+            <p
+              className="library-inline-status library-partial-hint"
+              role="status"
+            >
+              当前列表仅展示已加载的前 {visible.length}{" "}
+              首，可点击底部「加载更多」或直接使用「整目录送往刮削」（单次最多
+              1000 首）。
+            </p>
+          )}
           {error && <p role="alert">{error}</p>}
           <div className="music-table-wrap">
             <table className="music-table">
@@ -1390,6 +1441,10 @@ export function MusicLibrary({
               >
                 {loadingMore ? "正在加载…" : "加载更多"}
               </button>
+              <span className="management-help">
+                已加载 {visible.length}{" "}
+                首（可继续加载或点击上方「整目录送往刮削」）
+              </span>
             </div>
           )}
         </div>

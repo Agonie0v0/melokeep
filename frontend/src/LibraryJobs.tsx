@@ -10,33 +10,22 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { Modal } from "./components";
+import {
+  buildKeepExistingChoices,
+  countPendingReviewItems,
+  getJobProgress,
+  hasReadyJobItems,
+  isFinishedJobStatus as isFinishedStatus,
+  isRunningJobStatus as isRunningStatus,
+} from "./library-utils";
 import { processingLabels, tagLabels } from "./LibrarySettings";
 import { formatMetadataSourceLabel } from "./plugin-utils";
 import type { LibraryConfig, LibraryJob, MetadataSource } from "./types";
 
 const toEpochMs = (ts: number) => (ts > 1e11 ? ts : ts * 1000);
 
-const active = new Set([
-  "queued",
-  "scanning",
-  "identifying",
-  "tagging",
-  "organizing",
-  "indexing",
-  "applying",
-  "restoring",
-  "running",
-]);
-const finishedStatuses = new Set([
-  "complete",
-  "completed",
-  "failed",
-  "partial",
-  "cancelled",
-  "restored",
-]);
 const jobStatusLabels: Record<string, string> = {
   ...processingLabels,
   scanning: "正在扫描",
@@ -46,10 +35,6 @@ const jobStatusLabels: Record<string, string> = {
   needs_attention: "需人工处理",
   running: "运行中",
 };
-const isRunningStatus = (status: string) =>
-  active.has(status.trim().toLowerCase());
-const isFinishedStatus = (status: string) =>
-  finishedStatuses.has(status.trim().toLowerCase());
 type DeleteJobResponse = {
   deleted: boolean;
   id: string;
@@ -119,6 +104,16 @@ export function LibraryJobs({
     null,
   );
   const previousStatus = useRef("");
+  const actionStripRef = useRef<HTMLDivElement>(null);
+  const runningPollRef = useRef(false);
+  const scrollActionStripError = () => {
+    requestAnimationFrame(() =>
+      actionStripRef.current?.scrollIntoView?.({
+        block: "nearest",
+        behavior: "smooth",
+      }),
+    );
+  };
   useEffect(() => {
     let active = true;
     void api<LibraryConfig>("/library/settings")
@@ -138,6 +133,7 @@ export function LibraryJobs({
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
+    runningPollRef.current = false;
     async function load() {
       try {
         const result = await api<{ jobs: LibraryJob[]; has_more: boolean }>(
@@ -158,12 +154,26 @@ export function LibraryJobs({
             changed();
           previousStatus.current = `${value.id}:${value.status}`;
           setDetail(value);
-          if (isRunningStatus(value.status))
+          if (isRunningStatus(value.status)) {
+            runningPollRef.current = true;
             timer = window.setTimeout(() => void load(), 1600);
-        } else if (result.jobs.some((job) => isRunningStatus(job.status)))
+          } else {
+            runningPollRef.current = false;
+          }
+        } else if (result.jobs.some((job) => isRunningStatus(job.status))) {
+          runningPollRef.current = true;
           timer = window.setTimeout(() => void load(), 2000);
+        } else {
+          runningPollRef.current = false;
+        }
       } catch (e) {
-        if (!stopped) setError((e as Error).message);
+        if (stopped) return;
+        setError((e as Error).message);
+        if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
+          runningPollRef.current = false;
+        } else if (runningPollRef.current) {
+          timer = window.setTimeout(() => void load(), 2500);
+        }
       } finally {
         if (!stopped) setLoading(false);
       }
@@ -187,10 +197,25 @@ export function LibraryJobs({
         "POST",
         name === "apply" ? {} : undefined,
       );
-      if (name === "retry") setSelected(result.id);
+      if (name === "retry") {
+        setSelected(result.id);
+      } else {
+        setDetail(result);
+        setJobs((prev) => prev.map((j) => (j.id === result.id ? result : j)));
+      }
+      if (name === "apply") {
+        if (result.status === "applying") {
+          setNotice("已提交后台写入，正在归档处理…");
+        } else if (result.status === "complete") {
+          setNotice("归档完成");
+        } else if (result.status === "partial") {
+          setNotice("部分条目已完成归档");
+        }
+      }
       setRefresh((value) => value + 1);
     } catch (e) {
       setError((e as Error).message);
+      scrollActionStripError();
     } finally {
       setBusy("");
     }
@@ -200,13 +225,42 @@ export function LibraryJobs({
     setBusy("preview");
     setError("");
     try {
-      setDetail(
-        await api<LibraryJob>(`/library/jobs/${detail.id}/preview`, "POST", {
+      const updated = await api<LibraryJob>(
+        `/library/jobs/${detail.id}/preview`,
+        "POST",
+        {
           choices: { [item]: candidate },
-        }),
+        },
       );
+      setDetail(updated);
+      setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
     } catch (e) {
       setError((e as Error).message);
+      scrollActionStripError();
+    } finally {
+      setBusy("");
+    }
+  }
+  async function keepAllPendingExisting() {
+    if (!detail) return;
+    const choices = buildKeepExistingChoices(detail.items);
+    const count = Object.keys(choices).length;
+    if (!count) return;
+    setBusy("keep-existing");
+    setError("");
+    setNotice("");
+    try {
+      const updated = await api<LibraryJob>(
+        `/library/jobs/${detail.id}/preview`,
+        "POST",
+        { choices },
+      );
+      setDetail(updated);
+      setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
+      setNotice(`已为 ${count} 首待确认曲目保留现有标签`);
+    } catch (e) {
+      setError((e as Error).message);
+      scrollActionStripError();
     } finally {
       setBusy("");
     }
@@ -299,6 +353,9 @@ export function LibraryJobs({
     jobs.some((job) => isFinishedStatus(job.status)) ||
     hasMore ||
     filter !== "all";
+  const detailProgress = detail ? getJobProgress(detail) : null;
+  const pendingReviewCount = detail ? countPendingReviewItems(detail.items) : 0;
+  const hasReadyItems = detail ? hasReadyJobItems(detail.items) : false;
   return (
     <section className="view library-jobs">
       <div className="jobs-top-bar">
@@ -394,7 +451,7 @@ export function LibraryJobs({
           </button>
         </div>
       </div>
-      {error && (
+      {error && !(selected && detail) && (
         <p role="alert" className="library-error">
           {error}
         </p>
@@ -427,7 +484,42 @@ export function LibraryJobs({
               {jobStatusLabels[detail.status] || detail.status}
             </span>
           </div>
-          <div className="processing-action-strip">
+          {detailProgress?.running && (
+            <div
+              className="processing-progress-card"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="processing-progress-meta">
+                <span>
+                  {jobStatusLabels[detail.status] || detail.status}
+                  {detail.detail ? ` · ${detail.detail}` : ""}
+                </span>
+                <strong>
+                  已处理 {detailProgress.processed} / {detailProgress.total} 首
+                  {detailProgress.total > 0
+                    ? ` (${detailProgress.percent}%)`
+                    : ""}
+                </strong>
+              </div>
+              <div
+                className={`processing-progress-track ${detailProgress.indeterminate ? "is-indeterminate" : ""}`}
+                role="progressbar"
+                aria-label="任务处理进度"
+                aria-valuemin={0}
+                aria-valuemax={Math.max(1, detailProgress.total)}
+                aria-valuenow={detailProgress.processed}
+              >
+                <span
+                  className="processing-progress-fill"
+                  style={{
+                    width: `${detailProgress.indeterminate ? 35 : detailProgress.percent}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          <div className="processing-action-strip" ref={actionStripRef}>
             <div className="processing-action-meta">
               {(detail.status === "ready" ||
                 detail.status === "preview_ready") && (
@@ -454,28 +546,45 @@ export function LibraryJobs({
               )}
             </div>
             <div className="management-toolbar processing-toolbar-actions">
+              {pendingReviewCount > 0 &&
+                !isRunningStatus(detail.status) &&
+                !["duplicates", "quality"].includes(detail.action) && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!!busy}
+                    onClick={() => void keepAllPendingExisting()}
+                  >
+                    <CheckSquare />
+                    {busy === "keep-existing"
+                      ? "正在更新…"
+                      : "全部待确认项保留现有标签"}
+                  </button>
+                )}
               {["ready", "preview_ready", "needs_review", "partial"].includes(
                 detail.status,
               ) &&
                 !["duplicates", "quality"].includes(detail.action) && (
-                  <button
-                    className="primary"
-                    disabled={
-                      !!busy ||
-                      !detail.items?.some((item) =>
-                        ["ready", "preview_ready"].includes(item.status),
-                      )
-                    }
-                    onClick={() => void action("apply")}
-                  >
-                    <Check />
-                    {busy === "apply"
-                      ? "正在写入…"
-                      : detail.status === "ready" ||
-                          detail.status === "preview_ready"
-                        ? "立即写入并整理"
-                        : "应用已确认的更改"}
-                  </button>
+                  <>
+                    <button
+                      className="primary"
+                      disabled={!!busy || !hasReadyItems}
+                      onClick={() => void action("apply")}
+                    >
+                      <Check />
+                      {busy === "apply"
+                        ? "正在写入…"
+                        : detail.status === "ready" ||
+                            detail.status === "preview_ready"
+                          ? "立即写入并整理"
+                          : "应用已确认的更改"}
+                    </button>
+                    {!hasReadyItems && (
+                      <span className="processing-apply-hint" role="status">
+                        请先在下方选择候选结果或点击‘保留现有标签’
+                      </span>
+                    )}
+                  </>
                 )}
               {["failed", "partial", "paused"].includes(detail.status) && (
                 <button
@@ -544,6 +653,11 @@ export function LibraryJobs({
                   </details>
                 )}
             </div>
+            {error && (
+              <p role="alert" className="library-error processing-strip-error">
+                {error}
+              </p>
+            )}
           </div>
           {detail.warnings?.map((warning, index) => (
             <p key={index} className="library-warning" role="status">
@@ -626,20 +740,26 @@ export function LibraryJobs({
                               setBusy("search");
                               setError("");
                               try {
-                                setDetail(
-                                  await api<LibraryJob>(
-                                    `/library/jobs/${detail.id}/search`,
-                                    "POST",
-                                    {
-                                      item: item.id,
-                                      query:
-                                        queries[item.id] ||
-                                        `${item.before.title} ${item.before.artist}`.trim(),
-                                    },
+                                const updated = await api<LibraryJob>(
+                                  `/library/jobs/${detail.id}/search`,
+                                  "POST",
+                                  {
+                                    item: item.id,
+                                    query: (
+                                      queries[item.id] ??
+                                      `${item.before.title} ${item.before.artist}`
+                                    ).trim(),
+                                  },
+                                );
+                                setDetail(updated);
+                                setJobs((prev) =>
+                                  prev.map((j) =>
+                                    j.id === updated.id ? updated : j,
                                   ),
                                 );
                               } catch (e) {
                                 setError((e as Error).message);
+                                scrollActionStripError();
                               } finally {
                                 setBusy("");
                               }
@@ -1040,8 +1160,27 @@ export function LibraryJobs({
                             {new Date(toEpochMs(job.created_at)).toLocaleString(
                               "zh-CN",
                             )}{" "}
-                            · {job.total} 首
+                            ·{" "}
+                            {running
+                              ? `已处理 ${job.processed} / ${job.total} 首`
+                              : `${job.total} 首`}
                           </small>
+                          {running &&
+                            (() => {
+                              const rowProgress = getJobProgress(job);
+                              return (
+                                <div
+                                  className={`processing-progress-track processing-row-progress ${rowProgress.indeterminate ? "is-indeterminate" : ""}`}
+                                >
+                                  <span
+                                    className="processing-progress-fill"
+                                    style={{
+                                      width: `${rowProgress.indeterminate ? 35 : rowProgress.percent}%`,
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })()}
                         </span>
                         <span
                           className={`processing-status status-dot-label is-${job.status}`}

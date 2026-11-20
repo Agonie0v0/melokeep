@@ -61,6 +61,14 @@
   font-size: 12px;
   color: var(--muted);
 }
+.library-partial-hint {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+  color: var(--ink);
+  line-height: 1.5;
+}
 .library-meta-inline {
   font-size: 12px;
   color: var(--muted);
@@ -585,6 +593,87 @@
 .processing-toolbar-actions {
   margin: 0;
   gap: 8px;
+}
+.processing-apply-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--amber);
+}
+.processing-strip-error {
+  flex: 1 0 100%;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  font-size: 12.5px;
+}
+.processing-progress-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  border-radius: 11px;
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+}
+.processing-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.processing-progress-meta span {
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.processing-progress-meta strong {
+  color: var(--ink);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.processing-progress-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  overflow: hidden;
+}
+.processing-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 260ms ease;
+}
+.processing-progress-track.is-indeterminate .processing-progress-fill {
+  position: relative;
+  animation: processing-progress-sweep 1.35s ease-in-out infinite;
+}
+.processing-row-progress {
+  height: 4px;
+  margin-top: 6px;
+  max-width: 240px;
+}
+@keyframes processing-progress-sweep {
+  0% {
+    transform: translateX(-60%);
+  }
+  50% {
+    transform: translateX(120%);
+  }
+  100% {
+    transform: translateX(-60%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .processing-progress-track.is-indeterminate .processing-progress-fill {
+    animation: none;
+  }
 }
 .processing-status {
   font-size: 12px;
