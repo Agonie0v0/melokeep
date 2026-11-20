@@ -414,6 +414,11 @@ func (s *Server) handleLibraryJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
+func isSyncQueryParam(r *http.Request) bool {
+	v := strings.TrimSpace(r.URL.Query().Get("sync"))
+	return strings.EqualFold(v, "true") || v == "1"
+}
+
 func (s *Server) handleLibraryProcess(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Library == nil {
 		writeError(w, http.StatusServiceUnavailable, "曲库整理服务未初始化")
@@ -424,7 +429,23 @@ func (s *Server) handleLibraryProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := actorFromRequest(r)
-	job, err := s.deps.Library.Submit(r.Context(), actor, req)
+	hasScopeDir := req.ScopeDir != nil && (len(req.Paths) == 0 || strings.TrimSpace(*req.ScopeDir) != "")
+	useAsync := !isSyncQueryParam(r) && (req.Action == "scrape" ||
+		req.Action == "both" ||
+		req.Action == "quality" ||
+		req.Action == "duplicates" ||
+		hasScopeDir ||
+		len(req.Paths) > 10)
+
+	var (
+		job model.LibraryJobDTO
+		err error
+	)
+	if useAsync {
+		job, err = s.deps.Library.SubmitAsync(r.Context(), actor, req)
+	} else {
+		job, err = s.deps.Library.Submit(r.Context(), actor, req)
+	}
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -454,7 +475,35 @@ func (s *Server) handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := s.deps.Library.Apply(r.Context(), actor, ident)
+
+	useAsync := false
+	if !isSyncQueryParam(r) {
+		if currentJob, found, gErr := s.deps.Library.GetJob(r.Context(), ident); gErr == nil && found {
+			executableCnt := 0
+			for _, it := range currentJob.Items {
+				if it.Status == string(model.LibraryItemComplete) || it.Status == string(model.LibraryItemSkipped) {
+					continue
+				}
+				if it.Status == string(model.LibraryItemNeedsReview) && it.Chosen == nil {
+					continue
+				}
+				executableCnt++
+			}
+			if executableCnt > 5 {
+				useAsync = true
+			}
+		}
+	}
+
+	var (
+		job model.LibraryJobDTO
+		err error
+	)
+	if useAsync {
+		job, err = s.deps.Library.ApplyAsync(r.Context(), actor, ident)
+	} else {
+		job, err = s.deps.Library.Apply(r.Context(), actor, ident)
+	}
 	if err != nil {
 		writeDomainError(w, err)
 		return

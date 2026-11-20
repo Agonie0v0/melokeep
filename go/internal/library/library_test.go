@@ -1927,3 +1927,562 @@ func TestLibraryLegacySettingsSourceFilteringAndValidation(t *testing.T) {
 		t.Fatalf("expected 400 on Submit invalid source, got %v", err)
 	}
 }
+
+func pollLibraryJobUntil(t *testing.T, svc *Service, ctx context.Context, jobID string, timeout time.Duration, pred func(model.LibraryJobDTO) bool) model.LibraryJobDTO {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		job, ok, err := svc.GetJob(ctx, jobID)
+		if err != nil {
+			t.Fatalf("GetJob(%s): %v", jobID, err)
+		}
+		if ok && pred(job) {
+			return job
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	job, _, _ := svc.GetJob(ctx, jobID)
+	t.Fatalf("timed out waiting for job %s condition; last state=%s detail=%q", jobID, job.Status, job.Detail)
+	return model.LibraryJobDTO{}
+}
+
+func TestLibraryReviewExistingAndSkippedDeriveComplete(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "itunes") {
+			_, _ = w.Write([]byte(`{"results":[{"trackId":1001,"trackName":"Different Title (Live)","artistName":"Other Artist","collectionName":"Other Album","trackTimeMillis":210000}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	tagger := newMemTagger()
+	_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{ITunesBaseURL: srv.URL + "/itunes"}, nil, nil)
+
+	incoming := filepath.Join(root.CanonicalPath, "incoming")
+	_ = os.MkdirAll(incoming, 0o755)
+	fBoth := filepath.Join(incoming, "keep-both.flac")
+	fSkip := filepath.Join(incoming, "skip-me.flac")
+	fScrape := filepath.Join(incoming, "keep-scrape.flac")
+	for _, p := range []string{fBoth, fSkip, fScrape} {
+		if _, err := files.WriteFileDurable(p, []byte("AUDIO-PAYLOAD")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origTagsBoth := map[string]string{
+		"title":        "原曲标题",
+		"artist":       "原歌手",
+		"album":        "原专辑",
+		"album_artist": "原歌手",
+		"track_number": "2",
+	}
+	tagger.tags[fBoth] = helper.AudioTagData{Path: fBoth, Editable: true, Duration: 210, Tags: cloneStringMap(origTagsBoth)}
+	tagger.tags[fSkip] = helper.AudioTagData{Path: fSkip, Editable: true, Duration: 210, Tags: map[string]string{"title": "SkipTrack", "artist": "SkipArtist"}}
+	tagger.tags[fScrape] = helper.AudioTagData{Path: fScrape, Editable: true, Duration: 210, Tags: cloneStringMap(origTagsBoth)}
+
+	// 1. Action "both": Review("existing") keeps original tags & computes target path; skipped item does not force partial.
+	jobBoth, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:  "both",
+		Paths:   []string{fBoth, fSkip},
+		Sources: []string{"itunes"},
+	})
+	if err != nil {
+		t.Fatalf("submit both: %v", err)
+	}
+	if jobBoth.Status != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected needs_review, got %s", jobBoth.Status)
+	}
+	reviewed, err := svc.Review(ctx, admin, jobBoth.ID, map[string]string{
+		jobBoth.Items[0].ID: "Existing",
+		jobBoth.Items[1].ID: "",
+	})
+	if err != nil {
+		t.Fatalf("Review existing: %v", err)
+	}
+	if reviewed.Status != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("expected preview_ready after Review(existing + skip), got %s", reviewed.Status)
+	}
+	if reviewed.Items[0].Chosen == nil || *reviewed.Items[0].Chosen != "existing" {
+		t.Fatalf("expected chosen=\"existing\", got %+v", reviewed.Items[0].Chosen)
+	}
+	if !mapsEqual(reviewed.Items[0].After, origTagsBoth) {
+		t.Fatalf("expected original tags preserved, got before=%+v after=%+v", reviewed.Items[0].Before, reviewed.Items[0].After)
+	}
+	wantTarget := filepath.Join(root.CanonicalPath, "library", "原歌手", "原专辑", "02 - 原曲标题.flac")
+	if reviewed.Items[0].Target != wantTarget {
+		t.Fatalf("expected target %s, got %s", wantTarget, reviewed.Items[0].Target)
+	}
+	if reviewed.Items[1].Status != string(model.LibraryItemSkipped) {
+		t.Fatalf("expected item 1 skipped, got %s", reviewed.Items[1].Status)
+	}
+
+	applied, err := svc.Apply(ctx, admin, jobBoth.ID)
+	if err != nil {
+		t.Fatalf("Apply after Review(existing): %v", err)
+	}
+	if applied.Status != string(model.LibraryJobComplete) {
+		t.Fatalf("expected complete (not partial) when items are complete+skipped, got %s (%s)", applied.Status, applied.Detail)
+	}
+	if _, err := os.Stat(wantTarget); err != nil {
+		t.Fatalf("expected organized file at %s: %v", wantTarget, err)
+	}
+
+	// 2. Action "scrape": Review("existing") keeps original path and succeeds on Apply.
+	jobScrape, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:  "scrape",
+		Paths:   []string{fScrape},
+		Sources: []string{"itunes"},
+	})
+	if err != nil {
+		t.Fatalf("submit scrape: %v", err)
+	}
+	revScrape, err := svc.Review(ctx, admin, jobScrape.ID, map[string]string{
+		jobScrape.Items[0].ID: "existing",
+	})
+	if err != nil {
+		t.Fatalf("Review existing scrape: %v", err)
+	}
+	if revScrape.Status != string(model.LibraryJobPreviewReady) || revScrape.Items[0].Target != fScrape {
+		t.Fatalf("unexpected scrape review result: %+v", revScrape)
+	}
+	appScrape, err := svc.Apply(ctx, admin, jobScrape.ID)
+	if err != nil || appScrape.Status != string(model.LibraryJobComplete) {
+		t.Fatalf("apply existing scrape failed: status=%s err=%v", appScrape.Status, err)
+	}
+	// Re-applying already complete job returns current DTO cleanly without error.
+	reapplied, err := svc.Apply(ctx, admin, jobScrape.ID)
+	if err != nil || reapplied.Status != string(model.LibraryJobComplete) {
+		t.Fatalf("expected idempotent Apply on complete job, got status=%s err=%v", reapplied.Status, err)
+	}
+
+	// 3. All skipped items -> deriveFinalJobStatus must return complete.
+	allSkipped := []persistedItemMeta{{Status: model.LibraryItemSkipped}, {Status: model.LibraryItemSkipped}}
+	if got := deriveFinalJobStatus(allSkipped, ""); got != model.LibraryJobComplete {
+		t.Fatalf("expected deriveFinalJobStatus(all skipped) = complete, got %s", got)
+	}
+}
+
+func TestLibraryApplyRejectsEmptyNeedsReviewSubmission(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	tagger := newMemTagger()
+	_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{ITunesBaseURL: srv.URL + "/itunes"}, nil, nil)
+	audio := filepath.Join(root.CanonicalPath, "unmatched.flac")
+	_, _ = files.WriteFileDurable(audio, []byte("AUDIO-UNMATCHED"))
+	tagger.tags[audio] = helper.AudioTagData{Path: audio, Editable: true, Tags: map[string]string{"title": "Unmatched"}}
+
+	job, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:  "scrape",
+		Paths:   []string{audio},
+		Sources: []string{"itunes"},
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if job.Status != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected needs_review, got %s", job.Status)
+	}
+
+	if _, err := svc.Apply(ctx, admin, job.ID); err == nil {
+		t.Fatalf("expected Apply on needs_review job to fail")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput || de.HTTPStatus() != http.StatusBadRequest {
+		t.Fatalf("expected 400 ErrInvalidInput, got %v", err)
+	}
+	if _, err := svc.ApplyAsync(ctx, admin, job.ID); err == nil {
+		t.Fatalf("expected ApplyAsync on needs_review job to fail")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput || de.HTTPStatus() != http.StatusBadRequest {
+		t.Fatalf("expected 400 ErrInvalidInput from ApplyAsync, got %v", err)
+	}
+	after, ok, err := svc.GetJob(ctx, job.ID)
+	if err != nil || !ok || after.Status != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected job to stay needs_review, got ok=%v err=%v status=%s", ok, err, after.Status)
+	}
+}
+
+func TestLibrarySubmitAsyncLifecycleAndCancelScanning(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	t.Run("completes background scan with logs and target assignment", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "itunes") {
+				term := r.URL.Query().Get("term")
+				title := strings.TrimSpace(strings.TrimSuffix(term, "ArtistAsync"))
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"results": []map[string]any{{
+						"trackId":         2001,
+						"trackName":       title,
+						"artistName":      "ArtistAsync",
+						"collectionName":  "AsyncAlbum",
+						"trackNumber":     1,
+						"trackTimeMillis": 180000,
+						"releaseDate":     "2025-01-01T00:00:00Z",
+					}},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		tmp := t.TempDir()
+		rootDir := filepath.Join(tmp, "music")
+		_ = os.MkdirAll(rootDir, 0o755)
+		st, err := store.Open(ctx, store.Options{Path: filepath.Join(tmp, "melokeep.db")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		root, rec, err := files.RegisterRoot(rootDir, "r-async")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = st.UpsertRoot(ctx, rec)
+		coord := files.NewCoordinator(st, files.NewAssetLockManager(2*time.Second), []files.Root{root})
+		tagger := newMemTagger()
+		tagSvc := media.NewTagService(tagger, nil)
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		scraper := NewScraper(pool, nil, nil, ScraperOptions{ITunesBaseURL: srv.URL + "/itunes"})
+
+		var logMu sync.Mutex
+		var logs []string
+		svc := NewService(st, coord, tagSvc, nil, scraper, ServiceOptions{
+			Logger: func(level, message, category, taskID string) {
+				logMu.Lock()
+				logs = append(logs, level+":"+taskID+":"+message)
+				logMu.Unlock()
+			},
+		})
+		defer svc.Close()
+
+		paths := make([]string, 0, 6)
+		for i := 1; i <= 6; i++ {
+			p := filepath.Join(root.CanonicalPath, fmt.Sprintf("song-%d.flac", i))
+			_, _ = files.WriteFileDurable(p, []byte("AUDIO-ASYNC"))
+			title := fmt.Sprintf("SongAsync%d", i)
+			tagger.tags[p] = helper.AudioTagData{
+				Path:     p,
+				Editable: true,
+				Duration: 180,
+				Tags:     map[string]string{"title": title, "artist": "ArtistAsync", "album": "AsyncAlbum"},
+			}
+			paths = append(paths, p)
+		}
+
+		initial, err := svc.SubmitAsync(ctx, admin, SubmitRequest{
+			Action:  "both",
+			Paths:   paths,
+			Sources: []string{"itunes"},
+		})
+		if err != nil {
+			t.Fatalf("SubmitAsync: %v", err)
+		}
+		if initial.Status != string(model.LibraryJobScanning) {
+			t.Fatalf("expected immediate status=scanning, got %s", initial.Status)
+		}
+		if initial.Total != 6 || initial.Processed != 0 {
+			t.Fatalf("expected total=6 processed=0, got total=%d processed=%d", initial.Total, initial.Processed)
+		}
+		if !strings.Contains(initial.Detail, "正在扫描分析（0 / 6）") {
+			t.Fatalf("unexpected initial detail: %q", initial.Detail)
+		}
+
+		finished := pollLibraryJobUntil(t, svc, ctx, initial.ID, 5*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status != string(model.LibraryJobScanning) && j.Status != string(model.LibraryJobQueued)
+		})
+		if finished.Status != string(model.LibraryJobPreviewReady) {
+			t.Fatalf("expected preview_ready after scan, got %s (detail=%s)", finished.Status, finished.Detail)
+		}
+		if len(finished.Items) != 6 {
+			t.Fatalf("expected 6 items, got %d", len(finished.Items))
+		}
+		for _, it := range finished.Items {
+			if it.Status != string(model.LibraryItemPreviewReady) || it.Target == it.OriginalPath {
+				t.Fatalf("expected item ready with organized target, got %+v", it)
+			}
+		}
+
+		logMu.Lock()
+		joined := strings.Join(logs, "\n")
+		logMu.Unlock()
+		if !strings.Contains(joined, "已提交曲库任务") || !strings.Contains(joined, "曲库扫描分析完成") {
+			t.Fatalf("expected submit & scan completion logs, got:\n%s", joined)
+		}
+	})
+
+	t.Run("duplicates via SubmitAsync reaches complete", func(t *testing.T) {
+		tagger := newMemTagger()
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, nil, nil)
+		d1 := filepath.Join(root.CanonicalPath, "dup1.flac")
+		d2 := filepath.Join(root.CanonicalPath, "dup2.flac")
+		_, _ = files.WriteFileDurable(d1, []byte("SAME-BYTES"))
+		_, _ = files.WriteFileDurable(d2, []byte("SAME-BYTES"))
+
+		job, err := svc.SubmitAsync(ctx, admin, SubmitRequest{
+			Action:        "duplicates",
+			Paths:         []string{d1, d2},
+			DuplicateMode: "file",
+		})
+		if err != nil {
+			t.Fatalf("SubmitAsync duplicates: %v", err)
+		}
+		if job.Status != string(model.LibraryJobScanning) {
+			t.Fatalf("expected immediate scanning, got %s", job.Status)
+		}
+		done := pollLibraryJobUntil(t, svc, ctx, job.ID, 5*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status != string(model.LibraryJobScanning)
+		})
+		if done.Status != string(model.LibraryJobComplete) || len(done.Duplicates) != 1 || len(done.Duplicates[0]) != 2 {
+			t.Fatalf("expected duplicates complete with 1 group of 2, got %+v", done)
+		}
+	})
+
+	t.Run("Cancel interrupts active scanning", func(t *testing.T) {
+		startedCh := make(chan struct{})
+		var once sync.Once
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			once.Do(func() { close(startedCh) })
+			<-r.Context().Done()
+		}))
+		defer srv.Close()
+
+		tagger := newMemTagger()
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{ITunesBaseURL: srv.URL + "/itunes"}, nil, nil)
+		paths := make([]string, 0, 4)
+		for i := 1; i <= 4; i++ {
+			p := filepath.Join(root.CanonicalPath, fmt.Sprintf("cancel-%d.flac", i))
+			_, _ = files.WriteFileDurable(p, []byte("CANCEL-PAYLOAD"))
+			tagger.tags[p] = helper.AudioTagData{Path: p, Editable: true, Tags: map[string]string{"title": fmt.Sprintf("Cancel%d", i), "artist": "Art"}}
+			paths = append(paths, p)
+		}
+
+		job, err := svc.SubmitAsync(ctx, admin, SubmitRequest{
+			Action:  "scrape",
+			Paths:   paths,
+			Sources: []string{"itunes"},
+		})
+		if err != nil {
+			t.Fatalf("SubmitAsync: %v", err)
+		}
+		select {
+		case <-startedCh:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for scraper HTTP call to start")
+		}
+
+		if _, err := svc.Cancel(ctx, admin, job.ID); err != nil {
+			t.Fatalf("Cancel scanning job: %v", err)
+		}
+		cancelled := pollLibraryJobUntil(t, svc, ctx, job.ID, 3*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status == string(model.LibraryJobCancelled)
+		})
+		if cancelled.Status != string(model.LibraryJobCancelled) {
+			t.Fatalf("expected cancelled status, got %s", cancelled.Status)
+		}
+	})
+
+	t.Run("AutoApply via SubmitAsync organizes automatically and Close aborts in-flight scan", func(t *testing.T) {
+		tagger := newMemTagger()
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, nil, nil)
+		p := filepath.Join(root.CanonicalPath, "auto-async.flac")
+		_, _ = files.WriteFileDurable(p, []byte("AUTO-ASYNC"))
+		tagger.tags[p] = helper.AudioTagData{
+			Path:     p,
+			Editable: true,
+			Tags:     map[string]string{"title": "AutoAsync", "artist": "AutoArtist", "album": "AutoAlbum", "track_number": "1"},
+		}
+		job, err := svc.SubmitAsync(ctx, admin, SubmitRequest{
+			Action:    "organize",
+			Paths:     []string{p},
+			AutoApply: true,
+		})
+		if err != nil {
+			t.Fatalf("SubmitAsync AutoApply: %v", err)
+		}
+		done := pollLibraryJobUntil(t, svc, ctx, job.ID, 5*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status == string(model.LibraryJobComplete) || j.Status == string(model.LibraryJobFailed)
+		})
+		if done.Status != string(model.LibraryJobComplete) {
+			t.Fatalf("expected complete after SubmitAsync AutoApply, got %s", done.Status)
+		}
+		if _, err := os.Stat(done.Items[0].Target); err != nil {
+			t.Fatalf("expected file moved to %s: %v", done.Items[0].Target, err)
+		}
+
+		// Verify Close() cancels and waits for an in-flight SubmitAsync without leaking or writing after DB close.
+		startedCh := make(chan struct{})
+		var once sync.Once
+		blockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			once.Do(func() { close(startedCh) })
+			<-r.Context().Done()
+		}))
+		defer blockSrv.Close()
+
+		tmp := t.TempDir()
+		rootDir2 := filepath.Join(tmp, "music")
+		_ = os.MkdirAll(rootDir2, 0o755)
+		st2, err := store.Open(ctx, store.Options{Path: filepath.Join(tmp, "close.db")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st2.Close()
+		r2, rec2, err := files.RegisterRoot(rootDir2, "r-close")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = st2.UpsertRoot(ctx, rec2)
+		coord2 := files.NewCoordinator(st2, files.NewAssetLockManager(2*time.Second), []files.Root{r2})
+		pool2 := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool2.CloseAll()
+		tagSvc2 := media.NewTagService(newMemTagger(), nil)
+		svc2 := NewService(st2, coord2, tagSvc2, nil, NewScraper(pool2, nil, nil, ScraperOptions{ITunesBaseURL: blockSrv.URL + "/itunes"}), ServiceOptions{})
+
+		p2 := filepath.Join(r2.CanonicalPath, "close-check.flac")
+		_, _ = files.WriteFileDurable(p2, []byte("CLOSE-CHECK"))
+		if _, err := svc2.SubmitAsync(ctx, admin, SubmitRequest{
+			Action:  "scrape",
+			Paths:   []string{p2},
+			Sources: []string{"itunes"},
+		}); err != nil {
+			t.Fatalf("SubmitAsync close test: %v", err)
+		}
+		select {
+		case <-startedCh:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for blocked scan")
+		}
+		closeDone := make(chan error, 1)
+		go func() { closeDone <- svc2.Close() }()
+		select {
+		case err := <-closeDone:
+			if err != nil {
+				t.Fatalf("svc2.Close: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("svc2.Close() blocked on active background scan")
+		}
+	})
+}
+
+func TestLibraryApplyAsyncBackgroundCompletionAndCancel(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	t.Run("ApplyAsync executes in background and triggers NavidromeHook", func(t *testing.T) {
+		tagger := newMemTagger()
+		var navCalls atomic.Int32
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, func(context.Context) error {
+			navCalls.Add(1)
+			return nil
+		}, nil)
+
+		paths := make([]string, 0, 6)
+		for i := 1; i <= 6; i++ {
+			p := filepath.Join(root.CanonicalPath, "incoming", fmt.Sprintf("org-%d.flac", i))
+			_ = os.MkdirAll(filepath.Dir(p), 0o755)
+			_, _ = files.WriteFileDurable(p, []byte("ORG-DATA"))
+			tagger.tags[p] = helper.AudioTagData{
+				Path:     p,
+				Editable: true,
+				Tags: map[string]string{
+					"title":        fmt.Sprintf("AsyncTrack%d", i),
+					"artist":       "AsyncArtist",
+					"album":        "AsyncAlbum",
+					"album_artist": "AsyncArtist",
+					"track_number": fmt.Sprintf("%d", i),
+				},
+			}
+			paths = append(paths, p)
+		}
+
+		preview, err := svc.Submit(ctx, admin, SubmitRequest{
+			Action: "organize",
+			Paths:  paths,
+		})
+		if err != nil {
+			t.Fatalf("Submit organize: %v", err)
+		}
+
+		applying, err := svc.ApplyAsync(ctx, admin, preview.ID)
+		if err != nil {
+			t.Fatalf("ApplyAsync: %v", err)
+		}
+		if applying.Status != string(model.LibraryJobApplying) || applying.Detail != "正在后台写入曲库更改" {
+			t.Fatalf("expected immediate applying state, got status=%s detail=%q", applying.Status, applying.Detail)
+		}
+
+		done := pollLibraryJobUntil(t, svc, ctx, preview.ID, 5*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status == string(model.LibraryJobComplete) || j.Status == string(model.LibraryJobFailed) || j.Status == string(model.LibraryJobPartial)
+		})
+		if done.Status != string(model.LibraryJobComplete) {
+			t.Fatalf("expected complete after ApplyAsync, got %s (detail=%s)", done.Status, done.Detail)
+		}
+		for _, it := range done.Items {
+			if it.Status != string(model.LibraryItemComplete) {
+				t.Fatalf("expected item complete, got %+v", it)
+			}
+			if _, err := os.Stat(it.Target); err != nil {
+				t.Fatalf("expected organized file at %s: %v", it.Target, err)
+			}
+		}
+		if navCalls.Load() != 1 {
+			t.Fatalf("expected NavidromeHook called once, got %d", navCalls.Load())
+		}
+	})
+
+	t.Run("Cancel stops ApplyAsync between items", func(t *testing.T) {
+		tagger := newMemTagger()
+		var svcRef *Service
+		var hookOnce sync.Once
+		var jobIDToCancel string
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, nil, func(phase string) error {
+			if phase == "backed_up" && jobIDToCancel != "" {
+				hookOnce.Do(func() {
+					_, _ = svcRef.Cancel(ctx, admin, jobIDToCancel)
+				})
+			}
+			return nil
+		})
+		svcRef = svc
+
+		f1 := filepath.Join(root.CanonicalPath, "ac1.flac")
+		f2 := filepath.Join(root.CanonicalPath, "ac2.flac")
+		_, _ = files.WriteFileDurable(f1, []byte("AC1"))
+		_, _ = files.WriteFileDurable(f2, []byte("AC2"))
+		tagger.tags[f1] = helper.AudioTagData{Path: f1, Tags: map[string]string{"title": "AC1"}, Editable: true}
+		tagger.tags[f2] = helper.AudioTagData{Path: f2, Tags: map[string]string{"title": "AC2"}, Editable: true}
+
+		job, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:   []string{f1, f2},
+			Action:  "edit",
+			Changes: map[string]string{"genre": "Electronic"},
+		})
+		if err != nil {
+			t.Fatalf("submit: %v", err)
+		}
+		jobIDToCancel = job.ID
+
+		if _, err := svc.ApplyAsync(ctx, admin, job.ID); err != nil {
+			t.Fatalf("ApplyAsync: %v", err)
+		}
+		cancelled := pollLibraryJobUntil(t, svc, ctx, job.ID, 5*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status == string(model.LibraryJobCancelled)
+		})
+		if cancelled.Items[0].Status != string(model.LibraryItemComplete) {
+			t.Fatalf("expected item 0 complete, got %s", cancelled.Items[0].Status)
+		}
+		if cancelled.Items[1].Status != string(model.LibraryItemPreviewReady) {
+			t.Fatalf("expected item 1 untouched, got %s", cancelled.Items[1].Status)
+		}
+	})
+}

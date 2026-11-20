@@ -2306,3 +2306,254 @@ func TestTrackLyricsPrefersLyricsProviderOverResolve(t *testing.T) {
 		t.Fatalf("expected 1 Resolve fallback call, got %d", resolveCalls.Load())
 	}
 }
+
+func TestUIPreferencesLyricsCustomizationAndBounds(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+
+	putPrefs := func(payload string) model.UIPreferencesDTO {
+		req := httptest.NewRequest(http.MethodPut, "/api/preferences", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT /api/preferences failed: %d %s", rec.Code, rec.Body.String())
+		}
+		var out model.UIPreferencesDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode prefs: %v", err)
+		}
+		return out
+	}
+
+	// 1. Out-of-bounds low + invalid active color + invalid align.
+	got1 := putPrefs(`{
+		"player": {
+			"lyrics_font_size": 8,
+			"lyrics_active_color": "red",
+			"lyrics_inactive_opacity": 0.05,
+			"lyrics_align": "right"
+		}
+	}`)
+	if got1.Player == nil || got1.Player.LyricsFontSize == nil || *got1.Player.LyricsFontSize != 14 {
+		t.Fatalf("expected lyrics_font_size clamped to 14, got %+v", got1.Player)
+	}
+	if got1.Player.LyricsInactiveOpacity == nil || *got1.Player.LyricsInactiveOpacity != 0.2 {
+		t.Fatalf("expected lyrics_inactive_opacity clamped to 0.2, got %+v", got1.Player)
+	}
+	if got1.Player.LyricsActiveColor != nil {
+		t.Fatalf("expected invalid lyrics_active_color ignored, got %q", *got1.Player.LyricsActiveColor)
+	}
+	if got1.Player.LyricsAlign != "" {
+		t.Fatalf("expected invalid lyrics_align ignored, got %q", got1.Player.LyricsAlign)
+	}
+
+	// 2. Out-of-bounds high + whitespace-trimmed valid hex + valid align.
+	got2 := putPrefs(`{
+		"player": {
+			"lyrics_font_size": 60,
+			"lyrics_active_color": "  #22c55e  ",
+			"lyrics_inactive_opacity": 1.8,
+			"lyrics_align": "left"
+		}
+	}`)
+	if *got2.Player.LyricsFontSize != 32 {
+		t.Fatalf("expected lyrics_font_size clamped to 32, got %d", *got2.Player.LyricsFontSize)
+	}
+	if got2.Player.LyricsActiveColor == nil || *got2.Player.LyricsActiveColor != "#22c55e" {
+		t.Fatalf("expected trimmed #22c55e, got %+v", got2.Player.LyricsActiveColor)
+	}
+	if *got2.Player.LyricsInactiveOpacity != 0.9 {
+		t.Fatalf("expected lyrics_inactive_opacity clamped to 0.9, got %v", *got2.Player.LyricsInactiveOpacity)
+	}
+	if got2.Player.LyricsAlign != "left" {
+		t.Fatalf("expected lyrics_align=left, got %q", got2.Player.LyricsAlign)
+	}
+
+	// 3. Valid values + empty active color (theme default) + partial update preserves fields.
+	_ = putPrefs(`{
+		"player": {
+			"lyrics_font_size": 22,
+			"lyrics_active_color": "",
+			"lyrics_inactive_opacity": 0.55,
+			"lyrics_align": "center"
+		}
+	}`)
+	_ = putPrefs(`{
+		"player": {
+			"volume": 0.65,
+			"lyrics_active_color": "#nothex",
+			"lyrics_align": "justify"
+		}
+	}`)
+
+	getRec := httptest.NewRecorder()
+	srv.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/api/preferences", nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/preferences status = %d", getRec.Code)
+	}
+	var final model.UIPreferencesDTO
+	if err := json.Unmarshal(getRec.Body.Bytes(), &final); err != nil {
+		t.Fatalf("decode final prefs: %v", err)
+	}
+	if final.Player == nil || final.Player.Volume == nil || *final.Player.Volume != 0.65 ||
+		final.Player.LyricsFontSize == nil || *final.Player.LyricsFontSize != 22 ||
+		final.Player.LyricsActiveColor == nil || *final.Player.LyricsActiveColor != "" ||
+		final.Player.LyricsInactiveOpacity == nil || *final.Player.LyricsInactiveOpacity != 0.55 ||
+		final.Player.LyricsAlign != "center" {
+		t.Fatalf("unexpected persisted player preferences: %+v", final.Player)
+	}
+}
+
+func TestLibraryProcessAndApplyAsyncAndSyncEndpoints(t *testing.T) {
+	emptyITunes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer emptyITunes.Close()
+
+	var libSvc *library.Service
+	srv, _, root := newTestServer(t, func(d *Dependencies, _ string) {
+		scraper := library.NewScraper(d.Transport, d.Providers, d.Media, library.ScraperOptions{
+			ITunesBaseURL: emptyITunes.URL + "/itunes",
+		})
+		libSvc = library.NewService(d.Store, d.Files, d.Tags, d.Media, scraper, library.ServiceOptions{})
+		d.Library = libSvc
+	})
+	t.Cleanup(func() { _ = libSvc.Close() })
+
+	pollJobHTTP := func(jobID string, pred func(model.LibraryJobDTO) bool) model.LibraryJobDTO {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/library/jobs/"+jobID, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /api/library/jobs/%s status=%d %s", jobID, rec.Code, rec.Body.String())
+			}
+			var dto model.LibraryJobDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+				t.Fatalf("decode job: %v", err)
+			}
+			if pred(dto) {
+				return dto
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		t.Fatalf("timed out polling job %s", jobID)
+		return model.LibraryJobDTO{}
+	}
+
+	scrapePath := filepath.Join(root, "incoming", "unmatched-http.wav")
+	_ = os.MkdirAll(filepath.Dir(scrapePath), 0o755)
+	if err := os.WriteFile(scrapePath, []byte("RIFF\x00\x00\x00\x00WAVEfmt "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Default POST /api/library/jobs for action="scrape" uses SubmitAsync (returns scanning).
+	code, out := jsonCall(t, srv, http.MethodPost, "/api/library/jobs", map[string]any{
+		"action":  "scrape",
+		"paths":   []string{scrapePath},
+		"sources": []string{"itunes"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobScanning) {
+		t.Fatalf("expected 200 scanning from async scrape, got %d %v", code, out)
+	}
+	asyncScrapeID, _ := out["id"].(string)
+	doneScrape := pollJobHTTP(asyncScrapeID, func(j model.LibraryJobDTO) bool {
+		return j.Status != string(model.LibraryJobScanning)
+	})
+	if doneScrape.Status != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected needs_review after empty scrape, got %s", doneScrape.Status)
+	}
+
+	// 2. Apply on all-needs_review job MUST return 400 BadRequest (not silent 200 OK).
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+asyncScrapeID+"/apply", map[string]any{})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 applying needs_review job, got %d %v", code, out)
+	}
+
+	// 3. Preview with "existing" then Apply succeeds with 200 complete.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+asyncScrapeID+"/preview", map[string]any{
+		"choices": map[string]string{doneScrape.Items[0].ID: "existing"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("expected preview_ready after existing choice, got %d %v", code, out)
+	}
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+asyncScrapeID+"/apply", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobComplete) {
+		t.Fatalf("expected complete after apply existing, got %d %v", code, out)
+	}
+
+	// 4. POST /api/library/jobs?sync=true forces synchronous Submit even for scrape.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs?sync=true", map[string]any{
+		"action":  "scrape",
+		"paths":   []string{scrapePath},
+		"sources": []string{"itunes"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected synchronous needs_review with ?sync=true, got %d %v", code, out)
+	}
+
+	// 5. Batch > 5 items: Apply uses ApplyAsync (returns applying), Apply?sync=true uses sync Apply.
+	var batchPaths []string
+	for i := 1; i <= 7; i++ {
+		p := filepath.Join(root, "incoming", fmt.Sprintf("batch-%d.wav", i))
+		if err := os.WriteFile(p, []byte("RIFF\x00\x00\x00\x00WAVEfmt "), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		batchPaths = append(batchPaths, p)
+	}
+	// <= 10 paths with action="edit" -> synchronous preview_ready.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs", map[string]any{
+		"action":  "edit",
+		"paths":   batchPaths,
+		"changes": map[string]string{"album": "AsyncBatch"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("expected sync preview_ready for 7-item edit, got %d %v", code, out)
+	}
+	batchJobID, _ := out["id"].(string)
+
+	// Apply without ?sync=true -> ApplyAsync returns "applying" immediately.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+batchJobID+"/apply", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobApplying) {
+		t.Fatalf("expected 200 applying for >5 executable items, got %d %v", code, out)
+	}
+	batchDone := pollJobHTTP(batchJobID, func(j model.LibraryJobDTO) bool {
+		return j.Status == string(model.LibraryJobComplete) || j.Status == string(model.LibraryJobFailed) || j.Status == string(model.LibraryJobPartial)
+	})
+	if batchDone.Status != string(model.LibraryJobComplete) {
+		t.Fatalf("expected async apply complete, got %s (%s)", batchDone.Status, batchDone.Detail)
+	}
+
+	// Apply?sync=true with > 5 items -> synchronous complete.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs", map[string]any{
+		"action":  "edit",
+		"paths":   batchPaths,
+		"changes": map[string]string{"genre": "Ambient"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("expected sync preview_ready for 2nd 7-item edit, got %d %v", code, out)
+	}
+	syncJobID, _ := out["id"].(string)
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+syncJobID+"/apply?sync=true", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobComplete) {
+		t.Fatalf("expected immediate complete with ?sync=true, got %d %v", code, out)
+	}
+
+	// 6. scope_dir="" (empty paths) triggers SubmitAsync even for organize.
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs", map[string]any{
+		"action":    "organize",
+		"scope_dir": "",
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobScanning) {
+		t.Fatalf("expected scanning for scope_dir=\"\", got %d %v", code, out)
+	}
+	scopeJobID, _ := out["id"].(string)
+	scopeDone := pollJobHTTP(scopeJobID, func(j model.LibraryJobDTO) bool {
+		return j.Status != string(model.LibraryJobScanning)
+	})
+	if scopeDone.Status != string(model.LibraryJobPreviewReady) || len(scopeDone.Items) < 7 {
+		t.Fatalf("expected scope_dir scan preview_ready with >=7 items, got status=%s len=%d", scopeDone.Status, len(scopeDone.Items))
+	}
+}

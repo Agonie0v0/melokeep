@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1121,6 +1122,36 @@ func sanitizeUIPreferencesPatch(dst *model.UIPreferencesDTO, req model.UIPrefere
 		if req.Player.LargeLyrics != nil {
 			v := *req.Player.LargeLyrics
 			dst.Player.LargeLyrics = &v
+		}
+		if req.Player.LyricsFontSize != nil {
+			v := *req.Player.LyricsFontSize
+			if v < 14 {
+				v = 14
+			} else if v > 32 {
+				v = 32
+			}
+			dst.Player.LyricsFontSize = &v
+		}
+		if req.Player.LyricsActiveColor != nil {
+			color := strings.TrimSpace(*req.Player.LyricsActiveColor)
+			if color == "" || isValidHexColor(color) {
+				dst.Player.LyricsActiveColor = &color
+			}
+		}
+		if req.Player.LyricsInactiveOpacity != nil {
+			v := *req.Player.LyricsInactiveOpacity
+			if !math.IsNaN(v) && !math.IsInf(v, 0) {
+				if v < 0.2 {
+					v = 0.2
+				} else if v > 0.9 {
+					v = 0.9
+				}
+				dst.Player.LyricsInactiveOpacity = &v
+			}
+		}
+		switch strings.TrimSpace(req.Player.LyricsAlign) {
+		case "center", "left":
+			dst.Player.LyricsAlign = strings.TrimSpace(req.Player.LyricsAlign)
 		}
 	}
 

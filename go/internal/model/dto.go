@@ -610,11 +610,15 @@ type AppearancePreferencesDTO struct {
 
 // PlayerPreferencesDTO describes persisted player audio and lyric preferences.
 type PlayerPreferencesDTO struct {
-	Volume       *float64 `json:"volume,omitempty"`
-	Shuffle      *bool    `json:"shuffle,omitempty"`
-	Repeat       *bool    `json:"repeat,omitempty"`
-	FollowLyrics *bool    `json:"follow_lyrics,omitempty"`
-	LargeLyrics  *bool    `json:"large_lyrics,omitempty"`
+	Volume                *float64 `json:"volume,omitempty"`
+	Shuffle               *bool    `json:"shuffle,omitempty"`
+	Repeat                *bool    `json:"repeat,omitempty"`
+	FollowLyrics          *bool    `json:"follow_lyrics,omitempty"`
+	LargeLyrics           *bool    `json:"large_lyrics,omitempty"`
+	LyricsFontSize        *int     `json:"lyrics_font_size,omitempty"`
+	LyricsActiveColor     *string  `json:"lyrics_active_color,omitempty"`
+	LyricsInactiveOpacity *float64 `json:"lyrics_inactive_opacity,omitempty"`
+	LyricsAlign           string   `json:"lyrics_align,omitempty"`
 }
 
 // NavidromeViewPreferencesDTO describes persisted Navidrome browser view preferences.
