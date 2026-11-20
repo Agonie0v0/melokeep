@@ -25,13 +25,21 @@ const (
 	updateMaxBodyBytes   = 1 << 20
 )
 
+type githubReleaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+	ContentType        string `json:"content_type"`
+}
+
 type githubReleaseResponse struct {
-	TagName         string `json:"tag_name"`
-	Name            string `json:"name"`
-	Body            string `json:"body"`
-	PublishedAt     string `json:"published_at"`
-	HTMLURL         string `json:"html_url"`
-	TargetCommitish string `json:"target_commitish"`
+	TagName         string               `json:"tag_name"`
+	Name            string               `json:"name"`
+	Body            string               `json:"body"`
+	PublishedAt     string               `json:"published_at"`
+	HTMLURL         string               `json:"html_url"`
+	TargetCommitish string               `json:"target_commitish"`
+	Assets          []githubReleaseAsset `json:"assets"`
 }
 
 type githubCommitAuthor struct {
@@ -170,6 +178,8 @@ func (s *Server) checkSystemUpdate(ctx context.Context, force bool) model.System
 			cached.Commits = []model.UpdateCommitDTO{}
 		}
 		s.updateMu.Unlock()
+		selfUpd := s.selfUpdateStatus(ctx)
+		cached.SelfUpdate = &selfUpd
 		return cached
 	}
 	s.updateMu.Unlock()
@@ -195,6 +205,8 @@ func (s *Server) checkSystemUpdate(ctx context.Context, force bool) model.System
 	result, err := s.fetchSystemUpdate(ctx, repo, apiBase, current)
 	if err != nil {
 		out.Error = err.Error()
+		selfUpd := s.selfUpdateStatus(ctx)
+		out.SelfUpdate = &selfUpd
 		return out
 	}
 
@@ -203,6 +215,8 @@ func (s *Server) checkSystemUpdate(ctx context.Context, force bool) model.System
 	s.updateCache = &copyCache
 	s.updateCacheExpires = time.Now().Add(updateCacheTTL)
 	s.updateMu.Unlock()
+	selfUpd := s.selfUpdateStatus(ctx)
+	result.SelfUpdate = &selfUpd
 	return result
 }
 
@@ -224,6 +238,20 @@ func (s *Server) fetchSystemUpdate(ctx context.Context, repo, apiBase string, cu
 		if err := json.Unmarshal(raw, &rel); err != nil {
 			return out, fmt.Errorf("解析 GitHub Release 响应失败：%v", err)
 		}
+		var assets []model.UpdateAssetDTO
+		for _, a := range rel.Assets {
+			name := strings.TrimSpace(a.Name)
+			dlURL := strings.TrimSpace(a.BrowserDownloadURL)
+			if name == "" || dlURL == "" {
+				continue
+			}
+			assets = append(assets, model.UpdateAssetDTO{
+				Name:        name,
+				DownloadURL: dlURL,
+				Size:        a.Size,
+				ContentType: strings.TrimSpace(a.ContentType),
+			})
+		}
 		out.Mode = "release"
 		out.ReleaseNotes = strings.TrimSpace(rel.Body)
 		out.Latest = &model.UpdateTargetDTO{
@@ -232,6 +260,7 @@ func (s *Server) fetchSystemUpdate(ctx context.Context, repo, apiBase string, cu
 			Title:       firstNonEmptyStr(rel.Name, rel.TagName),
 			PublishedAt: strings.TrimSpace(rel.PublishedAt),
 			URL:         strings.TrimSpace(rel.HTMLURL),
+			Assets:      assets,
 		}
 		if curVer, okCur := parseSemver(current.Version); okCur && current.Version != "1.0.0-go" {
 			if latestVer, okLatest := parseSemver(rel.TagName); okLatest {

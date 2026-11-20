@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/agonie0v0/melokeep/internal/app"
+	"github.com/agonie0v0/melokeep/internal/dockerupdate"
 	"github.com/agonie0v0/melokeep/internal/legacyimport"
 	"github.com/agonie0v0/melokeep/internal/store"
 )
@@ -29,7 +31,42 @@ func run(args []string, environ []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "migrate" {
 		return runMigrate(args[1:], environ, stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "self-update-helper" {
+		return runSelfUpdateHelper(args[1:], stdout, stderr)
+	}
 	return runServe(args, environ, stdout, stderr)
+}
+
+func runSelfUpdateHelper(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("melokeep self-update-helper", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	socketFlag := fs.String("socket", dockerupdate.DefaultSocketPath, "Docker Engine unix socket path")
+	targetFlag := fs.String("target", "", "Target container ID to recreate")
+	imageFlag := fs.String("image", "", "Target container image reference")
+	waitMSFlag := fs.Int("wait-ms", 500, "Wait duration in milliseconds before stopping target container")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	waitDur := time.Duration(0)
+	if *waitMSFlag > 0 {
+		waitDur = time.Duration(*waitMSFlag) * time.Millisecond
+	}
+	if err := dockerupdate.RunHelper(ctx, dockerupdate.HelperOptions{
+		SocketPath:     *socketFlag,
+		TargetID:       *targetFlag,
+		TargetImage:    *imageFlag,
+		WaitBeforeStop: waitDur,
+	}); err != nil {
+		fmt.Fprintf(stderr, "self-update-helper failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "self-update-helper completed successfully")
+	return 0
 }
 
 func runServe(args []string, environ []string, stdout, stderr io.Writer) int {

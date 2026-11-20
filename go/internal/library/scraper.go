@@ -115,27 +115,58 @@ type ScrapeReference struct {
 	Query    string
 }
 
+const DefaultMinMatchScore = 85
+
+func normalizeMinMatchScore(minScore int) int {
+	if minScore <= 0 {
+		return DefaultMinMatchScore
+	}
+	if minScore < 50 {
+		return 50
+	}
+	if minScore > 100 {
+		return 100
+	}
+	return minScore
+}
+
 func builtinSourceCatalog() []model.MetadataSourceDTO {
 	return []model.MetadataSourceDTO{
 		{
 			ID: "musicbrainz", Label: "MusicBrainz", Description: "国际音乐与不同发行版本的结构化资料",
-			Fields: []string{"title", "artist", "album", "album_artist", "date", "track_number", "disc_number", "cover"},
-			Note:   "无需账号；封面来自 Cover Art Archive，不提供歌词。社区资料可能缺失，多个发行版本需人工确认。", URL: "https://musicbrainz.org/",
+			Fields:          []string{"title", "artist", "album", "album_artist", "date", "track_number", "disc_number", "cover"},
+			Note:            "无需账号；封面来自 Cover Art Archive，不提供歌词。社区资料可能缺失，多个发行版本需人工确认。",
+			URL:             "https://musicbrainz.org/",
+			Builtin:         true,
+			Recommended:     true,
+			RecommendReason: "国际发行结构化资料补全",
 		},
 		{
 			ID: "itunes", Label: "iTunes", Description: "国际与中文发行专辑结构化资料与高清封面",
-			Fields: []string{"title", "artist", "album", "date", "track_number", "disc_number", "cover"},
-			Note:   "无需账号；提供官方发行曲序与高分辨率封面，不提供歌词。", URL: "https://itunes.apple.com/",
+			Fields:          []string{"title", "artist", "album", "date", "track_number", "disc_number", "cover"},
+			Note:            "无需账号；提供官方发行曲序与高分辨率封面，不提供歌词。",
+			URL:             "https://itunes.apple.com/",
+			Builtin:         true,
+			Recommended:     true,
+			RecommendReason: "中英文专辑与高清封面首选",
 		},
 		{
 			ID: "acoustid", Label: "AcoustID 指纹", Description: "通过音频内容识别，适合文件名和标签缺失的歌曲",
-			Fields: []string{"title", "artist", "album", "album_artist", "date", "track_number", "disc_number", "cover"},
-			Note:   "需要 fpcalc 和 AcoustID 应用 Key；指纹查询返回 MusicBrainz 录音，发行版本仍需审核。不上传音频。", URL: "https://acoustid.org/",
+			Fields:          []string{"title", "artist", "album", "album_artist", "date", "track_number", "disc_number", "cover"},
+			Note:            "需要 fpcalc 和 AcoustID 应用 Key；指纹查询返回 MusicBrainz 录音，发行版本仍需审核。不上传音频。",
+			URL:             "https://acoustid.org/",
+			Builtin:         true,
+			Recommended:     false,
+			RecommendReason: "适合无标签文件指纹识别（需配置 Key 与 fpcalc）",
 		},
 		{
 			ID: "lrclib", Label: "LRCLIB", Description: "开源免费同步与纯文本歌词库",
-			Fields: []string{"lyrics"},
-			Note:   "无需账号与 Key；优先按歌名、歌手、专辑与时长匹配 LRC 同步歌词。", URL: "https://lrclib.net/",
+			Fields:          []string{"lyrics"},
+			Note:            "无需账号与 Key；优先按歌名、歌手、专辑与时长匹配 LRC 同步歌词。",
+			URL:             "https://lrclib.net/",
+			Builtin:         true,
+			Recommended:     true,
+			RecommendReason: "开源免费同步 LRC 歌词",
 		},
 	}
 }
@@ -194,6 +225,8 @@ func (s *Scraper) SourceCatalog() []model.MetadataSourceDTO {
 			Description: strings.TrimSpace(entry.Meta.Description),
 			Fields:      dynamicPluginFields(caps),
 			Note:        strings.TrimSpace(caps.Note),
+			Builtin:     false,
+			Recommended: false,
 		})
 	}
 	return out
@@ -318,7 +351,12 @@ func similarityRatio(a, b string) float64 {
 }
 
 func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
-	var reasons, conflicts []string
+	return RankCandidateWithMinScore(ref, cand, DefaultMinMatchScore)
+}
+
+func RankCandidateWithMinScore(ref ScrapeReference, cand ScrapeCandidate, minScore int) ScrapeCandidate {
+	minScore = normalizeMinMatchScore(minScore)
+	var reasons, conflicts, hardConflicts []string
 	title := NormalizedMeta(ref.Title)
 	other := NormalizedMeta(cand.Title)
 	sim := 0.0
@@ -330,6 +368,7 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 		reasons = append(reasons, "标题一致")
 	} else if sim < 0.85 {
 		conflicts = append(conflicts, "标题不同")
+		hardConflicts = append(hardConflicts, "标题不同")
 	}
 
 	artists := NormalizedMeta(ref.Artist)
@@ -341,6 +380,7 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 		reasons = append(reasons, "歌手一致")
 	} else if artists != "" {
 		conflicts = append(conflicts, "歌手不同")
+		hardConflicts = append(hardConflicts, "歌手不同")
 	}
 
 	album := NormalizedMeta(ref.Album)
@@ -349,6 +389,7 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 		score += 15
 		reasons = append(reasons, "专辑一致")
 	} else if album != "" && otherAlbum != "" {
+		// 软冲突：保留展示在 Conflicts 中，但在无硬冲突且分数达标时不直接阻断自动匹配。
 		conflicts = append(conflicts, "专辑不同")
 	}
 
@@ -359,11 +400,13 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 			reasons = append(reasons, "时长接近")
 		} else if diff > math.Max(8, ref.Duration*0.04) {
 			conflicts = append(conflicts, "时长差异较大")
+			hardConflicts = append(hardConflicts, "时长差异较大")
 		}
 	}
 
 	if !equalBoolMap(VersionFlags(ref.Title+" "+ref.Version), VersionFlags(cand.Title+" "+cand.Version)) {
 		conflicts = append(conflicts, "歌曲版本不同")
+		hardConflicts = append(hardConflicts, "歌曲版本不同")
 	}
 
 	trusted := ref.Source == cand.Source && ref.SourceID != "" && ref.SourceID == cand.SourceID
@@ -371,24 +414,35 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 		score = 100
 		reasons = append([]string{"下载来源 ID 一致"}, reasons...)
 	}
-	confident := len(conflicts) == 0 && (trusted || (sim >= 0.96 && artistMatch && score >= 85))
+	roundedScore := math.Round(score)
+	confident := false
+	if trusted && len(conflicts) == 0 {
+		confident = true
+	} else if len(hardConflicts) == 0 && roundedScore >= float64(minScore) && (artistMatch || artists == "") && sim >= 0.85 {
+		confident = true
+	}
 
 	if cand.Source == "acoustid" && cand.FingerprintScore >= 0.9 {
 		var filtered []string
+		hasHard := false
 		for _, c := range conflicts {
 			if c == "专辑不同" || c == "时长差异较大" {
 				filtered = append(filtered, c)
+				if c == "时长差异较大" {
+					hasHard = true
+				}
 			}
 		}
 		conflicts = filtered
 		score = 98
+		roundedScore = 98
 		reasons = []string{"音频指纹高度匹配；发行版本需核对"}
-		confident = len(conflicts) == 0
+		confident = !hasHard && roundedScore >= float64(minScore)
 	}
 
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%s|%s", cand.Source, cand.SourceID, cand.ReleaseID, cand.Album)))
 	cand.ID = hex.EncodeToString(sum[:])[:20]
-	cand.Score = math.Round(score)
+	cand.Score = roundedScore
 	cand.Reasons = nonNilStrings(reasons)
 	cand.Conflicts = nonNilStrings(conflicts)
 	cand.Confident = confident
@@ -396,9 +450,14 @@ func RankCandidate(ref ScrapeReference, cand ScrapeCandidate) ScrapeCandidate {
 }
 
 func PickCandidates(ref ScrapeReference, candidates []ScrapeCandidate) ([]ScrapeCandidate, *ScrapeCandidate) {
+	return PickCandidatesWithMinScore(ref, candidates, DefaultMinMatchScore)
+}
+
+func PickCandidatesWithMinScore(ref ScrapeReference, candidates []ScrapeCandidate, minScore int) ([]ScrapeCandidate, *ScrapeCandidate) {
+	minScore = normalizeMinMatchScore(minScore)
 	ranked := make([]ScrapeCandidate, 0, len(candidates))
 	for _, c := range candidates {
-		ranked = append(ranked, RankCandidate(ref, c))
+		ranked = append(ranked, RankCandidateWithMinScore(ref, c, minScore))
 	}
 	sort.SliceStable(ranked, func(i, j int) bool {
 		return ranked[i].Score > ranked[j].Score

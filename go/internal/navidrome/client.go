@@ -147,7 +147,7 @@ func computeRevision(s Settings) string {
 
 func (c *Client) authParams(s Settings) (url.Values, error) {
 	if !s.Enabled || s.URL == "" {
-		return nil, model.NewError(model.ErrConflict, http.StatusConflict, "请先在设置中配置并启用 Navidrome")
+		return nil, model.NewError(model.ErrConflict, http.StatusConflict, "MeloKeep 服务端未配置并启用 Navidrome（App 端可直接独立连接）")
 	}
 	q := url.Values{}
 	q.Set("v", "1.16.1")

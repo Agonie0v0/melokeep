@@ -15,6 +15,7 @@ import (
 
 	"github.com/agonie0v0/melokeep/internal/auth"
 	"github.com/agonie0v0/melokeep/internal/config"
+	"github.com/agonie0v0/melokeep/internal/dockerupdate"
 	"github.com/agonie0v0/melokeep/internal/model"
 )
 
@@ -70,6 +71,7 @@ type Server struct {
 	updateMu           sync.Mutex
 	updateCache        *model.SystemUpdateDTO
 	updateCacheExpires time.Time
+	selfUpdater        *dockerupdate.Manager
 
 	prefsMu sync.Mutex
 }
@@ -363,6 +365,8 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodPost, "/api/engine/update", "legacy.app.engineupdate", s.handleEngineUpdate)
 	s.addRoute(http.MethodGet, "/api/engine/update", "legacy.app.engineupdatestatus", s.handleEngineUpdateStatus)
 	s.addRoute(http.MethodGet, "/api/system/update", "engine_api.system_update", s.handleSystemUpdate)
+	s.addRoute(http.MethodGet, "/api/system/update/status", "engine_api.system_update_status", s.handleSystemUpdateStatus)
+	s.addRoute(http.MethodPost, "/api/system/update/apply", "engine_api.system_update_apply", s.handleSystemUpdateApply)
 	s.addRoute(http.MethodPost, "/api/restart", "legacy.app.restartserver", s.handleRestart)
 	s.addRoute(http.MethodPost, "/api/open-dir", "legacy.app.opendir", s.handleOpenDir)
 	s.addRoute(http.MethodPost, "/api/cache/clear", "legacy.app.clearcache", s.handleCacheClear)

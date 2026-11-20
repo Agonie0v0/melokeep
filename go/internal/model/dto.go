@@ -95,12 +95,15 @@ type LibraryFilesPageDTO struct {
 }
 
 type MetadataSourceDTO struct {
-	ID          string   `json:"id"`
-	Label       string   `json:"label"`
-	Description string   `json:"description"`
-	Fields      []string `json:"fields"`
-	Note        string   `json:"note"`
-	URL         string   `json:"url"`
+	ID              string   `json:"id"`
+	Label           string   `json:"label"`
+	Description     string   `json:"description"`
+	Fields          []string `json:"fields"`
+	Note            string   `json:"note"`
+	URL             string   `json:"url"`
+	Builtin         bool     `json:"builtin"`
+	Recommended     bool     `json:"recommended"`
+	RecommendReason string   `json:"recommend_reason,omitempty"`
 }
 
 type MetadataCandidateDTO struct {
@@ -148,9 +151,10 @@ type LibraryJobItemDTO struct {
 }
 
 type LibraryJobSettingsDTO struct {
-	Sources   []string `json:"sources"`
-	Overwrite bool     `json:"overwrite"`
-	Fields    []string `json:"fields"`
+	Sources       []string `json:"sources"`
+	Overwrite     bool     `json:"overwrite"`
+	Fields        []string `json:"fields"`
+	MinMatchScore int      `json:"min_match_score,omitempty"`
 }
 
 type LibraryDuplicateDTO struct {
@@ -388,6 +392,7 @@ type LibraryConfigDTO struct {
 	CoverMode          string              `json:"cover_mode"`
 	Fields             []string            `json:"fields"`
 	BackupDays         int                 `json:"backup_days"`
+	MinMatchScore      int                 `json:"min_match_score"`
 	Navidrome          NavidromeConfigDTO  `json:"navidrome"`
 	MetadataSources    []MetadataSourceDTO `json:"metadata_sources,omitempty"`
 	Chinese            string              `json:"chinese,omitempty"`
@@ -560,42 +565,66 @@ type BuildInfoDTO struct {
 	InContainer bool   `json:"in_container"`
 }
 
+// UpdateAssetDTO describes a downloadable release asset published on GitHub Releases.
+type UpdateAssetDTO struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"download_url"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"content_type,omitempty"`
+}
+
 // UpdateTargetDTO describes the latest available release or branch commit on GitHub.
 type UpdateTargetDTO struct {
-	Version     string `json:"version,omitempty"`
-	Tag         string `json:"tag,omitempty"`
-	Commit      string `json:"commit,omitempty"`
-	ShortCommit string `json:"short_commit,omitempty"`
-	Title       string `json:"title,omitempty"`
-	PublishedAt string `json:"published_at,omitempty"`
-	URL         string `json:"url,omitempty"`
+	Version     string           `json:"version,omitempty"`
+	Tag         string           `json:"tag,omitempty"`
+	Commit      string           `json:"commit,omitempty"`
+	ShortCommit string           `json:"short_commit,omitempty"`
+	Title       string           `json:"title,omitempty"`
+	PublishedAt string           `json:"published_at,omitempty"`
+	URL         string           `json:"url,omitempty"`
+	Assets      []UpdateAssetDTO `json:"assets,omitempty"`
+}
+
+// SelfUpdateStatusDTO describes one-click container self-update capability and runtime progress.
+type SelfUpdateStatusDTO struct {
+	Supported   bool   `json:"supported"`
+	Mode        string `json:"mode"` // "docker_socket" | "webhook" | "none"
+	Reason      string `json:"reason,omitempty"`
+	InProgress  bool   `json:"in_progress"`
+	Stage       string `json:"stage,omitempty"` // "idle" | "pulling" | "recreating" | "restarting" | "up_to_date" | "failed"
+	Message     string `json:"message,omitempty"`
+	Progress    int    `json:"progress,omitempty"`
+	TargetImage string `json:"target_image,omitempty"`
+	StartedAt   string `json:"started_at,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // UpdateCommitDTO describes a single commit entry in the update changelog.
 type UpdateCommitDTO struct {
-	SHA     string `json:"sha"`
-	Short   string `json:"short"`
-	Title   string `json:"title"`
-	Author  string `json:"author,omitempty"`
-	Date    string `json:"date,omitempty"`
-	URL     string `json:"url,omitempty"`
+	SHA    string `json:"sha"`
+	Short  string `json:"short"`
+	Title  string `json:"title"`
+	Author string `json:"author,omitempty"`
+	Date   string `json:"date,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 // SystemUpdateDTO summarizes version comparison and changelog data for the UI.
 type SystemUpdateDTO struct {
-	Repo         string            `json:"repo"`
-	Mode         string            `json:"mode"` // "release", "compare", "commits", or "error"
-	Current      BuildInfoDTO      `json:"current"`
-	Latest       *UpdateTargetDTO  `json:"latest,omitempty"`
-	HasUpdate    bool              `json:"has_update"`
-	Comparable   bool              `json:"comparable"`
-	AheadBy      int               `json:"ahead_by,omitempty"`
-	BehindBy     int               `json:"behind_by,omitempty"`
-	ReleaseNotes string            `json:"release_notes,omitempty"`
-	Commits      []UpdateCommitDTO `json:"commits"`
-	CheckedAt    string            `json:"checked_at"`
-	Cached       bool              `json:"cached"`
-	Error        string            `json:"error,omitempty"`
+	Repo         string               `json:"repo"`
+	Mode         string               `json:"mode"` // "release", "compare", "commits", or "error"
+	Current      BuildInfoDTO         `json:"current"`
+	Latest       *UpdateTargetDTO     `json:"latest,omitempty"`
+	HasUpdate    bool                 `json:"has_update"`
+	Comparable   bool                 `json:"comparable"`
+	AheadBy      int                  `json:"ahead_by,omitempty"`
+	BehindBy     int                  `json:"behind_by,omitempty"`
+	ReleaseNotes string               `json:"release_notes,omitempty"`
+	Commits      []UpdateCommitDTO    `json:"commits"`
+	CheckedAt    string               `json:"checked_at"`
+	Cached       bool                 `json:"cached"`
+	Error        string               `json:"error,omitempty"`
+	SelfUpdate   *SelfUpdateStatusDTO `json:"self_update,omitempty"`
 }
 
 // AppearancePreferencesDTO describes persisted UI theme and density preferences.

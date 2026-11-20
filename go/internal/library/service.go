@@ -58,6 +58,7 @@ type Settings struct {
 	CoverMode          string   `json:"cover_mode"`
 	Fields             []string `json:"fields"`
 	BackupDays         int      `json:"backup_days"`
+	MinMatchScore      int      `json:"min_match_score"`
 	Chinese            string   `json:"chinese"`
 	RepairEncoding     bool     `json:"repair_encoding"`
 	WatchEnabled       bool     `json:"watch_enabled"`
@@ -84,6 +85,7 @@ func DefaultSettings() Settings {
 		CoverMode:          "both",
 		Fields:             fields,
 		BackupDays:         7,
+		MinMatchScore:      DefaultMinMatchScore,
 		Chinese:            "none",
 		RepairEncoding:     false,
 		WatchEnabled:       false,
@@ -194,6 +196,12 @@ func ValidateSettingsWithScraper(s Settings, roots []files.Root, scraper *Scrape
 	if s.BackupDays < 0 || s.BackupDays > 365 {
 		return s, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "备份保留天数需在 0 到 365 之间")
 	}
+	if s.MinMatchScore == 0 {
+		s.MinMatchScore = DefaultMinMatchScore
+	}
+	if s.MinMatchScore < 50 || s.MinMatchScore > 100 {
+		return s, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "默认自动匹配分数需在 50 到 100 之间")
+	}
 	if s.WatchInterval == 0 {
 		s.WatchInterval = 180
 	}
@@ -245,6 +253,17 @@ type SubmitRequest struct {
 	CUE              string            `json:"cue,omitempty"`
 	SourceDownloadID string            `json:"source_download_id,omitempty"`
 	AutoApply        bool              `json:"auto_apply,omitempty"`
+	MinMatchScore    int               `json:"min_match_score,omitempty"`
+}
+
+func effectiveMinMatchScore(settings Settings, req SubmitRequest) int {
+	if req.MinMatchScore >= 50 && req.MinMatchScore <= 100 {
+		return req.MinMatchScore
+	}
+	if settings.MinMatchScore >= 50 && settings.MinMatchScore <= 100 {
+		return settings.MinMatchScore
+	}
+	return DefaultMinMatchScore
 }
 
 type submitFlags struct {
@@ -452,6 +471,9 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return def, nil
 	}
 	out.Sources = filterValidScrapeSources(out.Sources, def.Sources, s.scraper)
+	if out.MinMatchScore < 50 || out.MinMatchScore > 100 {
+		out.MinMatchScore = DefaultMinMatchScore
+	}
 	return out, nil
 }
 
@@ -1485,7 +1507,7 @@ func (s *Service) SearchItemCandidates(ctx context.Context, actor auth.Actor, jo
 		Query:  query,
 	}
 	cands, warns := s.scraper.Search(ctx, s.opts.SnapshotProvider(), ref, useSources)
-	ranked, _ := PickCandidates(ref, cands)
+	ranked, _ := PickCandidatesWithMinScore(ref, cands, effectiveMinMatchScore(jobMeta.Settings, jobMeta.Request))
 	it.Candidates = ranked
 	it.Chosen = nil
 	it.After = cloneStringMap(it.Before)
@@ -2284,9 +2306,10 @@ func (s *Service) buildJobDTO(ctx context.Context, j model.LibraryJob, storeItem
 	if err == nil {
 		dto.Duplicates = meta.Duplicates
 		dto.Settings = &model.LibraryJobSettingsDTO{
-			Sources:   nonNilSlice(meta.Settings.Sources),
-			Overwrite: meta.Settings.Overwrite,
-			Fields:    nonNilSlice(meta.Settings.Fields),
+			Sources:       nonNilSlice(meta.Settings.Sources),
+			Overwrite:     meta.Settings.Overwrite,
+			Fields:        nonNilSlice(meta.Settings.Fields),
+			MinMatchScore: effectiveMinMatchScore(meta.Settings, meta.Request),
 		}
 		itemsDTO := make([]model.LibraryJobItemDTO, 0, len(meta.Items))
 		for _, it := range meta.Items {
@@ -2922,13 +2945,18 @@ func (s *Service) buildPreviewItemCore(
 		if s.scraper != nil {
 			cands, warns = s.scraper.Search(ctx, snap, ref, sources)
 		}
-		ranked, best := PickCandidates(ref, cands)
+		minScore := effectiveMinMatchScore(settings, req)
+		ranked, best := PickCandidatesWithMinScore(ref, cands, minScore)
 		item.Candidates = ranked
 		item.Warnings = mergeWarnings(item.Warnings, warns)
 		if best == nil {
 			item.Status = model.LibraryItemNeedsReview
 			if len(ranked) == 0 {
 				item.Warnings = mergeWarnings(item.Warnings, []string{"未找到匹配候选，请人工确认"})
+			} else if ranked[0].Score < float64(minScore) {
+				item.Warnings = mergeWarnings(item.Warnings, []string{
+					fmt.Sprintf("最高匹配分 %.0f 分，低于默认匹配度阈值 %d 分，请人工确认", ranked[0].Score, minScore),
+				})
 			} else {
 				item.Warnings = mergeWarnings(item.Warnings, []string{"匹配置信度不足或存在多候选冲突，请人工选择"})
 			}
@@ -3564,6 +3592,9 @@ func validateSubmitRequest(req SubmitRequest) error {
 		}); err != nil {
 			return err
 		}
+	}
+	if req.MinMatchScore != 0 && (req.MinMatchScore < 50 || req.MinMatchScore > 100) {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "自动匹配分数阈值需在 50 到 100 之间")
 	}
 	return nil
 }

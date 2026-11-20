@@ -2730,3 +2730,170 @@ func TestLibraryF2ScanRevisionSyncAndRetryRecovery(t *testing.T) {
 		}
 	})
 }
+
+func TestPhase3MinMatchScoreAndSourceCatalog(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	t.Run("SourceCatalog populates Builtin Recommended and RecommendReason", func(t *testing.T) {
+		cat := SourceCatalog()
+		byID := make(map[string]model.MetadataSourceDTO, len(cat))
+		for _, src := range cat {
+			byID[src.ID] = src
+			if !src.Builtin {
+				t.Fatalf("expected built-in source %s to have Builtin=true", src.ID)
+			}
+			if strings.TrimSpace(src.RecommendReason) == "" {
+				t.Fatalf("expected non-empty RecommendReason for %s", src.ID)
+			}
+		}
+		for _, recID := range []string{"itunes", "musicbrainz", "lrclib"} {
+			if !byID[recID].Recommended {
+				t.Fatalf("expected %s to have Recommended=true", recID)
+			}
+		}
+		if byID["acoustid"].Recommended {
+			t.Fatalf("expected acoustid to have Recommended=false")
+		}
+	})
+
+	t.Run("RankCandidateWithMinScore and PickCandidatesWithMinScore soft vs hard conflicts", func(t *testing.T) {
+		ref := ScrapeReference{
+			Title:  "晴天",
+			Artist: "周杰伦",
+			Album:  "我的精选集",
+		}
+		// Candidate with matching title (45) + artist (30) = 75, soft conflict "专辑不同", no duration.
+		cand75 := ScrapeCandidate{
+			Source:   "itunes",
+			SourceID: "it-75",
+			Title:    "晴天",
+			Artist:   "周杰伦",
+			Album:    "叶惠美",
+		}
+
+		r85 := RankCandidateWithMinScore(ref, cand75, 85)
+		if r85.Score != 75 || r85.Confident || !slices.Contains(r85.Conflicts, "专辑不同") {
+			t.Fatalf("at minScore=85 expected score=75 Confident=false with soft conflict, got %+v", r85)
+		}
+		_, best85 := PickCandidatesWithMinScore(ref, []ScrapeCandidate{cand75}, 85)
+		if best85 != nil {
+			t.Fatalf("expected nil chosen at minScore=85 for 75-point candidate")
+		}
+
+		r75 := RankCandidateWithMinScore(ref, cand75, 75)
+		if r75.Score != 75 || !r75.Confident || !slices.Contains(r75.Conflicts, "专辑不同") {
+			t.Fatalf("at minScore=75 expected score=75 Confident=true while keeping soft conflict, got %+v", r75)
+		}
+		_, best75 := PickCandidatesWithMinScore(ref, []ScrapeCandidate{cand75}, 75)
+		if best75 == nil || best75.SourceID != "it-75" {
+			t.Fatalf("expected chosen candidate at minScore=75, got %+v", best75)
+		}
+
+		// Hard conflict ("歌曲版本不同") must never be confident even at minScore=50.
+		candLive := cand75
+		candLive.SourceID = "it-live"
+		candLive.Title = "晴天 (Live)"
+		rLive := RankCandidateWithMinScore(ref, candLive, 50)
+		if rLive.Confident || !slices.Contains(rLive.Conflicts, "歌曲版本不同") {
+			t.Fatalf("hard conflict must force Confident=false even at minScore=50, got %+v", rLive)
+		}
+
+		// Ambiguity safety valve: two confident candidates within <5 points and different albums -> chosen=nil.
+		cand75Alt := cand75
+		cand75Alt.SourceID = "it-75-alt"
+		cand75Alt.Album = "范特西精选"
+		_, ambigBest := PickCandidatesWithMinScore(ref, []ScrapeCandidate{cand75, cand75Alt}, 75)
+		if ambigBest != nil {
+			t.Fatalf("expected ambiguity safety valve to return nil chosen for 2 close confident albums, got %+v", ambigBest)
+		}
+	})
+
+	t.Run("Settings validation and Submit threshold warning and override", func(t *testing.T) {
+		mbSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ws/2/recording" {
+				// Returns exact title + artist (45+30=75), different album, no duration.
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"recordings": []map[string]any{
+						{
+							"id":    "rec-75",
+							"title": "夜曲",
+							"artist-credit": []map[string]any{
+								{"name": "周杰伦", "joinphrase": ""},
+							},
+							"releases": []map[string]any{
+								{"id": "rel-75", "title": "十一月的萧邦", "date": "2005-11-01"},
+							},
+						},
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer mbSrv.Close()
+
+		tagger := newMemTagger()
+		_, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{
+			MusicBrainzBaseURL: mbSrv.URL + "/ws/2",
+			CoverArtBaseURL:    mbSrv.URL + "/caa",
+			ITunesBaseURL:      mbSrv.URL + "/itunes",
+			MBLimitInterval:    time.Millisecond,
+		}, nil, nil)
+
+		// Default MinMatchScore is 85; 0 normalizes to 85; <50 or >100 fails validation.
+		def, err := svc.Settings(ctx)
+		if err != nil || def.MinMatchScore != 85 {
+			t.Fatalf("expected default MinMatchScore=85, got %d err=%v", def.MinMatchScore, err)
+		}
+		badLow := def
+		badLow.MinMatchScore = 40
+		if _, err := svc.SaveSettings(ctx, admin, badLow); err == nil {
+			t.Fatalf("expected MinMatchScore=40 rejected")
+		}
+		badHigh := def
+		badHigh.MinMatchScore = 105
+		if _, err := svc.SaveSettings(ctx, admin, badHigh); err == nil {
+			t.Fatalf("expected MinMatchScore=105 rejected")
+		}
+
+		p := filepath.Join(root.CanonicalPath, "nocturne.flac")
+		_, _ = files.WriteFileDurable(p, []byte("NOCTURNE"))
+		tagger.tags[p] = helper.AudioTagData{
+			Path:     p,
+			Tags:     map[string]string{"title": "夜曲", "artist": "周杰伦", "album": "未知收藏"},
+			Editable: true,
+		}
+
+		// With default MinMatchScore=85, 75-point candidate goes to needs_review with explicit score warning.
+		job85, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:   []string{p},
+			Action:  "scrape",
+			Sources: []string{"musicbrainz"},
+		})
+		if err != nil {
+			t.Fatalf("Submit at default 85: %v", err)
+		}
+		if job85.Status != string(model.LibraryJobNeedsReview) {
+			t.Fatalf("expected needs_review at minScore=85, got %s", job85.Status)
+		}
+		wantWarn := "最高匹配分 75 分，低于默认匹配度阈值 85 分，请人工确认"
+		if len(job85.Items) != 1 || !slices.Contains(job85.Items[0].Warnings, wantWarn) {
+			t.Fatalf("expected warning %q, got %+v", wantWarn, job85.Items)
+		}
+
+		// Lowering MinMatchScore to 75 allows automatic preview_ready match.
+		job75, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:         []string{p},
+			Action:        "scrape",
+			Sources:       []string{"musicbrainz"},
+			MinMatchScore: 75,
+		})
+		if err != nil {
+			t.Fatalf("Submit at MinMatchScore=75: %v", err)
+		}
+		if job75.Status != string(model.LibraryJobPreviewReady) {
+			t.Fatalf("expected preview_ready at MinMatchScore=75, got %s (items=%+v)", job75.Status, job75.Items)
+		}
+	})
+}

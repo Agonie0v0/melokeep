@@ -56,6 +56,10 @@ func (s *Server) buildLibraryConfigDTO(ctx context.Context, settings library.Set
 		tools["ffprobe"] = s.deps.Media.Available("ffprobe")
 		tools["fpcalc"] = s.deps.Media.Available("fpcalc")
 	}
+	minMatchScore := settings.MinMatchScore
+	if minMatchScore < 50 || minMatchScore > 100 {
+		minMatchScore = library.DefaultMinMatchScore
+	}
 	return model.LibraryConfigDTO{
 		AutoScrape:         settings.AutoScrape,
 		AutoOrganize:       settings.AutoOrganize,
@@ -69,6 +73,7 @@ func (s *Server) buildLibraryConfigDTO(ctx context.Context, settings library.Set
 		CoverMode:          settings.CoverMode,
 		Fields:             settings.Fields,
 		BackupDays:         settings.BackupDays,
+		MinMatchScore:      minMatchScore,
 		Navidrome:          navCfg,
 		MetadataSources:    s.deps.Library.SourceCatalog(),
 		Chinese:            settings.Chinese,

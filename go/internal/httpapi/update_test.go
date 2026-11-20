@@ -147,3 +147,101 @@ func TestSystemUpdateReleaseModeAndRateLimit(t *testing.T) {
 		t.Fatalf("expected error field on rate limit, got %+v", errDTO)
 	}
 }
+
+func TestSystemUpdateAssetsAndSelfUpdateEndpoints(t *testing.T) {
+	selfID := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	dockerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/_ping":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		case r.Method == http.MethodGet && r.URL.Path == "/containers/"+selfID+"/json":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":     selfID,
+				"Name":   "/melokeep",
+				"Image":  "sha256:same-sha",
+				"Config": map[string]any{"Image": "ghcr.io/agonie0v0/melokeep:latest"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/images/create":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"Pull complete","id":"l1"}` + "\n"))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/images/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "sha256:same-sha"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer dockerSrv.Close()
+
+	t.Setenv("MELOKEEP_DOCKER_SOCKET", dockerSrv.URL)
+	t.Setenv("MELOKEEP_CONTAINER_ID", selfID)
+
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/Agonie0v0/melokeep/releases/latest" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tag_name":     "v1.3.0",
+				"name":         "v1.3.0",
+				"body":         "Release with APK/IPA assets",
+				"published_at": "2026-11-20T12:00:00Z",
+				"html_url":     "https://github.com/Agonie0v0/melokeep/releases/tag/v1.3.0",
+				"assets": []map[string]any{
+					{
+						"name":                 "MeloKeep-android-release.apk",
+						"browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v1.3.0/MeloKeep-android-release.apk",
+						"size":                 15857935,
+						"content_type":         "application/vnd.android.package-archive",
+					},
+					{
+						"name":                 "MeloKeep-ios.ipa",
+						"browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v1.3.0/MeloKeep-ios.ipa",
+						"size":                 24112233,
+						"content_type":         "application/octet-stream",
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer gh.Close()
+
+	srv, _, _ := newTestServer(t, func(d *Dependencies, _ string) {
+		d.Transport = nil
+		d.GitHubAPIBase = gh.URL
+		d.BuildInfo = model.BuildInfoDTO{Version: "v1.2.0", InContainer: true}
+	})
+
+	// 1. GET /api/system/update includes latest.assets and self_update.
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/system/update", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/system/update status=%d %s", rec.Code, rec.Body.String())
+	}
+	var sysUpd model.SystemUpdateDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &sysUpd); err != nil {
+		t.Fatalf("decode SystemUpdateDTO: %v", err)
+	}
+	if sysUpd.Latest == nil || len(sysUpd.Latest.Assets) != 2 || sysUpd.Latest.Assets[0].Name != "MeloKeep-android-release.apk" {
+		t.Fatalf("expected 2 release assets parsed, got %+v", sysUpd.Latest)
+	}
+	if sysUpd.SelfUpdate == nil || !sysUpd.SelfUpdate.Supported || sysUpd.SelfUpdate.Mode != "docker_socket" {
+		t.Fatalf("expected supported docker_socket self_update, got %+v", sysUpd.SelfUpdate)
+	}
+
+	// 2. GET /api/system/update/status returns SelfUpdateStatusDTO.
+	recSt := httptest.NewRecorder()
+	srv.ServeHTTP(recSt, httptest.NewRequest(http.MethodGet, "/api/system/update/status", nil))
+	if recSt.Code != http.StatusOK {
+		t.Fatalf("GET /api/system/update/status status=%d", recSt.Code)
+	}
+
+	// 3. POST /api/system/update/apply returns 202 Accepted.
+	recApply := httptest.NewRecorder()
+	reqApply := httptest.NewRequest(http.MethodPost, "/api/system/update/apply", nil)
+	reqApply.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recApply, reqApply)
+	if recApply.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted from POST /api/system/update/apply, got %d %s", recApply.Code, recApply.Body.String())
+	}
+}

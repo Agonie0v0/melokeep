@@ -82,7 +82,21 @@ def main():
                     repair_owner(item, uid, gid)
             repair_owner(private, uid, gid)
             private.chmod(0o700)
-            os.setgroups([])
+            groups = []
+            allow_self_update = os.environ.get('MELOKEEP_ALLOW_DOCKER_SELF_UPDATE', '1').strip().lower()
+            if allow_self_update not in ('0', 'false', 'no', 'off'):
+                sock_path = Path(os.environ.get('MELOKEEP_DOCKER_SOCKET', '/var/run/docker.sock'))
+                try:
+                    if sock_path.exists():
+                        sock_stat = sock_path.stat()
+                        if stat.S_ISSOCK(sock_stat.st_mode):
+                            groups = [sock_stat.st_gid]
+                except OSError:
+                    groups = []
+            try:
+                os.setgroups(groups)
+            except OSError:
+                os.setgroups([])
             os.setgid(gid)
             os.setuid(uid)
         if private.is_symlink():
