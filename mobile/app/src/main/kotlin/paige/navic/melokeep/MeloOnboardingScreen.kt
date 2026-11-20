@@ -77,6 +77,7 @@ import org.koin.compose.koinInject
 import paige.navic.di.LocalNavStack
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PermissionManager
+import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.LoginManager
 import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SessionState
@@ -108,6 +109,7 @@ fun MeloOnboardingScreen(
 	val loginManager = koinInject<LoginManager>()
 	val syncManager = koinInject<SyncManager>()
 	val permissionManager = koinInject<PermissionManager>()
+	val preferenceManager = koinInject<PreferenceManager>()
 
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
 	val settingsState by meloSettingsController.state.collectAsStateWithLifecycle()
@@ -116,6 +118,7 @@ fun MeloOnboardingScreen(
 
 	val canNavigateBack = backStack.size > 1
 
+	var meloDisplayName by rememberSaveable { mutableStateOf(meloConfig.displayName) }
 	var meloUrl by rememberSaveable { mutableStateOf(meloConfig.baseUrl) }
 	var meloUser by rememberSaveable { mutableStateOf(meloConfig.username) }
 	var meloPass by rememberSaveable { mutableStateOf("") }
@@ -131,6 +134,7 @@ fun MeloOnboardingScreen(
 	var navidromeExpanded by rememberSaveable {
 		mutableStateOf(sessionState !is SessionState.Unauthenticated)
 	}
+	var navidromeServerName by rememberSaveable { mutableStateOf(preferenceManager.navidromeServerName) }
 	var navidromeUrl by rememberSaveable { mutableStateOf(sessionManager.instanceUrl) }
 	var navidromeUser by rememberSaveable { mutableStateOf(sessionManager.username) }
 	var navidromePass by rememberSaveable { mutableStateOf("") }
@@ -174,6 +178,8 @@ fun MeloOnboardingScreen(
 		navidromeLoginState is LoginUiState.Syncing
 
 	val finishOnboarding: () -> Unit = {
+		meloSettingsController.updateDisplayName(meloDisplayName.trim())
+		preferenceManager.navidromeServerName = navidromeServerName.trim()
 		meloSettingsStore.setOnboardingDismissed(true)
 		onFinished()
 	}
@@ -181,6 +187,8 @@ fun MeloOnboardingScreen(
 	val verifyAndFinishOnboarding: () -> Unit = {
 		focusManager.clearFocus()
 		enterErrorMessage = null
+		meloSettingsController.updateDisplayName(meloDisplayName.trim())
+		preferenceManager.navidromeServerName = navidromeServerName.trim()
 
 		val trimmedMeloUrl = meloUrl.trim()
 		val normalizedInputMelo = MeloSettingsStore.normalizeBaseUrl(trimmedMeloUrl)
@@ -226,7 +234,8 @@ fun MeloOnboardingScreen(
 								baseUrl = trimmedMeloUrl,
 								username = meloUser.trim(),
 								password = meloPass,
-								deviceName = deviceName
+								deviceName = deviceName,
+								displayName = meloDisplayName.trim()
 							)
 							meloSettingsController.loadConfig()
 							meloConnectedOk = true
@@ -335,6 +344,23 @@ fun MeloOnboardingScreen(
 									overflow = TextOverflow.Ellipsis
 								)
 							}
+
+							OutlinedTextField(
+								modifier = Modifier.fillMaxWidth(),
+								value = meloDisplayName,
+								onValueChange = {
+									meloDisplayName = it
+									meloSettingsController.updateDisplayName(it.trim())
+								},
+								singleLine = true,
+								shape = RoundedCornerShape(12.dp),
+								label = { Text("服务名称（可选，如 家里 NAS）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+								placeholder = { Text("默认显示 MeloKeep", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+								keyboardOptions = KeyboardOptions(
+									autoCorrectEnabled = false,
+									imeAction = ImeAction.Next
+								)
+							)
 
 							OutlinedTextField(
 								modifier = Modifier.fillMaxWidth(),
@@ -464,7 +490,8 @@ fun MeloOnboardingScreen(
 													baseUrl = meloUrl,
 													username = meloUser,
 													password = meloPass,
-													deviceName = deviceName
+													deviceName = deviceName,
+													displayName = meloDisplayName.trim()
 												)
 											}
 										}
@@ -545,7 +572,8 @@ fun MeloOnboardingScreen(
 											baseUrl = meloUrl,
 											username = meloUser,
 											password = meloPass,
-											deviceName = deviceName
+											deviceName = deviceName,
+											displayName = meloDisplayName.trim()
 										)
 									}
 								) {
@@ -661,6 +689,24 @@ fun MeloOnboardingScreen(
 
 									OutlinedTextField(
 										modifier = Modifier.fillMaxWidth(),
+										value = navidromeServerName,
+										onValueChange = {
+											navidromeServerName = it
+											preferenceManager.navidromeServerName = it.trim()
+										},
+										singleLine = true,
+										enabled = !isNavidromeBusy,
+										shape = RoundedCornerShape(12.dp),
+										label = { Text("服务名称（可选）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+										placeholder = { Text("默认显示 Navidrome", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+										keyboardOptions = KeyboardOptions(
+											autoCorrectEnabled = false,
+											imeAction = ImeAction.Next
+										)
+									)
+
+									OutlinedTextField(
+										modifier = Modifier.fillMaxWidth(),
 										value = navidromeUrl,
 										onValueChange = {
 											navidromeUrl = it
@@ -773,6 +819,7 @@ fun MeloOnboardingScreen(
 										onClick = {
 											focusManager.clearFocus()
 											navidromeLocalError = null
+											preferenceManager.navidromeServerName = navidromeServerName.trim()
 											scope.launch {
 												loginManager.instanceState.edit {
 													replace(0, length, navidromeUrl.trim())

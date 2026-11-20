@@ -6,6 +6,7 @@
 
 package paige.navic.melokeep
 
+import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseOut
@@ -13,6 +14,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,20 +22,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -65,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.ImageLoader
+import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -97,6 +107,8 @@ import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Add
 import paige.navic.ui.icons.outlined.ChevronForward
 import paige.navic.ui.icons.outlined.Close
+import paige.navic.ui.icons.outlined.Delete
+import paige.navic.ui.icons.outlined.Logout
 import paige.navic.ui.icons.outlined.Refresh
 import paige.navic.ui.screen.lyrics.component.LyricsStyleCustomizationControls
 import paige.navic.ui.theme.positive
@@ -125,6 +137,320 @@ internal fun rememberMeloVersionName(): String {
 }
 
 // =============================================================================
+// 0. MeloKeep 服务连接与设备管理面板
+// =============================================================================
+
+@Composable
+internal fun SettingsMeloKeepConnectionPanel(
+	modifier: Modifier = Modifier,
+	nestedInSheet: Boolean = false
+) {
+	val controller = koinInject<MeloSettingsController>()
+	val focusManager = LocalFocusManager.current
+	val state by controller.state.collectAsStateWithLifecycle()
+	val serverConfig = state.serverConfig
+
+	var displayNameInput by rememberSaveable(serverConfig.displayName) {
+		mutableStateOf(serverConfig.displayName)
+	}
+	var baseUrlInput by rememberSaveable(serverConfig.baseUrl) {
+		mutableStateOf(serverConfig.baseUrl)
+	}
+	var usernameInput by rememberSaveable(serverConfig.username) {
+		mutableStateOf(serverConfig.username)
+	}
+	var passwordInput by rememberSaveable { mutableStateOf("") }
+	var passwordVisible by rememberSaveable { mutableStateOf(false) }
+
+	val deviceName = remember {
+		listOf(Build.MANUFACTURER, Build.MODEL)
+			.map { it.trim() }
+			.filter { it.isNotEmpty() }
+			.distinct()
+			.joinToString(" ")
+			.ifBlank { "MeloKeep Android" }
+	}
+
+	LaunchedEffect(serverConfig.isAuthenticated) {
+		if (serverConfig.isAuthenticated) {
+			controller.loadConfig()
+		}
+	}
+
+	MeloFeedbackObserver(
+		errorMessage = state.errorMessage,
+		noticeMessage = state.noticeMessage,
+		onClearError = controller::clearError,
+		onClearNotice = controller::clearNotice
+	)
+
+	LazyColumn(
+		modifier = modifier.background(MaterialTheme.colorScheme.background),
+		contentPadding = PaddingValues(
+			start = 16.dp,
+			end = 16.dp,
+			top = 8.dp,
+			bottom = if (nestedInSheet) 32.dp else 28.dp
+		),
+		verticalArrangement = Arrangement.spacedBy(18.dp)
+	) {
+		item(key = "melokeep-connection") {
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(
+					title = "服务与凭据",
+					trailing = {
+						Text(
+							text = if (serverConfig.isAuthenticated) "已连接" else "未连接",
+							style = MaterialTheme.typography.labelSmall,
+							color = if (serverConfig.isAuthenticated) {
+								MaterialTheme.colorScheme.positive
+							} else {
+								MaterialTheme.colorScheme.onSurfaceVariant
+							}
+						)
+					}
+				)
+				MeloGroupedCard {
+					Column(
+						modifier = Modifier.padding(16.dp),
+						verticalArrangement = Arrangement.spacedBy(10.dp)
+					) {
+						OutlinedTextField(
+							value = displayNameInput,
+							onValueChange = {
+								displayNameInput = it
+								controller.updateDisplayName(it.trim())
+							},
+							singleLine = true,
+							modifier = Modifier.fillMaxWidth(),
+							label = { Text("服务名称（可选，如 家里 NAS）") },
+							placeholder = { Text("默认显示 MeloKeep") },
+							keyboardOptions = KeyboardOptions(
+								autoCorrectEnabled = false,
+								imeAction = ImeAction.Next
+							),
+							shape = RoundedCornerShape(12.dp)
+						)
+
+						OutlinedTextField(
+							value = baseUrlInput,
+							onValueChange = { baseUrlInput = it },
+							singleLine = true,
+							modifier = Modifier.fillMaxWidth(),
+							label = { Text("服务器地址") },
+							placeholder = { Text("http://192.168.1.10:8765") },
+							keyboardOptions = KeyboardOptions(
+								autoCorrectEnabled = false,
+								keyboardType = KeyboardType.Uri,
+								imeAction = ImeAction.Next
+							),
+							shape = RoundedCornerShape(12.dp)
+						)
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(10.dp)
+						) {
+							OutlinedTextField(
+								value = usernameInput,
+								onValueChange = { usernameInput = it },
+								singleLine = true,
+								modifier = Modifier.weight(1f),
+								label = { Text("用户名（可选）") },
+								keyboardOptions = KeyboardOptions(
+									autoCorrectEnabled = false,
+									imeAction = ImeAction.Next
+								),
+								shape = RoundedCornerShape(12.dp)
+							)
+							OutlinedTextField(
+								value = passwordInput,
+								onValueChange = { passwordInput = it },
+								singleLine = true,
+								modifier = Modifier.weight(1f),
+								label = { Text("密码") },
+								visualTransformation = if (passwordVisible) {
+									VisualTransformation.None
+								} else {
+									PasswordVisualTransformation()
+								},
+								trailingIcon = {
+									IconButton(onClick = { passwordVisible = !passwordVisible }) {
+										Icon(
+											imageVector = if (passwordVisible) MeloIcons.VisibilityOff else MeloIcons.Visibility,
+											contentDescription = "切换密码可见性"
+										)
+									}
+								},
+								keyboardOptions = KeyboardOptions(
+									autoCorrectEnabled = false,
+									keyboardType = KeyboardType.Password,
+									imeAction = ImeAction.Done
+								),
+								keyboardActions = KeyboardActions(
+									onDone = {
+										focusManager.clearFocus()
+										if (baseUrlInput.isNotBlank()) {
+											controller.testAndLogin(
+												baseUrl = baseUrlInput,
+												username = usernameInput,
+												password = passwordInput,
+												deviceName = deviceName,
+												displayName = displayNameInput.trim()
+											)
+										}
+									}
+								),
+								shape = RoundedCornerShape(12.dp)
+							)
+						}
+
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(top = 2.dp),
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							Button(
+								modifier = Modifier
+									.weight(1f)
+									.height(44.dp),
+								shape = RoundedCornerShape(12.dp),
+								enabled = !state.testingConnection && baseUrlInput.isNotBlank(),
+								onClick = {
+									focusManager.clearFocus()
+									controller.testAndLogin(
+										baseUrl = baseUrlInput,
+										username = usernameInput,
+										password = passwordInput,
+										deviceName = deviceName,
+										displayName = displayNameInput.trim()
+									)
+								}
+							) {
+								if (state.testingConnection) {
+									CircularProgressIndicator(
+										modifier = Modifier.size(16.dp),
+										strokeWidth = 2.dp,
+										color = MaterialTheme.colorScheme.onPrimary
+									)
+									Spacer(Modifier.width(8.dp))
+									Text("连接中…")
+								} else {
+									Text(if (serverConfig.isAuthenticated) "保存并重新认证" else "连接并登录")
+								}
+							}
+
+							if (serverConfig.isAuthenticated) {
+								OutlinedButton(
+									onClick = {
+										passwordInput = ""
+										controller.logout()
+									},
+									modifier = Modifier.height(44.dp),
+									shape = RoundedCornerShape(12.dp),
+									border = BorderStroke(
+										MeloHairlineWidth,
+										MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+									),
+									colors = ButtonDefaults.outlinedButtonColors(
+										contentColor = MaterialTheme.colorScheme.error
+									)
+								) {
+									Icon(Icons.Outlined.Logout, null, modifier = Modifier.size(16.dp))
+									Spacer(Modifier.width(6.dp))
+									Text("退出")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (serverConfig.isAuthenticated && state.devices.isNotEmpty()) {
+			item(key = "melokeep-devices") {
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					MeloSectionLabel(
+						title = "已授权设备",
+						trailing = {
+							Text(
+								text = "${state.devices.size} 台",
+								style = MaterialTheme.typography.labelSmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant
+							)
+						}
+					)
+					MeloGroupedCard {
+						state.devices.forEachIndexed { idx, device ->
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 16.dp, vertical = 12.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp)
+							) {
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp)
+								) {
+									Text(
+										text = if (device.current) {
+											"${device.deviceName.ifBlank { "未知设备" }} · 当前"
+										} else {
+											device.deviceName.ifBlank { "未知设备" }
+										},
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis
+									)
+									val created = formatEpochTimestamp(device.createdAt)
+									Text(
+										text = listOfNotNull(
+											"ID ${device.id}",
+											created.takeIf { it.isNotBlank() }
+										).joinToString(" · "),
+										style = MaterialTheme.typography.bodySmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis
+									)
+								}
+								if (!device.current) {
+									FilledTonalButton(
+										onClick = { controller.revokeDevice(device.id) },
+										shape = CircleShape,
+										contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+										modifier = Modifier.height(30.dp),
+										colors = ButtonDefaults.filledTonalButtonColors(
+											containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+											contentColor = MaterialTheme.colorScheme.onErrorContainer
+										)
+									) {
+										Icon(
+											imageVector = Icons.Outlined.Delete,
+											contentDescription = null,
+											modifier = Modifier.size(14.dp)
+										)
+										Spacer(Modifier.width(4.dp))
+										Text("吊销", style = MaterialTheme.typography.labelSmall)
+									}
+								}
+							}
+							if (idx < state.devices.lastIndex) {
+								MeloHairlineDivider(startIndent = 16.dp)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// =============================================================================
 // 1. Navidrome 连接面板
 // =============================================================================
 
@@ -146,6 +472,9 @@ internal fun SettingsNavidromeConnectionPanel(
 	val isConnected = sessionState !is SessionState.Unauthenticated
 	val isBusy = loginState is LoginUiState.Loading || loginState is LoginUiState.Syncing
 
+	var serverNameInput by rememberSaveable(preferenceManager.navidromeServerName) {
+		mutableStateOf(preferenceManager.navidromeServerName)
+	}
 	var serverUrlInput by rememberSaveable(sessionManager.instanceUrl) {
 		mutableStateOf(sessionManager.instanceUrl)
 	}
@@ -227,6 +556,31 @@ internal fun SettingsNavidromeConnectionPanel(
 									.padding(horizontal = 8.dp, vertical = 4.dp)
 							)
 						}
+					}
+
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp)
+							.padding(bottom = 12.dp)
+					) {
+						OutlinedTextField(
+							value = serverNameInput,
+							onValueChange = {
+								serverNameInput = it
+								preferenceManager.navidromeServerName = it.trim()
+							},
+							enabled = !isBusy,
+							label = { Text("服务名称（可选）") },
+							placeholder = { Text("默认显示 Navidrome") },
+							singleLine = true,
+							modifier = Modifier.fillMaxWidth(),
+							keyboardOptions = KeyboardOptions(
+								autoCorrectEnabled = false,
+								imeAction = ImeAction.Next
+							),
+							shape = RoundedCornerShape(12.dp)
+						)
 					}
 
 					if (isConnected) {
@@ -371,6 +725,7 @@ internal fun SettingsNavidromeConnectionPanel(
 									}
 									focusManager.clearFocus()
 									localLoginError = null
+									preferenceManager.navidromeServerName = serverNameInput.trim()
 									scope.launch {
 										val normalizedUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
 											url

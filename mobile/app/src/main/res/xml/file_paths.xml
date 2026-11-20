@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
 	<cache-path
-		name="shared_images"
-		path="shared_images/" />
+		name="shared_covers"
+		path="shared_covers/" />
+	<cache-path
+		name="apk_updates"
+		path="apk_updates/" />
 </paths>

@@ -1,16 +1,21 @@
 /*
  * Navic / MeloKeep, a Subsonic music streaming app for Android
- * Copyright (c) 2026 paige
+ * Copyright (c) 2026 paige & MeloKeep Swarm
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
 package paige.navic.ui.component.sheet
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,42 +24,56 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
+import io.github.agonie0v0.melokeep.shared.MeloSemVer
+import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
-import io.ktor.client.request.header
 import io.ktor.serialization.kotlinx.json.json
+import java.io.File
+import java.io.FileOutputStream
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.koin.compose.viewmodel.koinViewModel
 import paige.navic.R
 import paige.navic.domain.manager.runtime.PreferenceManager
@@ -62,19 +81,13 @@ import paige.navic.domain.model.settings.UpdateCheckFrequency
 import paige.navic.ui.component.common.Markdown
 import paige.navic.ui.component.dialog.LinkConfirmationDialog
 import paige.navic.ui.theme.defaultFont
+import paige.navic.ui.theme.tabularNums
 import paige.navic.util.Logger
+import paige.navic.util.toFileSize
 
-private const val MELOKEEP_LATEST_RELEASE_URL =
-	"https://api.github.com/repos/Agonie0v0/melokeep/releases/latest"
 private const val ONE_DAY_MS = 24L * 60L * 60L * 1000L
 private const val ONE_WEEK_MS = 7L * ONE_DAY_MS
-
-@Serializable
-data class GitHubRelease(
-	@SerialName("tag_name") val tag: String,
-	@SerialName("html_url") val url: String,
-	@SerialName("body") val body: String
-)
+private const val FALLBACK_RELEASES_HTML_URL = "https://github.com/Agonie0v0/melokeep/releases"
 
 sealed interface UpdateCheckFeedback {
 	data object Idle : UpdateCheckFeedback
@@ -84,114 +97,59 @@ sealed interface UpdateCheckFeedback {
 	data class Error(val message: String) : UpdateCheckFeedback
 }
 
-private data class ParsedSemVer(
-	val core: List<Int>,
-	val preRelease: List<String>
-)
-
-private fun parseSemVer(raw: String): ParsedSemVer? {
-	val trimmed = raw.trim().removePrefix("v").removePrefix("V").substringBefore('+')
-	if (trimmed.isEmpty()) return null
-	val dashIdx = trimmed.indexOf('-')
-	val coreStr = if (dashIdx >= 0) trimmed.substring(0, dashIdx) else trimmed
-	val preStr = if (dashIdx >= 0) trimmed.substring(dashIdx + 1) else ""
-	val coreSegments = coreStr.split('.').map { seg ->
-		seg.toIntOrNull() ?: seg.takeWhile { it.isDigit() }.toIntOrNull() ?: return null
-	}
-	if (coreSegments.isEmpty()) return null
-	val preSegments = if (preStr.isBlank()) {
-		emptyList()
-	} else {
-		preStr.split('.').filter { it.isNotBlank() }
-	}
-	return ParsedSemVer(core = coreSegments, preRelease = preSegments)
+sealed interface ApkUpdateInstallState {
+	data object Idle : ApkUpdateInstallState
+	data class Downloading(
+		val downloadedBytes: Long,
+		val totalBytes: Long,
+		val progress: Float
+	) : ApkUpdateInstallState
+	data class ReadyToInstall(
+		val apkFile: File,
+		val tag: String
+	) : ApkUpdateInstallState
+	data class NeedInstallPermission(
+		val apkFile: File,
+		val tag: String
+	) : ApkUpdateInstallState
+	data class Error(val message: String) : ApkUpdateInstallState
 }
 
-private fun tokenizeAlphaNum(value: String): List<String> {
-	val result = mutableListOf<String>()
-	var idx = 0
-	while (idx < value.length) {
-		val isDigit = value[idx].isDigit()
-		val start = idx
-		while (idx < value.length && value[idx].isDigit() == isDigit) {
-			idx++
-		}
-		result.add(value.substring(start, idx))
-	}
-	return result
-}
-
-private fun comparePreReleaseIdentifiers(a: String, b: String): Int {
-	val aInt = a.toIntOrNull()
-	val bInt = b.toIntOrNull()
-	if (aInt != null && bInt != null) return aInt.compareTo(bInt)
-	if (aInt != null) return -1 // numeric < alphanumeric per SemVer 2.0.0
-	if (bInt != null) return 1
-
-	val tokensA = tokenizeAlphaNum(a)
-	val tokensB = tokenizeAlphaNum(b)
-	val count = maxOf(tokensA.size, tokensB.size)
-	for (i in 0 until count) {
-		val tA = tokensA.getOrNull(i) ?: return -1
-		val tB = tokensB.getOrNull(i) ?: return 1
-		val nA = tA.toIntOrNull()
-		val nB = tB.toIntOrNull()
-		val cmp = if (nA != null && nB != null) {
-			nA.compareTo(nB)
-		} else {
-			tA.compareTo(tB, ignoreCase = true)
-		}
-		if (cmp != 0) return cmp
-	}
-	return 0
-}
-
-internal fun compareSemVer(remoteTag: String, currentVersion: String): Int {
-	val remote = parseSemVer(remoteTag) ?: return 0
-	val local = parseSemVer(currentVersion) ?: return 0
-	val maxLen = maxOf(remote.core.size, local.core.size)
-	for (i in 0 until maxLen) {
-		val r = remote.core.getOrElse(i) { 0 }
-		val l = local.core.getOrElse(i) { 0 }
-		if (r != l) return r.compareTo(l)
-	}
-	// 相同主次修订号时，正式版 > 预发布版
-	if (remote.preRelease.isEmpty() && local.preRelease.isEmpty()) return 0
-	if (remote.preRelease.isEmpty()) return 1
-	if (local.preRelease.isEmpty()) return -1
-
-	val maxPre = maxOf(remote.preRelease.size, local.preRelease.size)
-	for (i in 0 until maxPre) {
-		val rPre = remote.preRelease.getOrNull(i) ?: return -1
-		val lPre = local.preRelease.getOrNull(i) ?: return 1
-		val cmp = comparePreReleaseIdentifiers(rPre, lPre)
-		if (cmp != 0) return cmp
-	}
-	return 0
-}
+internal fun compareSemVer(remoteTag: String, currentVersion: String): Int =
+	MeloSemVer.compare(remoteTag, currentVersion)
 
 class ChangelogViewModel(
-	context: Context,
+	private val appContext: Context,
 	private val preferenceManager: PreferenceManager
 ) : ViewModel() {
 	private val appVersionName: String = runCatching {
-		context.packageManager
-			.getPackageInfo(context.packageName, 0)
+		appContext.packageManager
+			.getPackageInfo(appContext.packageName, 0)
 			.versionName
 			?.takeIf { it.isNotBlank() }
 	}.getOrNull() ?: "0.0.0"
 
-	val release: StateFlow<GitHubRelease?>
-		field = MutableStateFlow(null)
+	val release: StateFlow<MeloGitHubRelease?>
+		field = MutableStateFlow<MeloGitHubRelease?>(null)
 
 	val checkFeedback: StateFlow<UpdateCheckFeedback>
 		field = MutableStateFlow<UpdateCheckFeedback>(UpdateCheckFeedback.Idle)
+
+	val installState: StateFlow<ApkUpdateInstallState>
+		field = MutableStateFlow<ApkUpdateInstallState>(ApkUpdateInstallState.Idle)
+
+	private var downloadJob: Job? = null
 
 	private val updateClient = HttpClient {
 		install(ContentNegotiation) {
 			json(Json { ignoreUnknownKeys = true })
 		}
 	}
+
+	private val apkHttpClient = OkHttpClient.Builder()
+		.followRedirects(true)
+		.followSslRedirects(true)
+		.build()
 
 	init {
 		if (shouldAutoCheck(System.currentTimeMillis())) {
@@ -219,20 +177,25 @@ class ChangelogViewModel(
 				checkFeedback.value = UpdateCheckFeedback.Checking
 			}
 			try {
-				val fetched: GitHubRelease = updateClient
-					.get(MELOKEEP_LATEST_RELEASE_URL) {
-						header("Accept", "application/vnd.github+json")
-					}
-					.body()
+				val fetched = MeloAppUpdateChecker.fetchLatestRelease(updateClient)
 				preferenceManager.lastUpdateCheckTimeMs = System.currentTimeMillis()
-				val isNewer = compareSemVer(fetched.tag, currentVersion) > 0
+				val isNewer = MeloSemVer.isNewer(fetched.tagName, currentVersion)
 				if (isNewer) {
-					if (!manual && fetched.tag == preferenceManager.ignoredUpdateTag) {
+					if (!manual && fetched.tagName == preferenceManager.ignoredUpdateTag) {
 						release.value = null
 						return@launch
 					}
 					release.value = fetched
-					checkFeedback.value = UpdateCheckFeedback.UpdateAvailable(fetched.tag)
+					checkFeedback.value = UpdateCheckFeedback.UpdateAvailable(fetched.tagName)
+					val cachedFile = resolveCachedApkFile(fetched)
+					if (cachedFile != null) {
+						installState.value = ApkUpdateInstallState.ReadyToInstall(
+							apkFile = cachedFile,
+							tag = fetched.tagName
+						)
+					} else if (installState.value !is ApkUpdateInstallState.Downloading) {
+						installState.value = ApkUpdateInstallState.Idle
+					}
 				} else {
 					release.value = null
 					if (manual) {
@@ -252,16 +215,185 @@ class ChangelogViewModel(
 		}
 	}
 
+	private fun sanitizeTag(tag: String): String =
+		tag.trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "latest" }
+
+	private fun resolveCachedApkFile(targetRelease: MeloGitHubRelease): File? {
+		val asset = targetRelease.findAndroidApkAsset() ?: return null
+		val dir = File(appContext.cacheDir, "apk_updates")
+		val file = File(dir, "MeloKeep-${sanitizeTag(targetRelease.tagName)}.apk")
+		if (!file.exists() || file.length() <= 0L) return null
+		if (asset.size > 0L && file.length() != asset.size) return null
+		return file
+	}
+
+	fun startDownloadAndInstall(targetRelease: MeloGitHubRelease) {
+		val asset = targetRelease.findAndroidApkAsset()
+		if (asset == null || asset.downloadUrl.isBlank()) {
+			installState.value = ApkUpdateInstallState.Error("该版本暂无 APK 安装包，请前往 GitHub 页面下载")
+			return
+		}
+		val cached = resolveCachedApkFile(targetRelease)
+		if (cached != null) {
+			proceedWithInstall(cached, targetRelease.tagName)
+			return
+		}
+
+		downloadJob?.cancel()
+		downloadJob = viewModelScope.launch {
+			val safeTag = sanitizeTag(targetRelease.tagName)
+			val updatesDir = File(appContext.cacheDir, "apk_updates")
+			val partFile = File(updatesDir, "MeloKeep-$safeTag.apk.part")
+			val finalFile = File(updatesDir, "MeloKeep-$safeTag.apk")
+
+			installState.value = ApkUpdateInstallState.Downloading(
+				downloadedBytes = 0L,
+				totalBytes = asset.size,
+				progress = 0f
+			)
+
+			try {
+				withContext(Dispatchers.IO) {
+					if (!updatesDir.exists()) {
+						updatesDir.mkdirs()
+					}
+					if (partFile.exists()) {
+						partFile.delete()
+					}
+					val request = Request.Builder()
+						.url(asset.downloadUrl)
+						.header("Accept", "application/octet-stream")
+						.header("User-Agent", "MeloKeep-Android")
+						.build()
+
+					apkHttpClient.newCall(request).execute().use { response ->
+						if (!response.isSuccessful) {
+							throw IllegalStateException("下载失败 (HTTP ${response.code})")
+						}
+						val body = response.body ?: throw IllegalStateException("下载响应为空")
+						val contentLength = body.contentLength().takeIf { it > 0L } ?: asset.size
+						var downloaded = 0L
+						val buffer = ByteArray(32 * 1024)
+
+						body.byteStream().use { input ->
+							FileOutputStream(partFile).use { output ->
+								while (true) {
+									ensureActive()
+									val read = input.read(buffer)
+									if (read == -1) break
+									output.write(buffer, 0, read)
+									downloaded += read
+									val ratio = if (contentLength > 0L) {
+										(downloaded.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
+									} else {
+										0f
+									}
+									installState.value = ApkUpdateInstallState.Downloading(
+										downloadedBytes = downloaded,
+										totalBytes = contentLength,
+										progress = ratio
+									)
+								}
+								output.flush()
+							}
+						}
+					}
+
+					if (finalFile.exists()) {
+						finalFile.delete()
+					}
+					if (!partFile.renameTo(finalFile)) {
+						partFile.copyTo(finalFile, overwrite = true)
+						partFile.delete()
+					}
+				}
+				proceedWithInstall(finalFile, targetRelease.tagName)
+			} catch (e: CancellationException) {
+				withContext(Dispatchers.IO) {
+					runCatching { if (partFile.exists()) partFile.delete() }
+				}
+				installState.value = ApkUpdateInstallState.Idle
+				throw e
+			} catch (e: Exception) {
+				Logger.e("ChangelogViewModel", "Failed to download APK update", e)
+				withContext(Dispatchers.IO) {
+					runCatching { if (partFile.exists()) partFile.delete() }
+				}
+				installState.value = ApkUpdateInstallState.Error(
+					e.message?.takeIf { it.isNotBlank() } ?: "下载更新包失败，请重试或前往 GitHub 页面下载"
+				)
+			}
+		}
+	}
+
+	fun cancelDownload() {
+		downloadJob?.cancel()
+		downloadJob = null
+		installState.value = ApkUpdateInstallState.Idle
+	}
+
+	fun openInstallPermissionSettings() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+			runCatching {
+				val intent = Intent(
+					Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+					Uri.parse("package:${appContext.packageName}")
+				).apply {
+					addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+				}
+				appContext.startActivity(intent)
+			}.onFailure { e ->
+				Logger.e("ChangelogViewModel", "Unable to open unknown app sources settings", e)
+			}
+		}
+	}
+
+	fun proceedWithInstall(apkFile: File, tag: String) {
+		if (!apkFile.exists() || apkFile.length() <= 0L) {
+			installState.value = ApkUpdateInstallState.Error("安装包文件不存在或已损坏，请重新下载")
+			return
+		}
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+			!appContext.packageManager.canRequestPackageInstalls()
+		) {
+			installState.value = ApkUpdateInstallState.NeedInstallPermission(apkFile = apkFile, tag = tag)
+			openInstallPermissionSettings()
+			return
+		}
+
+		installState.value = ApkUpdateInstallState.ReadyToInstall(apkFile = apkFile, tag = tag)
+		try {
+			val apkUri = FileProvider.getUriForFile(
+				appContext,
+				"${appContext.packageName}.fileprovider",
+				apkFile
+			)
+			val installIntent = Intent(Intent.ACTION_VIEW).apply {
+				setDataAndType(apkUri, "application/vnd.android.package-archive")
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+			}
+			appContext.startActivity(installIntent)
+		} catch (e: Exception) {
+			Logger.e("ChangelogViewModel", "Failed to launch system package installer", e)
+			installState.value = ApkUpdateInstallState.Error(
+				"无法拉起系统安装器：${e.message ?: "未知错误"}"
+			)
+		}
+	}
+
 	fun skipVersion(tag: String) {
+		cancelDownload()
 		preferenceManager.ignoredUpdateTag = tag
 		release.value = null
 	}
 
 	fun clearRelease() {
+		cancelDownload()
 		release.value = null
 	}
 
 	override fun onCleared() {
+		downloadJob?.cancel()
 		updateClient.close()
 		super.onCleared()
 	}
@@ -277,11 +409,20 @@ fun ChangelogSheet() {
 		koinViewModel<ChangelogViewModel>()
 	}
 	val release by viewModel.release.collectAsStateWithLifecycle()
+	val installState by viewModel.installState.collectAsStateWithLifecycle()
 	var linkToOpen by rememberSaveable { mutableStateOf<String?>(null) }
 
 	release?.let { activeRelease ->
+		val apkAsset = remember(activeRelease) { activeRelease.findAndroidApkAsset() }
+		val isDownloading = installState is ApkUpdateInstallState.Downloading
+		val releaseHtmlUrl = activeRelease.htmlUrl.ifBlank { FALLBACK_RELEASES_HTML_URL }
+
 		ModalBottomSheet(
-			onDismissRequest = { viewModel.clearRelease() },
+			onDismissRequest = {
+				if (!isDownloading) {
+					viewModel.clearRelease()
+				}
+			},
 			sheetState = rememberBottomSheetState(
 				initialValue = SheetValue.Hidden,
 				enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
@@ -305,15 +446,15 @@ fun ChangelogSheet() {
 						fontFamily = defaultFont(round = 100f)
 					)
 					Text(
-						stringResource(R.string.info_update, activeRelease.tag),
+						text = stringResource(R.string.info_update, activeRelease.tagName),
 						style = MaterialTheme.typography.bodyMedium
 					)
 				}
 
 				Markdown(
-					text = activeRelease.body,
+					text = activeRelease.body.ifBlank { "包含体验优化与问题修复。" },
 					modifier = Modifier
-						.heightIn(max = 400.dp)
+						.heightIn(max = 360.dp)
 						.fillMaxWidth()
 						.clip(MaterialTheme.shapes.large)
 						.background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -323,37 +464,209 @@ fun ChangelogSheet() {
 
 				Spacer(Modifier.height(4.dp))
 
-				Button(
-					onClick = { linkToOpen = activeRelease.url },
-					modifier = Modifier.fillMaxWidth(),
-					shape = CircleShape
-				) {
-					Text(
-						text = "前往更新",
-						fontFamily = defaultFont(100)
-					)
+				when (val state = installState) {
+					is ApkUpdateInstallState.Downloading -> {
+						Surface(
+							shape = RoundedCornerShape(14.dp),
+							color = MaterialTheme.colorScheme.surfaceContainerHigh,
+							modifier = Modifier.fillMaxWidth()
+						) {
+							Column(
+								modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+								verticalArrangement = Arrangement.spacedBy(8.dp)
+							) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.SpaceBetween,
+									verticalAlignment = Alignment.CenterVertically
+								) {
+									Text(
+										text = "正在下载安装包…",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium
+									)
+									Text(
+										text = "${(state.progress * 100).toInt()}%",
+										style = MaterialTheme.typography.labelMedium.tabularNums(),
+										color = MaterialTheme.colorScheme.primary
+									)
+								}
+								if (state.totalBytes > 0L) {
+									LinearProgressIndicator(
+										progress = { state.progress.coerceIn(0f, 1f) },
+										modifier = Modifier
+											.fillMaxWidth()
+											.height(5.dp)
+											.clip(CircleShape)
+									)
+								} else {
+									LinearProgressIndicator(
+										modifier = Modifier
+											.fillMaxWidth()
+											.height(5.dp)
+											.clip(CircleShape)
+									)
+								}
+								Text(
+									text = if (state.totalBytes > 0L) {
+										"${state.downloadedBytes.toFileSize()} / ${state.totalBytes.toFileSize()}"
+									} else {
+										"已下载 ${state.downloadedBytes.toFileSize()}"
+									},
+									style = MaterialTheme.typography.labelSmall.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+							}
+						}
+
+						OutlinedButton(
+							onClick = { viewModel.cancelDownload() },
+							modifier = Modifier.fillMaxWidth(),
+							shape = CircleShape
+						) {
+							Text(
+								text = "取消下载",
+								fontFamily = defaultFont(100)
+							)
+						}
+					}
+
+					is ApkUpdateInstallState.NeedInstallPermission -> {
+						Surface(
+							shape = RoundedCornerShape(14.dp),
+							color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+							modifier = Modifier.fillMaxWidth()
+						) {
+							Text(
+								text = "更新包已下载完成！首次应用内更新请先开启「允许安装未知应用」权限，授权后返回点击下方按钮即可直接覆盖安装。",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSecondaryContainer,
+								modifier = Modifier.padding(12.dp)
+							)
+						}
+
+						Button(
+							onClick = { viewModel.proceedWithInstall(state.apkFile, state.tag) },
+							modifier = Modifier.fillMaxWidth(),
+							shape = CircleShape
+						) {
+							Text(
+								text = "已完成授权，立即安装",
+								fontFamily = defaultFont(100)
+							)
+						}
+
+						OutlinedButton(
+							onClick = { viewModel.openInstallPermissionSettings() },
+							modifier = Modifier.fillMaxWidth(),
+							shape = CircleShape
+						) {
+							Text(
+								text = "前往系统设置授权",
+								fontFamily = defaultFont(100)
+							)
+						}
+					}
+
+					is ApkUpdateInstallState.ReadyToInstall -> {
+						Button(
+							onClick = { viewModel.proceedWithInstall(state.apkFile, state.tag) },
+							modifier = Modifier.fillMaxWidth(),
+							shape = CircleShape
+						) {
+							Text(
+								text = "立即安装 (${state.apkFile.length().toFileSize()})",
+								fontFamily = defaultFont(100)
+							)
+						}
+
+						TextButton(
+							onClick = { linkToOpen = releaseHtmlUrl },
+							modifier = Modifier.fillMaxWidth(),
+							shape = CircleShape
+						) {
+							Text(
+								text = "前往 GitHub 页面",
+								fontFamily = defaultFont(100)
+							)
+						}
+					}
+
+					is ApkUpdateInstallState.Idle,
+					is ApkUpdateInstallState.Error -> {
+						if (state is ApkUpdateInstallState.Error) {
+							Text(
+								text = state.message,
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.error,
+								modifier = Modifier.padding(horizontal = 4.dp)
+							)
+						}
+
+						if (apkAsset != null) {
+							val sizeLabel = apkAsset.size.takeIf { it > 0L }?.let { " (${it.toFileSize()})" }.orEmpty()
+							Button(
+								onClick = { viewModel.startDownloadAndInstall(activeRelease) },
+								modifier = Modifier.fillMaxWidth(),
+								shape = CircleShape
+							) {
+								Text(
+									text = if (state is ApkUpdateInstallState.Error) {
+										"重试下载并更新$sizeLabel"
+									} else {
+										"立即更新$sizeLabel"
+									},
+									fontFamily = defaultFont(100)
+								)
+							}
+
+							TextButton(
+								onClick = { linkToOpen = releaseHtmlUrl },
+								modifier = Modifier.fillMaxWidth(),
+								shape = CircleShape
+							) {
+								Text(
+									text = "前往 GitHub 页面",
+									fontFamily = defaultFont(100)
+								)
+							}
+						} else {
+							Button(
+								onClick = { linkToOpen = releaseHtmlUrl },
+								modifier = Modifier.fillMaxWidth(),
+								shape = CircleShape
+							) {
+								Text(
+									text = "前往 GitHub 页面",
+									fontFamily = defaultFont(100)
+								)
+							}
+						}
+					}
 				}
 
-				OutlinedButton(
-					onClick = { viewModel.skipVersion(activeRelease.tag) },
-					modifier = Modifier.fillMaxWidth(),
-					shape = CircleShape
-				) {
-					Text(
-						text = "跳过此版本",
-						fontFamily = defaultFont(100)
-					)
-				}
+				if (!isDownloading) {
+					OutlinedButton(
+						onClick = { viewModel.skipVersion(activeRelease.tagName) },
+						modifier = Modifier.fillMaxWidth(),
+						shape = CircleShape
+					) {
+						Text(
+							text = "跳过此版本",
+							fontFamily = defaultFont(100)
+						)
+					}
 
-				TextButton(
-					onClick = { viewModel.clearRelease() },
-					modifier = Modifier.fillMaxWidth(),
-					shape = CircleShape
-				) {
-					Text(
-						text = "稍后提醒",
-						fontFamily = defaultFont(100)
-					)
+					TextButton(
+						onClick = { viewModel.clearRelease() },
+						modifier = Modifier.fillMaxWidth(),
+						shape = CircleShape
+					) {
+						Text(
+							text = "稍后提醒",
+							fontFamily = defaultFont(100)
+						)
+					}
 				}
 			}
 		}

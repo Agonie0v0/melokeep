@@ -911,42 +911,6 @@ private fun UnifiedLibraryTopHeader(
 					horizontalArrangement = Arrangement.spacedBy(6.dp)
 				) {
 					if (sourceMode == LibrarySourceMode.NAVIDROME) {
-						Surface(
-							onClick = onTriggerScan,
-							enabled = !scanningNavidrome,
-							shape = CircleShape,
-							color = MaterialTheme.colorScheme.surfaceContainer,
-							border = libraryHairlineBorder()
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.spacedBy(4.dp)
-							) {
-								if (scanningNavidrome) {
-									CircularProgressIndicator(
-										modifier = Modifier.size(12.dp),
-										strokeWidth = 1.8.dp,
-										color = MaterialTheme.colorScheme.primary
-									)
-								} else {
-									Text(
-										text = "↻",
-										style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-										color = MaterialTheme.colorScheme.primary
-									)
-								}
-								val countSuffix = scanTrackCount?.takeIf { it > 0L }?.let { " $it" }.orEmpty()
-								Text(
-									text = if (scanningNavidrome) "扫库中" else "扫库$countSuffix",
-									style = MaterialTheme.typography.labelMedium.tabularNums(),
-									color = MaterialTheme.colorScheme.onSurface,
-									maxLines = 1,
-									softWrap = false
-								)
-							}
-						}
-
 						if (isNavidromeLoggedIn) {
 							HeaderCircleButton(
 								icon = Icons.Outlined.Search,

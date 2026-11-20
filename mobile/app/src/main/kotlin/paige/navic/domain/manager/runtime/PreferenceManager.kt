@@ -206,4 +206,5 @@ class PreferenceManager(
 	var proxyUrl by preference("")
 	var dangerousSslNoopEnabled by preference(false)
 	var alternateServerAddresses by jsonPreference<List<String>>(emptyList())
+	var navidromeServerName by preference("")
 }

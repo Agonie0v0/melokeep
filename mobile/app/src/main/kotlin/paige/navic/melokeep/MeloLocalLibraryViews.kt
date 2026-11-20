@@ -298,72 +298,107 @@ internal fun LibraryLocalSection(
 
 	Box(modifier = Modifier.fillMaxSize()) {
 		when (subTab) {
-			LibraryLocalSubTab.OVERVIEW -> LocalOverviewContent(
-				allItems = allItems,
-				albums = albums,
-				artists = artists,
-				folderCount = folderCount,
-				localState = localState,
-				downloadsMap = downloadsMap,
-				currentPlayingSongId = currentPlayingSongId,
-				filesLoading = studioState.filesLoading,
-				onOpenRoute = onOpenRoute,
-				onSelectSubTab = onSelectSubTab,
-				onPlaySongs = { songs, idx -> player.playNow(songs, idx) },
-				onToggleFavorite = toggleFavorite,
-				onDownloadSong = downloadOne,
-				onCancelSong = cancelOne,
-				onDeleteOffline = deleteOne,
-				onRefresh = onRefreshFiles
-			)
+			LibraryLocalSubTab.OVERVIEW -> PullToRefreshBox(
+				modifier = Modifier.fillMaxSize(),
+				finished = !(studioState.filesLoading || localState.loading),
+				onRefresh = onRefreshFiles,
+				key = listOf(studioState.filesLoading, localState.loading, allItems.size, localState.playlists.size)
+			) {
+				LocalOverviewContent(
+					allItems = allItems,
+					albums = albums,
+					artists = artists,
+					folderCount = folderCount,
+					localState = localState,
+					downloadsMap = downloadsMap,
+					currentPlayingSongId = currentPlayingSongId,
+					filesLoading = studioState.filesLoading,
+					onOpenRoute = onOpenRoute,
+					onSelectSubTab = onSelectSubTab,
+					onPlaySongs = { songs, idx -> player.playNow(songs, idx) },
+					onToggleFavorite = toggleFavorite,
+					onDownloadSong = downloadOne,
+					onCancelSong = cancelOne,
+					onDeleteOffline = deleteOne,
+					onRefresh = onRefreshFiles
+				)
+			}
 
-			LibraryLocalSubTab.SONGS -> LocalTrackListView(
-				items = allItems,
-				downloadsMap = downloadsMap,
-				favoriteIds = localState.favoriteIds,
-				currentPlayingSongId = currentPlayingSongId,
-				hostNavBottom = hostNavBottom,
-				emptyLabel = if (studioState.fileQuery.isNotBlank()) {
-					"未找到匹配「${studioState.fileQuery}」的曲目"
-				} else {
-					"本地库暂无已索引曲目"
-				},
-				loading = studioState.filesLoading,
-				title = null,
-				showOfflineAll = false,
-				hasMore = hasMore,
-				onLoadMore = studioController::loadMoreLibraryFiles,
-				onToggleFavorite = toggleFavorite,
-				onDownloadSong = downloadOne,
-				onCancelSong = cancelOne,
-				onDeleteOffline = deleteOne,
-				onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist
-			)
+			LibraryLocalSubTab.SONGS -> PullToRefreshBox(
+				modifier = Modifier.fillMaxSize(),
+				finished = !studioState.filesLoading,
+				onRefresh = onRefreshFiles,
+				key = listOf(studioState.filesLoading, allItems.size)
+			) {
+				LocalTrackListView(
+					items = allItems,
+					downloadsMap = downloadsMap,
+					favoriteIds = localState.favoriteIds,
+					currentPlayingSongId = currentPlayingSongId,
+					hostNavBottom = hostNavBottom,
+					emptyLabel = if (studioState.fileQuery.isNotBlank()) {
+						"未找到匹配「${studioState.fileQuery}」的曲目"
+					} else {
+						"本地库暂无已索引曲目"
+					},
+					loading = studioState.filesLoading,
+					title = null,
+					showOfflineAll = false,
+					hasMore = hasMore,
+					onLoadMore = studioController::loadMoreLibraryFiles,
+					onToggleFavorite = toggleFavorite,
+					onDownloadSong = downloadOne,
+					onCancelSong = cancelOne,
+					onDeleteOffline = deleteOne,
+					onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist
+				)
+			}
 
-			LibraryLocalSubTab.ALBUMS -> LocalAlbumsContent(
-				albums = albums,
-				loading = studioState.filesLoading,
-				hasMore = hasMore,
-				onLoadMore = studioController::loadMoreLibraryFiles,
-				onOpenAlbum = { onOpenRoute(LibraryLocalDetailRoute.Album(it.name)) }
-			)
+			LibraryLocalSubTab.ALBUMS -> PullToRefreshBox(
+				modifier = Modifier.fillMaxSize(),
+				finished = !studioState.filesLoading,
+				onRefresh = onRefreshFiles,
+				key = listOf(studioState.filesLoading, albums.size)
+			) {
+				LocalAlbumsContent(
+					albums = albums,
+					loading = studioState.filesLoading,
+					hasMore = hasMore,
+					onLoadMore = studioController::loadMoreLibraryFiles,
+					onOpenAlbum = { onOpenRoute(LibraryLocalDetailRoute.Album(it.name)) }
+				)
+			}
 
-			LibraryLocalSubTab.ARTISTS -> LocalArtistsContent(
-				artists = artists,
-				loading = studioState.filesLoading,
-				hasMore = hasMore,
-				onLoadMore = studioController::loadMoreLibraryFiles,
-				onOpenArtist = { onOpenRoute(LibraryLocalDetailRoute.Artist(it.name)) }
-			)
+			LibraryLocalSubTab.ARTISTS -> PullToRefreshBox(
+				modifier = Modifier.fillMaxSize(),
+				finished = !studioState.filesLoading,
+				onRefresh = onRefreshFiles,
+				key = listOf(studioState.filesLoading, artists.size)
+			) {
+				LocalArtistsContent(
+					artists = artists,
+					loading = studioState.filesLoading,
+					hasMore = hasMore,
+					onLoadMore = studioController::loadMoreLibraryFiles,
+					onOpenArtist = { onOpenRoute(LibraryLocalDetailRoute.Artist(it.name)) }
+				)
+			}
 
-			LibraryLocalSubTab.PLAYLISTS -> LocalPlaylistsContent(
-				playlists = localState.playlists,
-				loading = localState.loading,
-				onCreate = { createPlaylistOpen = true },
-				onOpen = { onOpenRoute(LibraryLocalDetailRoute.Playlist(it.id)) },
-				onRename = { renameTarget = it },
-				onDelete = { deleteTarget = it }
-			)
+			LibraryLocalSubTab.PLAYLISTS -> PullToRefreshBox(
+				modifier = Modifier.fillMaxSize(),
+				finished = !localState.loading,
+				onRefresh = onRefreshFiles,
+				key = listOf(localState.loading, localState.playlists.size)
+			) {
+				LocalPlaylistsContent(
+					playlists = localState.playlists,
+					loading = localState.loading,
+					onCreate = { createPlaylistOpen = true },
+					onOpen = { onOpenRoute(LibraryLocalDetailRoute.Playlist(it.id)) },
+					onRename = { renameTarget = it },
+					onDelete = { deleteTarget = it }
+				)
+			}
 
 			LibraryLocalSubTab.FOLDERS -> LocalServerFilesSection(
 				studioState = studioState,
@@ -1423,70 +1458,86 @@ private fun LocalTrackRowContent(
 			qualityLabel
 		).joinToString(" · ").ifBlank { "未知歌手" }
 	}
+	val isDownloaded = download?.status == DownloadStatus.DOWNLOADED
+	val rowBgColor = when {
+		selecting && selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+		isPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+		else -> MaterialTheme.colorScheme.surfaceContainer
+	}
 
-	Row(
-		modifier = modifier
-			.fillMaxWidth()
-			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-			.padding(horizontal = 12.dp, vertical = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(11.dp)
+	MeloSwipeableSongRow(
+		song = song,
+		selectionMode = selecting,
+		modifier = modifier.fillMaxWidth()
 	) {
-		if (selecting) {
-			Checkbox(checked = selected, onCheckedChange = { onClick() })
-		}
-		CoverArt(
-			coverArtId = song.coverArtId,
-			modifier = Modifier.size(44.dp),
-			shape = RoundedCornerShape(9.dp)
-		)
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp)
-		) {
-			Text(
-				text = song.title,
-				style = MaterialTheme.typography.titleSmall.copy(
-					fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium
-				),
-				color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-			Text(
-				text = subtitleText,
-				style = MaterialTheme.typography.bodySmall,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-		}
 		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.background(MaterialTheme.colorScheme.surfaceContainer)
+				.background(rowBgColor)
+				.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+				.padding(horizontal = 12.dp, vertical = 10.dp),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(0.dp)
+			horizontalArrangement = Arrangement.spacedBy(11.dp)
 		) {
-			IconButton(onClick = onToggleFavorite, modifier = Modifier.size(32.dp)) {
-				Icon(
-					imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.Star,
-					contentDescription = if (isFavorite) "取消喜欢" else "加入我喜欢",
-					tint = if (isFavorite) MaterialTheme.colorScheme.meloGoldText else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-					modifier = Modifier.size(16.dp)
-				)
+			if (selecting) {
+				Checkbox(checked = selected, onCheckedChange = { onClick() })
 			}
-			OfflineSongStatusIcon(
-				status = download?.status,
-				onDownloadClick = onDownload,
-				onDeleteClick = onDeleteOffline,
-				onCancelDownloadingClick = onCancelDownload
+			CoverArt(
+				coverArtId = song.coverArtId,
+				modifier = Modifier.size(44.dp),
+				shape = RoundedCornerShape(9.dp)
 			)
-			if (showMore) {
-				IconButton(onClick = onMore, modifier = Modifier.size(32.dp)) {
-					Icon(
-						imageVector = Icons.Outlined.MoreVert,
-						contentDescription = "更多操作",
-						tint = MaterialTheme.colorScheme.onSurfaceVariant,
-						modifier = Modifier.size(18.dp)
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp)
+			) {
+				Text(
+					text = song.title,
+					style = MaterialTheme.typography.titleSmall.copy(
+						fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium
+					),
+					color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis
+				)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp)
+				) {
+					if (isDownloaded) {
+						MeloDownloadedTinyBadge()
+					}
+					Text(
+						text = subtitleText,
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis
 					)
+				}
+			}
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(0.dp)
+			) {
+				IconButton(onClick = onToggleFavorite, modifier = Modifier.size(32.dp)) {
+					Icon(
+						imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.Star,
+						contentDescription = if (isFavorite) "取消喜欢" else "加入我喜欢",
+						tint = if (isFavorite) MaterialTheme.colorScheme.meloGoldText else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+						modifier = Modifier.size(16.dp)
+					)
+				}
+				if (showMore) {
+					IconButton(onClick = onMore, modifier = Modifier.size(32.dp)) {
+						Icon(
+							imageVector = Icons.Outlined.MoreVert,
+							contentDescription = "更多操作",
+							tint = MaterialTheme.colorScheme.onSurfaceVariant,
+							modifier = Modifier.size(18.dp)
+						)
+					}
 				}
 			}
 		}
@@ -1809,6 +1860,7 @@ private fun LocalServerFilesSection(
 	onCancelFileDownload: (MeloLibraryFile) -> Unit = {},
 	onDeleteFileOffline: (MeloLibraryFile) -> Unit = {}
 ) {
+	val apiClient = koinInject<MeloKeepApiClient>()
 	val currentClean = remember(studioState.currentFolder) {
 		libraryNormalizeFolder(studioState.currentFolder)
 	}
@@ -1980,11 +2032,16 @@ private fun LocalServerFilesSection(
 						val rawId = file.track?.id?.takeIf { it.isNotBlank() } ?: file.path
 						if (rawId.startsWith(MeloTrackMapper.ID_PREFIX)) rawId else "${MeloTrackMapper.ID_PREFIX}$rawId"
 					}
+					val fileSong = remember(file, apiClient) {
+						val track = file.track ?: libraryBuildFallbackMeloTrack(file, apiClient)
+						MeloTrackMapper.toDomainSong(track)
+					}
 					val isPlayingThis = currentPlayingSongId == expectedSongId
 					val checked = file.path in studioState.selectedFilePaths
+					val rowShape = libraryGroupedItemShape(isFirst, isLast)
 					Surface(
 						modifier = Modifier.fillMaxWidth(),
-						shape = libraryGroupedItemShape(isFirst, isLast),
+						shape = rowShape,
 						color = when {
 							checked -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
 							isPlayingThis -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
@@ -1994,6 +2051,9 @@ private fun LocalServerFilesSection(
 						Column {
 							ServerAudioFileRowContent(
 								file = file,
+								song = fileSong,
+								selectionMode = studioState.selectedFilePaths.isNotEmpty(),
+								rowShape = rowShape,
 								checked = checked,
 								isCurrentTrack = isPlayingThis,
 								isActivelyPlaying = isPlayingThis && !isPlaybackPaused,
@@ -2109,6 +2169,9 @@ private fun ServerFolderCard(
 @Composable
 private fun ServerAudioFileRowContent(
 	file: MeloLibraryFile,
+	song: DomainSong,
+	selectionMode: Boolean,
+	rowShape: androidx.compose.ui.graphics.Shape,
 	checked: Boolean,
 	isCurrentTrack: Boolean,
 	isActivelyPlaying: Boolean,
@@ -2139,101 +2202,118 @@ private fun ServerAudioFileRowContent(
 		val lockHint = if (file.lockedFields.isNotEmpty()) "已锁 ${file.lockedFields.size}" else null
 		listOfNotNull(artist, album, codec, size, lockHint).joinToString(" · ").ifBlank { file.name }
 	}
+	val isDownloaded = download?.status == DownloadStatus.DOWNLOADED
+	val rowBgColor = when {
+		checked -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+		isCurrentTrack -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+		else -> MaterialTheme.colorScheme.surfaceContainer
+	}
 
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.combinedClickable(
-				onClick = onPlay,
-				onLongClick = onToggleCheck
-			)
-			.padding(start = 4.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(8.dp)
+	MeloSwipeableSongRow(
+		song = song,
+		selectionMode = selectionMode,
+		shape = rowShape,
+		modifier = Modifier.fillMaxWidth()
 	) {
-		Checkbox(
-			checked = checked,
-			onCheckedChange = { onToggleCheck() }
-		)
-
-		val coverArtUrl = file.track?.cover?.trim()?.takeIf { it.isNotEmpty() }
-		Box(
+		Row(
 			modifier = Modifier
-				.size(42.dp)
-				.clip(RoundedCornerShape(9.dp))
-				.background(MaterialTheme.colorScheme.surfaceContainerHigh),
-			contentAlignment = Alignment.Center
+				.fillMaxWidth()
+				.background(MaterialTheme.colorScheme.surfaceContainer)
+				.background(rowBgColor)
+				.combinedClickable(
+					onClick = onPlay,
+					onLongClick = onToggleCheck
+				)
+				.padding(start = 4.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(8.dp)
 		) {
-			if (coverArtUrl != null) {
-				CoverArt(
-					coverArtId = coverArtUrl,
-					modifier = Modifier.fillMaxSize(),
-					shape = RoundedCornerShape(9.dp)
-				)
-			} else if (!isCurrentTrack) {
-				Icon(
-					imageVector = Icons.Outlined.Note,
-					contentDescription = null,
-					tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-					modifier = Modifier.size(18.dp)
-				)
-			}
-			if (isCurrentTrack) {
-				Box(
-					modifier = Modifier
-						.fillMaxSize()
-						.clip(RoundedCornerShape(9.dp))
-						.background(Color.Black.copy(alpha = 0.45f)),
-					contentAlignment = Alignment.Center
-				) {
+			Checkbox(
+				checked = checked,
+				onCheckedChange = { onToggleCheck() }
+			)
+
+			val coverArtUrl = file.track?.cover?.trim()?.takeIf { it.isNotEmpty() }
+			Box(
+				modifier = Modifier
+					.size(42.dp)
+					.clip(RoundedCornerShape(9.dp))
+					.background(MaterialTheme.colorScheme.surfaceContainerHigh),
+				contentAlignment = Alignment.Center
+			) {
+				if (coverArtUrl != null) {
+					CoverArt(
+						coverArtId = coverArtUrl,
+						modifier = Modifier.fillMaxSize(),
+						shape = RoundedCornerShape(9.dp)
+					)
+				} else if (!isCurrentTrack) {
 					Icon(
-						imageVector = if (isActivelyPlaying) MeloIcons.Pause else MeloIcons.PlayArrow,
+						imageVector = Icons.Outlined.Note,
 						contentDescription = null,
-						tint = Color.White,
-						modifier = Modifier.size(16.dp)
+						tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+						modifier = Modifier.size(18.dp)
+					)
+				}
+				if (isCurrentTrack) {
+					Box(
+						modifier = Modifier
+							.fillMaxSize()
+							.clip(RoundedCornerShape(9.dp))
+							.background(Color.Black.copy(alpha = 0.45f)),
+						contentAlignment = Alignment.Center
+					) {
+						Icon(
+							imageVector = if (isActivelyPlaying) MeloIcons.Pause else MeloIcons.PlayArrow,
+							contentDescription = null,
+							tint = Color.White,
+							modifier = Modifier.size(16.dp)
+						)
+					}
+				}
+			}
+
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp)
+			) {
+				Text(
+					text = displayTitle,
+					style = MaterialTheme.typography.titleSmall.copy(
+						fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Medium
+					),
+					color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis
+				)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp)
+				) {
+					if (isDownloaded) {
+						MeloDownloadedTinyBadge()
+					}
+					Text(
+						text = quietMeta,
+						style = MaterialTheme.typography.bodySmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis
 					)
 				}
 			}
-		}
 
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp)
-		) {
-			Text(
-				text = displayTitle,
-				style = MaterialTheme.typography.titleSmall.copy(
-					fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Medium
-				),
-				color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-			Text(
-				text = quietMeta,
-				style = MaterialTheme.typography.bodySmall.tabularNums(),
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-		}
-
-		OfflineSongStatusIcon(
-			status = download?.status,
-			onDownloadClick = onDownload,
-			onDeleteClick = onDeleteOffline,
-			onCancelDownloadingClick = onCancelDownload
-		)
-		IconButton(
-			onClick = onEditTags,
-			modifier = Modifier.size(32.dp)
-		) {
-			Icon(
-				imageVector = Icons.Outlined.Edit,
-				contentDescription = "编辑标签",
-				tint = MaterialTheme.colorScheme.onSurfaceVariant,
-				modifier = Modifier.size(17.dp)
-			)
+			IconButton(
+				onClick = onEditTags,
+				modifier = Modifier.size(32.dp)
+			) {
+				Icon(
+					imageVector = Icons.Outlined.Edit,
+					contentDescription = "编辑标签",
+					tint = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.size(17.dp)
+				)
+			}
 		}
 	}
 }

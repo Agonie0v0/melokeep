@@ -308,7 +308,16 @@ fun MeloStudioSettingsHomeScreen(
 					MeloSectionLabel(title = "服务")
 					MeloGroupedCard {
 						SettingsNavRow(
-							title = "Navidrome 连接",
+							title = meloConfig.effectiveName,
+							value = if (meloConfig.isAuthenticated) "已连接" else "未连接",
+							statusConnected = meloConfig.isAuthenticated,
+							onClick = { currentSheet = "melokeep" }
+						)
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
+							title = preferenceManager.navidromeServerName.trim().ifBlank { "Navidrome" },
 							value = navidromeStatus,
 							statusConnected = navidromeConnected,
 							onClick = { currentSheet = "connection" }
@@ -318,8 +327,6 @@ fun MeloStudioSettingsHomeScreen(
 
 						SettingsNavRow(
 							title = "连接向导",
-							value = if (meloConfig.isAuthenticated) "已连接" else "未连接",
-							statusConnected = meloConfig.isAuthenticated,
 							onClick = openOnboarding
 						)
 
@@ -411,6 +418,10 @@ fun MeloStudioSettingsHomeScreen(
 		}
 	}
 
+	MeloKeepConnectionSheet(
+		presented = currentSheet == "melokeep",
+		onDismissRequest = { currentSheet = null }
+	)
 	MeloNavidromeConnectionSheet(
 		presented = currentSheet == "connection",
 		onDismissRequest = { currentSheet = null }
@@ -436,6 +447,25 @@ fun MeloStudioSettingsHomeScreen(
 // =============================================================================
 // 2. 子面板 Screen & Sheet 外壳（100% 保留既有公开函数签名）
 // =============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloKeepConnectionSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "MeloKeep 连接",
+		onDismissRequest = onDismissRequest,
+		imePadding = true
+	) {
+		SettingsMeloKeepConnectionPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
 
 @Composable
 fun MeloNavidromeConnectionScreen(onBack: (() -> Unit)? = null) {

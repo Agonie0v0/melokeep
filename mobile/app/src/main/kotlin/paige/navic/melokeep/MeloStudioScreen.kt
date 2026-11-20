@@ -62,6 +62,8 @@ import paige.navic.database.entity.DownloadStatus
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
+import paige.navic.domain.manager.session.SessionManager
+import paige.navic.domain.manager.session.SessionState
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.layout.NestedTopBarDefaults
 import paige.navic.ui.icons.Icons
@@ -152,6 +154,7 @@ fun MeloStudioScreen(
 ) {
 	val controller = koinInject<MeloStudioController>()
 	val settingsStore = koinInject<MeloSettingsStore>()
+	val sessionManager = koinInject<SessionManager>()
 	val downloadManager = koinInject<DownloadManager>()
 	val player = koinInject<MediaPlayer>()
 	val preferenceManager = koinInject<PreferenceManager>()
@@ -161,6 +164,9 @@ fun MeloStudioScreen(
 
 	val state by controller.state.collectAsStateWithLifecycle()
 	val serverConfig by settingsStore.config.collectAsStateWithLifecycle()
+	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
+	var directScanningNavidrome by remember { mutableStateOf(false) }
+	var directScanCount by remember { mutableStateOf<Long?>(null) }
 
 	val phoneDownloadingCount by remember(downloadManager) {
 		downloadManager.allDownloads
@@ -254,16 +260,50 @@ fun MeloStudioScreen(
 		Column(modifier = Modifier.fillMaxSize()) {
 			StudioUnifiedTopBar(
 				nested = nested,
-				isAuthenticated = serverConfig.isAuthenticated,
+				isAuthenticated = serverConfig.isAuthenticated || sessionState is SessionState.Authenticated,
 				workspaceTab = workspaceTab,
 				activeDownloadCount = state.activeDownloadCount,
 				phoneDownloadingCount = phoneDownloadingCount,
 				phoneDownloadedCount = phoneDownloadedCount,
 				activeScrapeCount = state.activeScrapeCount,
-				scanningNavidrome = state.scanningNavidrome,
-				scanCount = state.scanStatus?.count,
+				scanningNavidrome = directScanningNavidrome || state.scanningNavidrome,
+				scanCount = directScanCount ?: state.scanStatus?.count,
 				onSelectTab = selectWorkspaceTab,
-				onTriggerScan = controller::triggerNavidromeScan
+				onTriggerScan = {
+					when {
+						sessionState is SessionState.Authenticated -> {
+							if (!directScanningNavidrome) {
+								directScanningNavidrome = true
+								scope.launch {
+									runCatching { sessionManager.triggerLibraryScan() }
+										.onSuccess { res ->
+											directScanningNavidrome = false
+											if (res.count != null && res.count > 0L) {
+												directScanCount = res.count
+											}
+											snackBarState.currentSnackbarData?.dismiss()
+											val suffix = res.count?.takeIf { it > 0L }?.let { "（$it 首）" }.orEmpty()
+											snackBarState.showSnackbar("已触发 Navidrome 扫库$suffix")
+										}
+										.onFailure { err ->
+											directScanningNavidrome = false
+											snackBarState.currentSnackbarData?.dismiss()
+											snackBarState.showSnackbar(err.message ?: "触发 Navidrome 扫库失败")
+										}
+								}
+							}
+						}
+						serverConfig.isAuthenticated -> {
+							controller.triggerNavidromeScan()
+						}
+						else -> {
+							scope.launch {
+								snackBarState.currentSnackbarData?.dismiss()
+								snackBarState.showSnackbar("请先连接 Navidrome 服务")
+							}
+						}
+					}
+				}
 			)
 
 			when (workspaceTab) {
@@ -581,19 +621,18 @@ private fun StudioUnifiedTopBar(
 				)
 			}
 
-			if (isAuthenticated) {
-				Spacer(Modifier.width(8.dp))
-				Surface(
-					modifier = Modifier
-						.clip(CircleShape)
-						.clickable(enabled = !scanningNavidrome, onClick = onTriggerScan),
-					shape = CircleShape,
-					color = MaterialTheme.colorScheme.surfaceContainer,
-					border = BorderStroke(
-						width = MeloHairlineWidth,
-						color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-					)
-				) {
+			Spacer(Modifier.width(8.dp))
+			Surface(
+				modifier = Modifier
+					.clip(CircleShape)
+					.clickable(enabled = !scanningNavidrome, onClick = onTriggerScan),
+				shape = CircleShape,
+				color = MaterialTheme.colorScheme.surfaceContainer,
+				border = BorderStroke(
+					width = MeloHairlineWidth,
+					color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+				)
+			) {
 					Row(
 						modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
 						verticalAlignment = Alignment.CenterVertically,
@@ -633,7 +672,6 @@ private fun StudioUnifiedTopBar(
 						}
 					}
 				}
-			}
 		}
 
 		// 第二行：全宽严格等宽 3 段式分段胶囊（0.5.dp 发丝描边）

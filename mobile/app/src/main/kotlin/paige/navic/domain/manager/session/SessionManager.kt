@@ -245,6 +245,63 @@ class SessionManager(
 
 		client.getUser(username)
 	}
+
+	data class DirectNavidromeScanResult(
+		val scanning: Boolean = true,
+		val count: Long? = null
+	)
+
+	suspend fun triggerLibraryScan(): DirectNavidromeScanResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
+		val base = instanceUrl.trim().trimEnd('/')
+		val user = username.trim()
+		val pass = password
+		if (base.isEmpty() || user.isEmpty()) {
+			throw IllegalStateException("Navidrome 未登录或连接信息不完整")
+		}
+		val salt = (1..12)
+			.map { "0123456789abcdef".random() }
+			.joinToString("")
+		val tokenBytes = java.security.MessageDigest.getInstance("MD5")
+			.digest((pass + salt).toByteArray(Charsets.UTF_8))
+		val token = tokenBytes.joinToString("") { "%02x".format(it) }
+		val encodedUser = java.net.URLEncoder.encode(user, "UTF-8")
+		val encodedClient = java.net.URLEncoder.encode(USER_AGENT, "UTF-8")
+		val url = "$base/rest/startScan.view?u=$encodedUser&t=$token&s=$salt&v=1.16.1&c=$encodedClient&f=json"
+
+		val okHttp = createOkHttpClient(
+			proxyUrl = preferenceManager.proxyUrl.getProxyUrlOrNull(),
+			trustAllCerts = preferenceManager.dangerousSslNoopEnabled,
+			dnsResolver = dnsResolver
+		)
+		val reqBuilder = okhttp3.Request.Builder()
+			.url(url)
+			.header("User-Agent", USER_AGENT)
+		preferenceManager.customHeadersMap().forEach { (k, v) ->
+			reqBuilder.header(k, v)
+		}
+		okHttp.newCall(reqBuilder.build()).execute().use { response ->
+			if (!response.isSuccessful) {
+				throw IllegalStateException("Navidrome 扫库请求失败 (HTTP ${response.code})")
+			}
+			val bodyText = response.body?.string().orEmpty()
+			val rootObj = runCatching {
+				kotlinx.serialization.json.Json.parseToJsonElement(bodyText) as? kotlinx.serialization.json.JsonObject
+			}.getOrNull()
+			val subResp = rootObj?.get("subsonic-response") as? kotlinx.serialization.json.JsonObject
+			val status = (subResp?.get("status") as? kotlinx.serialization.json.JsonPrimitive)?.content
+			if (status != null && status != "ok") {
+				val errObj = subResp["error"] as? kotlinx.serialization.json.JsonObject
+				val errMsg = (errObj?.get("message") as? kotlinx.serialization.json.JsonPrimitive)?.content
+				throw IllegalStateException(errMsg?.takeIf { it.isNotBlank() } ?: "Navidrome 拒绝了扫库请求")
+			}
+			val scanObj = subResp?.get("scanStatus") as? kotlinx.serialization.json.JsonObject
+			val scanning = (scanObj?.get("scanning") as? kotlinx.serialization.json.JsonPrimitive)
+				?.content?.toBooleanStrictOrNull() ?: true
+			val count = (scanObj?.get("count") as? kotlinx.serialization.json.JsonPrimitive)
+				?.content?.toLongOrNull()
+			DirectNavidromeScanResult(scanning = scanning, count = count)
+		}
+	}
 }
 
 fun User.hasRole(role: Role): Boolean {

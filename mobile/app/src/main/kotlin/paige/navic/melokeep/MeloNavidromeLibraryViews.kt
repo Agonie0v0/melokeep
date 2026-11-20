@@ -2198,63 +2198,76 @@ private fun NavidromeSongRowContent(
 			song.duration.takeIf { it.inWholeSeconds > 0 }?.toHoursMinutesSeconds().orEmpty()
 		}
 	}
+	val isDownloaded = download?.status == DownloadStatus.DOWNLOADED
+	val rowBgColor = when {
+		isSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+		isPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+		else -> MaterialTheme.colorScheme.surfaceContainer
+	}
 
-	Row(
-		modifier = modifier
-			.fillMaxWidth()
-			.combinedClickable(
-				onClick = onClick,
-				onLongClick = onLongClick ?: onMoreClick
-			)
-			.padding(horizontal = 12.dp, vertical = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(11.dp)
+	MeloSwipeableSongRow(
+		song = song,
+		selectionMode = isSelecting,
+		modifier = modifier.fillMaxWidth()
 	) {
-		if (isSelecting) {
-			Checkbox(
-				checked = isSelected,
-				onCheckedChange = onCheckedChange
-			)
-		}
-		CoverArt(
-			coverArtId = song.coverArtId,
-			modifier = Modifier.size(44.dp),
-			shape = RoundedCornerShape(9.dp)
-		)
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp)
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.background(MaterialTheme.colorScheme.surfaceContainer)
+				.background(rowBgColor)
+				.combinedClickable(
+					onClick = onClick,
+					onLongClick = onLongClick ?: onMoreClick
+				)
+				.padding(horizontal = 12.dp, vertical = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(11.dp)
 		) {
-			Text(
-				text = song.title,
-				style = MaterialTheme.typography.titleSmall.copy(
-					fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium
-				),
-				color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
+			if (isSelecting) {
+				Checkbox(
+					checked = isSelected,
+					onCheckedChange = onCheckedChange
+				)
+			}
+			CoverArt(
+				coverArtId = song.coverArtId,
+				modifier = Modifier.size(44.dp),
+				shape = RoundedCornerShape(9.dp)
 			)
-			if (subtitleText.isNotBlank()) {
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp)
+			) {
 				Text(
-					text = subtitleText,
-					style = MaterialTheme.typography.bodySmall.tabularNums(),
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					text = song.title,
+					style = MaterialTheme.typography.titleSmall.copy(
+						fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium
+					),
+					color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
 					maxLines = 1,
 					overflow = TextOverflow.Ellipsis
 				)
+				if (subtitleText.isNotBlank() || isDownloaded) {
+					Row(
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(4.dp)
+					) {
+						if (isDownloaded) {
+							MeloDownloadedTinyBadge()
+						}
+						if (subtitleText.isNotBlank()) {
+							Text(
+								text = subtitleText,
+								style = MaterialTheme.typography.bodySmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis
+							)
+						}
+					}
+				}
 			}
-		}
 
-		Row(
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(2.dp)
-		) {
-			OfflineSongStatusIcon(
-				status = download?.status,
-				onDownloadClick = onDownload,
-				onDeleteClick = onDeleteOffline,
-				onCancelDownloadingClick = onCancelDownload
-			)
 			IconButton(
 				onClick = onMoreClick,
 				modifier = Modifier.size(32.dp)

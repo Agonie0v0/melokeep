@@ -6,6 +6,8 @@
 
 package paige.navic.melokeep
 
+import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,9 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -32,42 +36,49 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import coil3.ImageLoader
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
-import io.github.agonie0v0.melokeep.shared.MeloStudioController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
-import paige.navic.database.entity.DownloadStatus
+import org.koin.compose.viewmodel.koinViewModel
 import paige.navic.di.LocalNavStack
+import paige.navic.di.LocalSnackBarState
+import paige.navic.domain.manager.playback.EqualizerManager
 import paige.navic.domain.manager.playback.SleepTimerManager
 import paige.navic.domain.manager.playback.SleepTimerMode
 import paige.navic.domain.manager.playback.StreamCacheManager
 import paige.navic.domain.manager.runtime.PreferenceManager
-import paige.navic.domain.manager.session.DownloadManager
+import paige.navic.domain.manager.runtime.StorageManager
 import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SessionState
+import paige.navic.domain.model.settings.BottomBarCollapseMode
+import paige.navic.domain.model.settings.BottomBarVisibilityMode
+import paige.navic.domain.model.settings.CoverArtShape
+import paige.navic.domain.model.settings.EqualizerMode
+import paige.navic.domain.model.settings.ReplayGainMode
 import paige.navic.domain.model.settings.ThemeMode
+import paige.navic.domain.model.settings.UpdateCheckFrequency
+import paige.navic.ui.component.sheet.ChangelogViewModel
 import paige.navic.ui.component.sheet.SleepTimerSheet
+import paige.navic.ui.component.sheet.UpdateCheckFeedback
 import paige.navic.ui.icons.Icons
-import paige.navic.ui.icons.filled.Settings
-import paige.navic.ui.icons.outlined.Bedtime
 import paige.navic.ui.icons.outlined.ChevronForward
-import paige.navic.ui.icons.outlined.Lyrics
-import paige.navic.ui.icons.outlined.Refresh
 import paige.navic.ui.navigation.Screen
 import paige.navic.ui.theme.MeloBottomChromeClearance
 import paige.navic.ui.theme.MeloStudioPresets
@@ -75,69 +86,81 @@ import paige.navic.ui.theme.positive
 import paige.navic.ui.theme.tabularNums
 import paige.navic.ui.util.label
 import paige.navic.util.toFileSize
+import kotlin.math.roundToInt
 
 /**
- * 第四 Tab「我的」：极简 Apple Notes / Linear 分组工作台。
+ * 第四 Tab「我的」：深度合并设置后的 5 大分组极简工作台。
  */
 @Composable
 fun MeloHubProfileScreen(
 	onOpenOnboarding: () -> Unit = {},
+	@Suppress("UNUSED_PARAMETER")
 	onOpenPhoneDownloads: (() -> Unit)? = null
 ) {
 	val meloSettingsStore = koinInject<MeloSettingsStore>()
-	val studioController = koinInject<MeloStudioController>()
 	val sessionManager = koinInject<SessionManager>()
 	val sleepTimerManager = koinInject<SleepTimerManager>()
-	val downloadManager = koinInject<DownloadManager>()
+	val equalizerManager = koinInject<EqualizerManager>()
 	val streamCacheManager = koinInject<StreamCacheManager>()
+	val storageManager = koinInject<StorageManager>()
 	val imageLoader = koinInject<ImageLoader>()
 	val preferenceManager = koinInject<PreferenceManager>()
 	val backStack = LocalNavStack.current
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+	val changelogViewModel = if (activityOwner != null) {
+		koinViewModel<ChangelogViewModel>(viewModelStoreOwner = activityOwner)
+	} else {
+		koinViewModel<ChangelogViewModel>()
+	}
 
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
 	val studioPreset by meloSettingsStore.studioThemePreset.collectAsStateWithLifecycle()
 	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
-	val studioState by studioController.state.collectAsStateWithLifecycle()
 	val sleepTimerMode by sleepTimerManager.mode.collectAsStateWithLifecycle()
-
-	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
-	val downloadCount by downloadManager.downloadCount.collectAsStateWithLifecycle(0)
-	val downloadSizeBytes by downloadManager.downloadSize.collectAsStateWithLifecycle(0L)
-	val isDownloadingLibrary by downloadManager.isDownloadingLibrary.collectAsStateWithLifecycle(false)
-
-	val downloadedEntities = remember(allDownloads) {
-		allDownloads.filter { it.status == DownloadStatus.DOWNLOADED }
-	}
-	val activePhoneDownloadsCount = remember(allDownloads) {
-		allDownloads.count { it.status == DownloadStatus.DOWNLOADING }
-	}
-	val totalOfflineCount = maxOf(downloadCount, downloadedEntities.size)
+	val eqConfig by equalizerManager.config.collectAsStateWithLifecycle()
+	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
+	val availableRelease by changelogViewModel.release.collectAsStateWithLifecycle()
+	val appVersionName = rememberMeloVersionName()
 
 	var streamCacheBytes by remember { mutableLongStateOf(0L) }
 	var imageCacheBytes by remember { mutableLongStateOf(0L) }
+	var cacheSizeLoaded by remember { mutableStateOf(false) }
+	var clearingCache by remember { mutableStateOf(false) }
 
-	LaunchedEffect(backStack.lastOrNull(), downloadSizeBytes, totalOfflineCount) {
+	var currentSheet by rememberSaveable { mutableStateOf<String?>(null) }
+	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
+
+	LaunchedEffect(backStack.lastOrNull(), currentSheet) {
 		val (stream, image) = withContext(Dispatchers.IO) {
 			streamCacheManager.size to (imageLoader.diskCache?.size ?: 0L)
 		}
 		streamCacheBytes = stream
 		imageCacheBytes = image
+		cacheSizeLoaded = true
+	}
+
+	LaunchedEffect(checkFeedback) {
+		when (val fb = checkFeedback) {
+			is UpdateCheckFeedback.UpToDate -> {
+				snackBarState.currentSnackbarData?.dismiss()
+				snackBarState.showSnackbar("当前已是最新版本 (v$appVersionName)")
+			}
+			is UpdateCheckFeedback.Error -> {
+				snackBarState.currentSnackbarData?.dismiss()
+				snackBarState.showSnackbar(fb.message)
+			}
+			else -> {}
+		}
 	}
 
 	val tempCacheBytes = streamCacheBytes + imageCacheBytes
 
-	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
-	var phoneDownloadsSheetOpen by rememberSaveable { mutableStateOf(false) }
-	var connectionSheetOpen by rememberSaveable { mutableStateOf(false) }
-
-	val openSettingsRoot = dropUnlessResumed {
-		if (backStack.lastOrNull() !is Screen.Settings.Root) {
-			backStack.add(Screen.Settings.Root)
-		}
-	}
-	val openStorageDetail = dropUnlessResumed {
-		if (backStack.lastOrNull() != Screen.Settings.DataStorage) {
-			backStack.add(Screen.Settings.DataStorage)
+	val openMeloSources = dropUnlessResumed {
+		if (backStack.lastOrNull() != Screen.Settings.MeloKeep) {
+			backStack.add(Screen.Settings.MeloKeep)
 		}
 	}
 
@@ -148,37 +171,7 @@ fun MeloHubProfileScreen(
 	) {
 		MeloCleanTopBar(
 			title = "我的",
-			applyStatusBarPadding = true,
-			trailing = {
-				Surface(
-					onClick = openSettingsRoot,
-					shape = CircleShape,
-					color = MaterialTheme.colorScheme.surfaceContainer,
-					border = BorderStroke(
-						width = MeloHairlineWidth,
-						color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-					)
-				) {
-					Row(
-						modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(5.dp)
-					) {
-						Icon(
-							imageVector = Icons.Filled.Settings,
-							contentDescription = "打开设置",
-							modifier = Modifier.size(15.dp),
-							tint = MaterialTheme.colorScheme.primary
-						)
-						Text(
-							text = "设置",
-							style = MaterialTheme.typography.labelMedium,
-							fontWeight = FontWeight.Medium,
-							color = MaterialTheme.colorScheme.onSurface
-						)
-					}
-				}
-			}
+			applyStatusBarPadding = true
 		)
 
 		LazyColumn(
@@ -193,11 +186,19 @@ fun MeloHubProfileScreen(
 			),
 			verticalArrangement = Arrangement.spacedBy(20.dp)
 		) {
-			// 1. 服务连接分组
+			// 1. 服务与连接
 			item(key = "hub-services", contentType = "hub-services") {
+				val navidromeConnected = sessionState !is SessionState.Unauthenticated
+				val navidromeStatus = when (sessionState) {
+					is SessionState.Authenticated -> "已连接"
+					is SessionState.Restoring -> "连接中"
+					SessionState.Unauthenticated -> "未连接"
+				}
+				val navidromeDisplayName = preferenceManager.navidromeServerName.trim().ifBlank { "Navidrome" }
+
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					MeloSectionLabel(
-						title = "服务",
+						title = "服务与连接",
 						trailing = {
 							Text(
 								text = "连接向导",
@@ -213,66 +214,61 @@ fun MeloHubProfileScreen(
 					)
 
 					MeloGroupedCard {
-						val meloDetail = when {
-							meloConfig.isAuthenticated && meloConfig.authEnabled && meloConfig.username.isNotBlank() ->
-								"${formatCompactHost(meloConfig.baseUrl)} · ${meloConfig.username}"
-							meloConfig.isAuthenticated ->
-								formatCompactHost(meloConfig.baseUrl)
-							else -> "未连接"
-						}
-						HubServiceRow(
-							title = "MeloKeep",
-							detail = meloDetail,
-							connected = meloConfig.isAuthenticated,
-							onClick = onOpenOnboarding
+						SettingsNavRow(
+							title = meloConfig.effectiveName,
+							value = if (meloConfig.isAuthenticated) "已连接" else "未连接",
+							statusConnected = meloConfig.isAuthenticated,
+							onClick = { currentSheet = "melokeep" }
 						)
 
-						MeloHairlineDivider(startIndent = 34.dp)
+						MeloHairlineDivider(startIndent = 30.dp)
 
-						val navidromeConnected = sessionState !is SessionState.Unauthenticated
-						val navidromeDetail = when (sessionState) {
-							is SessionState.Authenticated -> {
-								val host = formatCompactHost(sessionManager.instanceUrl)
-								val user = sessionManager.username.trim()
-								if (user.isNotEmpty()) "$host · $user" else host
-							}
-							is SessionState.Restoring -> "正在连接…"
-							SessionState.Unauthenticated -> "未连接"
-						}
-						HubServiceRow(
-							title = "Navidrome",
-							detail = navidromeDetail,
-							connected = navidromeConnected,
-							onClick = { connectionSheetOpen = true }
+						SettingsNavRow(
+							title = navidromeDisplayName,
+							value = navidromeStatus,
+							statusConnected = navidromeConnected,
+							onClick = { currentSheet = "navidrome" }
 						)
 
-						if (meloConfig.isAuthenticated) {
-							MeloHairlineDivider(startIndent = 34.dp)
-							HubActionRow(
-								icon = Icons.Outlined.Refresh,
-								title = "扫描 Navidrome 曲库",
-								value = if (studioState.scanningNavidrome) "扫描中…" else "",
-								enabled = !studioState.scanningNavidrome,
-								onClick = studioController::triggerNavidromeScan
-							)
-						}
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
+							title = "音源与代理",
+							onClick = openMeloSources
+						)
 					}
 				}
 			}
 
-			// 2. 工具与存储分组
-			item(key = "hub-tools", contentType = "hub-tools") {
-				val downloadingActive = isDownloadingLibrary || activePhoneDownloadsCount > 0
-				val offlineValue = when {
-					downloadingActive && activePhoneDownloadsCount > 0 ->
-						"缓存中 $activePhoneDownloadsCount · $totalOfflineCount 首"
-					downloadingActive -> "缓存中…"
-					totalOfflineCount > 0 ->
-						"$totalOfflineCount 首 · ${downloadSizeBytes.toFileSize()}"
-					else -> "0 首"
+			// 2. 播放与音频
+			item(key = "hub-audio", contentType = "hub-audio") {
+				val wifiTag = SettingsQualityShortTag(preferenceManager.streamingQualityWifi)
+				val cellTag = SettingsQualityShortTag(preferenceManager.streamingQualityCellular)
+				val rgSummary = when (preferenceManager.replayGainMode) {
+					ReplayGainMode.Off -> null
+					ReplayGainMode.Track -> "单曲增益"
+					ReplayGainMode.Album -> "专辑增益"
+					ReplayGainMode.Dynamic -> "动态增益"
+				}
+				val audioEngineSummary = listOfNotNull(
+					"Wi-Fi $wifiTag · 移动 $cellTag",
+					rgSummary
+				).joinToString(" · ")
+
+				val eqSummary = when (eqConfig.mode) {
+					EqualizerMode.BuiltIn -> "内置 EQ"
+					EqualizerMode.External -> "系统音效"
+					EqualizerMode.Disabled -> "关闭"
 				}
 
-				val timerActive = sleepTimerMode !is SleepTimerMode.Disabled
+				val fontSizeLabel = "${preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f).roundToInt()}sp"
+				val offsetMs = preferenceManager.playerLyricsOffsetMs
+				val offsetLabel = when {
+					offsetMs > 0 -> "+${offsetMs}ms"
+					offsetMs < 0 -> "${offsetMs}ms"
+					else -> "0ms"
+				}
+
 				val timerValue = when (val mode = sleepTimerMode) {
 					is SleepTimerMode.Time -> sleepTimerManager.timeLeft?.label().orEmpty()
 					is SleepTimerMode.Songs -> "剩余 ${mode.remaining} 首"
@@ -281,49 +277,54 @@ fun MeloHubProfileScreen(
 				}
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "工具与存储")
+					MeloSectionLabel(title = "播放与音频")
 
 					MeloGroupedCard {
-						HubActionRow(
-							icon = MeloIcons.PhoneAndroid,
-							title = "本机离线缓存",
-							value = offlineValue,
-							valueHighlight = downloadingActive,
-							onClick = {
-								if (onOpenPhoneDownloads != null) {
-									onOpenPhoneDownloads()
-								} else {
-									phoneDownloadsSheetOpen = true
-								}
-							}
+						SettingsToggleRow(
+							title = "无缝播放",
+							checked = preferenceManager.gaplessPlayback,
+							onCheckedChange = { preferenceManager.gaplessPlayback = it }
 						)
 
-						MeloHairlineDivider(startIndent = 46.dp)
+						MeloHairlineDivider(startIndent = 16.dp)
 
-						HubActionRow(
-							icon = Icons.Outlined.Bedtime,
+						SettingsNavRow(
+							title = "音质与增益",
+							value = audioEngineSummary,
+							onClick = { currentSheet = "audio" }
+						)
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
+							title = "均衡器",
+							value = eqSummary,
+							onClick = { currentSheet = "equalizer" }
+						)
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
+							title = "歌词与播放页",
+							value = "$fontSizeLabel · 偏移 $offsetLabel",
+							onClick = { currentSheet = "lyrics" }
+						)
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
 							title = "睡眠定时",
 							value = timerValue,
-							valueHighlight = timerActive,
 							onClick = { sleepTimerOpen = true }
-						)
-
-						MeloHairlineDivider(startIndent = 46.dp)
-
-						HubActionRow(
-							icon = MeloIcons.CleaningServices,
-							title = "临时缓存",
-							value = tempCacheBytes.toFileSize(),
-							onClick = openStorageDetail
 						)
 					}
 				}
 			}
 
-			// 3. 外观分组
+			// 3. 外观与交互
 			item(key = "hub-appearance", contentType = "hub-appearance") {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "外观")
+					MeloSectionLabel(title = "外观与交互")
 
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
@@ -391,13 +392,258 @@ fun MeloHubProfileScreen(
 								}
 							}
 						}
+
+						MeloGroupedCard {
+							SettingsToggleRow(
+								title = "下滑隐藏底栏",
+								checked = preferenceManager.bottomBarCollapseMode == BottomBarCollapseMode.OnScroll,
+								onCheckedChange = { enabled ->
+									preferenceManager.bottomBarCollapseMode = if (enabled) {
+										BottomBarCollapseMode.OnScroll
+									} else {
+										BottomBarCollapseMode.Never
+									}
+								}
+							)
+
+							MeloHairlineDivider(startIndent = 16.dp)
+
+							SettingsToggleRow(
+								title = "二级页显示播放栏",
+								checked = preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens,
+								onCheckedChange = { showAll ->
+									preferenceManager.bottomBarVisibilityMode = if (showAll) {
+										BottomBarVisibilityMode.AllScreens
+									} else {
+										BottomBarVisibilityMode.Default
+									}
+								}
+							)
+
+							MeloHairlineDivider(startIndent = 16.dp)
+
+							Column(
+								modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+								verticalArrangement = Arrangement.spacedBy(8.dp)
+							) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.SpaceBetween,
+									verticalAlignment = Alignment.CenterVertically
+								) {
+									Text(
+										text = "封面圆角",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium
+									)
+									Text(
+										text = SettingsCoverShapeLabel(preferenceManager.coverArtShape),
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+								}
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(6.dp)
+								) {
+									CoverArtShape.entries.forEach { shape ->
+										SettingsChoicePill(
+											label = SettingsCoverShapeLabel(shape),
+											selected = preferenceManager.coverArtShape == shape,
+											onClick = { preferenceManager.coverArtShape = shape },
+											modifier = Modifier.weight(1f)
+										)
+									}
+								}
+							}
+						}
 					}
 				}
 			}
 
-			// 4. 极简版本尾注
+			// 4. 存储与离线
+			item(key = "hub-storage", contentType = "hub-storage") {
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					MeloSectionLabel(title = "存储与离线")
+
+					MeloGroupedCard {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(10.dp)
+						) {
+							Text(
+								text = "临时缓存",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium,
+								modifier = Modifier.weight(1f)
+							)
+							Text(
+								text = if (cacheSizeLoaded) tempCacheBytes.toFileSize() else "…",
+								style = MaterialTheme.typography.bodySmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant
+							)
+							Text(
+								text = if (clearingCache) "清理中" else "清理",
+								style = MaterialTheme.typography.labelMedium,
+								color = if (tempCacheBytes > 0L && !clearingCache) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+								},
+								modifier = Modifier
+									.clip(RoundedCornerShape(6.dp))
+									.clickable(enabled = !clearingCache && tempCacheBytes > 0L) {
+										clearingCache = true
+										scope.launch {
+											withContext(Dispatchers.IO) {
+												streamCacheManager.clear()
+												imageLoader.memoryCache?.clear()
+												imageLoader.diskCache?.clear()
+												storageManager.clearCoverArts()
+											}
+											streamCacheBytes = 0L
+											imageCacheBytes = 0L
+											clearingCache = false
+											snackBarState.currentSnackbarData?.dismiss()
+											snackBarState.showSnackbar("已清理临时缓存")
+										}
+									}
+									.padding(horizontal = 6.dp, vertical = 3.dp)
+							)
+						}
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsNavRow(
+							title = "离线模式与索引同步",
+							onClick = { currentSheet = "storage" }
+						)
+					}
+				}
+			}
+
+			// 5. 更新与关于
+			item(key = "hub-update", contentType = "hub-update") {
+				val updateTag = (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag
+					?: availableRelease?.tagName?.takeIf { it.isNotBlank() }
+				val isChecking = checkFeedback is UpdateCheckFeedback.Checking
+				val normalizedNewTag = updateTag?.let { if (it.startsWith("v", ignoreCase = true)) it else "v$it" }
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					MeloSectionLabel(title = "更新与关于")
+
+					MeloGroupedCard {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clickable(enabled = !isChecking) {
+									changelogViewModel.checkForUpdates(
+										currentVersion = appVersionName,
+										manual = true
+									)
+								}
+								.padding(horizontal = 16.dp, vertical = 13.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp)
+						) {
+							Text(
+								text = "检查更新",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium,
+								color = MaterialTheme.colorScheme.onSurface,
+								modifier = Modifier.weight(1f)
+							)
+							when {
+								isChecking -> {
+									CircularProgressIndicator(
+										modifier = Modifier.size(14.dp),
+										strokeWidth = 1.8.dp
+									)
+									Text(
+										text = "检查中…",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+								}
+								normalizedNewTag != null -> {
+									Box(
+										modifier = Modifier
+											.size(7.dp)
+											.clip(CircleShape)
+											.background(MaterialTheme.colorScheme.error)
+									)
+									Text(
+										text = "发现新版本 $normalizedNewTag",
+										style = MaterialTheme.typography.bodySmall.tabularNums(),
+										fontWeight = FontWeight.SemiBold,
+										color = MaterialTheme.colorScheme.primary
+									)
+								}
+								else -> {
+									Text(
+										text = "当前 v$appVersionName",
+										style = MaterialTheme.typography.bodySmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+								}
+							}
+							Icon(
+								imageVector = Icons.Outlined.ChevronForward,
+								contentDescription = null,
+								tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+								modifier = Modifier.size(17.dp)
+							)
+						}
+
+						MeloHairlineDivider(startIndent = 16.dp)
+
+						SettingsToggleRow(
+							title = "自动检查更新",
+							checked = preferenceManager.checkForUpdates,
+							onCheckedChange = { enabled ->
+								preferenceManager.checkForUpdates = enabled
+								if (enabled && preferenceManager.updateCheckFrequency == UpdateCheckFrequency.ManualOnly) {
+									preferenceManager.updateCheckFrequency = UpdateCheckFrequency.Daily
+								}
+							}
+						)
+
+						AnimatedVisibility(visible = preferenceManager.checkForUpdates) {
+							Column(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+								verticalArrangement = Arrangement.spacedBy(6.dp)
+							) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(6.dp)
+								) {
+									listOf(
+										UpdateCheckFrequency.OnEveryLaunch to "每次启动",
+										UpdateCheckFrequency.Daily to "每天",
+										UpdateCheckFrequency.Weekly to "每周",
+										UpdateCheckFrequency.ManualOnly to "仅手动"
+									).forEach { (freq, label) ->
+										SettingsChoicePill(
+											label = label,
+											selected = preferenceManager.updateCheckFrequency == freq,
+											onClick = { preferenceManager.updateCheckFrequency = freq },
+											modifier = Modifier.weight(1f)
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// 6. 极简版本尾注
 			item(key = "hub-version", contentType = "hub-version") {
-				val appVersionName = rememberMeloVersionName()
 				Text(
 					text = "MeloKeep v$appVersionName",
 					style = MaterialTheme.typography.labelSmall.tabularNums(),
@@ -414,129 +660,30 @@ fun MeloHubProfileScreen(
 	if (sleepTimerOpen) {
 		SleepTimerSheet(onDismissRequest = { sleepTimerOpen = false })
 	}
-	MeloPhoneDownloadCenterSheet(
-		presented = phoneDownloadsSheetOpen,
-		onDismissRequest = { phoneDownloadsSheetOpen = false }
+	MeloKeepConnectionSheet(
+		presented = currentSheet == "melokeep",
+		onDismissRequest = { currentSheet = null }
 	)
 	MeloNavidromeConnectionSheet(
-		presented = connectionSheetOpen,
-		onDismissRequest = { connectionSheetOpen = false }
+		presented = currentSheet == "navidrome",
+		onDismissRequest = { currentSheet = null }
 	)
-}
-
-@Composable
-private fun HubServiceRow(
-	title: String,
-	detail: String,
-	connected: Boolean,
-	onClick: () -> Unit
-) {
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.clickable(onClick = onClick)
-			.padding(horizontal = 14.dp, vertical = 13.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(12.dp)
-	) {
-		Box(
-			modifier = Modifier
-				.size(8.dp)
-				.clip(CircleShape)
-				.background(
-					if (connected) {
-						MaterialTheme.colorScheme.positive
-					} else {
-						MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-					}
-				)
-		)
-
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp)
-		) {
-			Text(
-				text = title,
-				style = MaterialTheme.typography.bodyMedium,
-				fontWeight = FontWeight.Medium,
-				color = MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-			Text(
-				text = detail,
-				style = MaterialTheme.typography.bodySmall.tabularNums(),
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-		}
-
-		Icon(
-			imageVector = Icons.Outlined.ChevronForward,
-			contentDescription = null,
-			tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-			modifier = Modifier.size(17.dp)
-		)
-	}
-}
-
-@Composable
-private fun HubActionRow(
-	icon: ImageVector,
-	title: String,
-	value: String,
-	valueHighlight: Boolean = false,
-	enabled: Boolean = true,
-	onClick: () -> Unit
-) {
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.clickable(enabled = enabled, onClick = onClick)
-			.padding(horizontal = 14.dp, vertical = 13.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(12.dp)
-	) {
-		Icon(
-			imageVector = icon,
-			contentDescription = null,
-			tint = MaterialTheme.colorScheme.onSurfaceVariant,
-			modifier = Modifier.size(20.dp)
-		)
-
-		Text(
-			text = title,
-			style = MaterialTheme.typography.bodyMedium,
-			fontWeight = FontWeight.Medium,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.weight(1f)
-		)
-
-		if (value.isNotBlank()) {
-			Text(
-				text = value,
-				style = MaterialTheme.typography.bodySmall.tabularNums(),
-				color = if (valueHighlight) {
-					MaterialTheme.colorScheme.primary
-				} else {
-					MaterialTheme.colorScheme.onSurfaceVariant
-				},
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis
-			)
-		}
-
-		Icon(
-			imageVector = Icons.Outlined.ChevronForward,
-			contentDescription = null,
-			tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-			modifier = Modifier.size(17.dp)
-		)
-	}
+	MeloAudioEngineSheet(
+		presented = currentSheet == "audio",
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloEqualizerSheet(
+		presented = currentSheet == "equalizer",
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloLyricsAndStageSheet(
+		presented = currentSheet == "lyrics",
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloStorageAndAboutSheet(
+		presented = currentSheet == "storage",
+		onDismissRequest = { currentSheet = null }
+	)
 }
 
 @Composable
@@ -593,12 +740,4 @@ private fun compactPresetLabel(descriptor: MeloStudioPresets.Descriptor): String
 	MeloStudioPresets.PURE_LIGHT -> "纯净白"
 	MeloStudioPresets.DYNAMIC -> "跟随封面"
 	else -> descriptor.title
-}
-
-private fun formatCompactHost(rawUrl: String): String {
-	return rawUrl.trim()
-		.removePrefix("https://")
-		.removePrefix("http://")
-		.trimEnd('/')
-		.ifBlank { "未配置" }
 }

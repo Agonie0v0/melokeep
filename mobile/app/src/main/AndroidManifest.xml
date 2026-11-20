@@ -29,6 +29,9 @@
 	<!-- needed for notifications for downloads and syncing db -->
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+	<!-- needed for in-app APK update installation -->
+	<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
 	<permission
 		android:name="${applicationId}.permission.PLAYBACK_SERVICE"
 		android:protectionLevel="signature" />

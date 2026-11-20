@@ -112,6 +112,7 @@ fun MeloSettingsScreen() {
 	val serverConfig = state.serverConfig
 	val engineConfig = state.engineConfig
 
+	var displayNameInput by rememberSaveable { mutableStateOf(serverConfig.displayName) }
 	var baseUrlInput by rememberSaveable { mutableStateOf(serverConfig.baseUrl) }
 	var usernameInput by rememberSaveable { mutableStateOf(serverConfig.username) }
 	var passwordInput by rememberSaveable { mutableStateOf("") }
@@ -139,7 +140,10 @@ fun MeloSettingsScreen() {
 		onClearNotice = controller::clearNotice
 	)
 
-	LaunchedEffect(serverConfig.baseUrl, serverConfig.username) {
+	LaunchedEffect(serverConfig.displayName, serverConfig.baseUrl, serverConfig.username) {
+		if (displayNameInput.isBlank() && serverConfig.displayName.isNotBlank()) {
+			displayNameInput = serverConfig.displayName
+		}
 		if (baseUrlInput.isBlank() && serverConfig.baseUrl.isNotBlank()) {
 			baseUrlInput = serverConfig.baseUrl
 		}
@@ -272,6 +276,23 @@ fun MeloSettingsScreen() {
 						) {
 							OutlinedTextField(
 								modifier = Modifier.fillMaxWidth(),
+								value = displayNameInput,
+								onValueChange = {
+									displayNameInput = it
+									controller.updateDisplayName(it.trim())
+								},
+								singleLine = true,
+								shape = RoundedCornerShape(12.dp),
+								label = { Text("服务名称（可选，如 家里 NAS）") },
+								placeholder = { Text("默认显示 MeloKeep") },
+								keyboardOptions = KeyboardOptions(
+									autoCorrectEnabled = false,
+									imeAction = ImeAction.Next
+								)
+							)
+
+							OutlinedTextField(
+								modifier = Modifier.fillMaxWidth(),
 								value = baseUrlInput,
 								onValueChange = { baseUrlInput = it },
 								singleLine = true,
@@ -334,7 +355,8 @@ fun MeloSettingsScreen() {
 													baseUrl = baseUrlInput,
 													username = usernameInput,
 													password = passwordInput,
-													deviceName = deviceName
+													deviceName = deviceName,
+													displayName = displayNameInput.trim()
 												)
 											}
 										}
@@ -361,7 +383,8 @@ fun MeloSettingsScreen() {
 											baseUrl = baseUrlInput,
 											username = usernameInput,
 											password = passwordInput,
-											deviceName = deviceName
+											deviceName = deviceName,
+											displayName = displayNameInput.trim()
 										)
 									}
 								) {

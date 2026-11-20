@@ -220,6 +220,7 @@ fun App() {
 
 	LaunchedEffect(Unit) {
 		snackBarManager.events.collectLatest { event ->
+			snackBarState.currentSnackbarData?.dismiss()
 			snackBarState.showSnackbar(
 				resources.getString(event.resource, *event.args.toTypedArray())
 			)
