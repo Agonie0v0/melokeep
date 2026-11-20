@@ -136,6 +136,7 @@ internal fun IosLibNavidromeSection(
 	onRequestPhysicalDelete: ((IosTrackItem) -> Unit)?,
 	onShowNotice: (String) -> Unit,
 	bottomPadding: PaddingValues,
+	onRecordSearchResult: () -> Unit = {},
 ) {
 	val scope = rememberCoroutineScope()
 
@@ -168,6 +169,7 @@ internal fun IosLibNavidromeSection(
 			onOpenAddToPlaylist = onOpenAddToPlaylist,
 			onRequestPhysicalDelete = onRequestPhysicalDelete,
 			onShowNotice = onShowNotice,
+			onRecordSearchResult = onRecordSearchResult,
 			bottomPadding = bottomPadding,
 		)
 		return
@@ -1801,6 +1803,7 @@ private fun NavSearchResultsContent(
 	onRequestPhysicalDelete: ((IosTrackItem) -> Unit)?,
 	onShowNotice: (String) -> Unit,
 	bottomPadding: PaddingValues,
+	onRecordSearchResult: () -> Unit = {},
 ) {
 	val scope = rememberCoroutineScope()
 	val hasAny = libState.searchArtists.isNotEmpty() ||
@@ -1844,7 +1847,10 @@ private fun NavSearchResultsContent(
 						contentType = { "artist-chip" },
 					) { artist ->
 						AssistChip(
-							onClick = { onOpenArtist(artist) },
+							onClick = {
+								onRecordSearchResult()
+								onOpenArtist(artist)
+							},
 							label = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
 							leadingIcon = {
 								Icon(Icons.Rounded.Person, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1868,7 +1874,10 @@ private fun NavSearchResultsContent(
 					) { album ->
 						IosLibAlbumGridTile(
 							album = album,
-							onClick = { onOpenAlbum(album) },
+							onClick = {
+								onRecordSearchResult()
+								onOpenAlbum(album)
+							},
 							modifier = Modifier.width(142.dp),
 						)
 					}
@@ -1891,7 +1900,10 @@ private fun NavSearchResultsContent(
 							downloadProgress = downloadingProgress[track.id],
 							multiSelectMode = false,
 							isSelected = false,
-							onClick = { audioPlayer.playQueue(libState.searchSongs, idx) },
+							onClick = {
+								onRecordSearchResult()
+								audioPlayer.playQueue(libState.searchSongs, idx)
+							},
 							onPlayNext = { audioPlayer.playNext(track) },
 							onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 							onDownloadOffline = {

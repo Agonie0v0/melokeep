@@ -71,7 +71,9 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -124,6 +126,7 @@ import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloQualityFilter
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
 import io.github.agonie0v0.melokeep.shared.MeloSearchUiState
+import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloSourceStatus
 import io.github.agonie0v0.melokeep.shared.MeloTrack
 import io.github.agonie0v0.melokeep.shared.MeloTrackGroup
@@ -380,6 +383,7 @@ internal fun IosDiscoverSearchContent(
 	currentTrackId: String?,
 	isPlayerPlaying: Boolean,
 	searchController: MeloSearchController,
+	settingsStore: MeloSettingsStore,
 	subsonicManager: IosSubsonicManager,
 	audioPlayer: IosAudioPlayer,
 	safeBottomDp: Dp,
@@ -392,7 +396,15 @@ internal fun IosDiscoverSearchContent(
 	var showSourceStatuses by rememberSaveable { mutableStateOf(false) }
 	var versionSheetTrack by remember { mutableStateOf<MeloTrack?>(null) }
 	var loadingVersions by remember { mutableStateOf(false) }
+	var historyManageMode by remember { mutableStateOf(false) }
+	var showClearHistoryDialog by remember { mutableStateOf(false) }
 	val expandedGroups = remember(searchState.keyword) { mutableStateMapOf<String, Boolean>() }
+
+	LaunchedEffect(searchState.searchHistory.isEmpty()) {
+		if (searchState.searchHistory.isEmpty()) {
+			historyManageMode = false
+		}
+	}
 
 	val groupedList = searchState.groupedTracks
 	val primaryTracks = remember(groupedList) { groupedList.map { it.primary } }
@@ -507,15 +519,29 @@ internal fun IosDiscoverSearchContent(
 									IosSectionLabel(
 										title = "最近搜索",
 										trailing = {
-											Text(
-												text = "清空",
-												style = MaterialTheme.typography.labelMedium,
-												color = MaterialTheme.colorScheme.primary,
-												modifier = Modifier
-													.clip(CircleShape)
-													.clickable { searchController.clearHistory() }
-													.padding(horizontal = 6.dp, vertical = 2.dp),
-											)
+											Row(
+												horizontalArrangement = Arrangement.spacedBy(8.dp),
+												verticalAlignment = Alignment.CenterVertically,
+											) {
+												Text(
+													text = if (historyManageMode) "完成" else "管理",
+													style = MaterialTheme.typography.labelMedium,
+													color = MaterialTheme.colorScheme.primary,
+													modifier = Modifier
+														.clip(CircleShape)
+														.clickable { historyManageMode = !historyManageMode }
+														.padding(horizontal = 6.dp, vertical = 2.dp),
+												)
+												Text(
+													text = "清空",
+													style = MaterialTheme.typography.labelMedium,
+													color = MaterialTheme.colorScheme.error,
+													modifier = Modifier
+														.clip(CircleShape)
+														.clickable { showClearHistoryDialog = true }
+														.padding(horizontal = 6.dp, vertical = 2.dp),
+												)
+											}
 										},
 									)
 									FlowRow(
@@ -525,7 +551,15 @@ internal fun IosDiscoverSearchContent(
 										searchState.searchHistory.forEach { kw ->
 											IosDiscoverQuietTagChip(
 												label = kw,
-												onClick = { submitSearch(kw, refresh = false) },
+												manageMode = historyManageMode,
+												onClick = {
+													if (historyManageMode) {
+														settingsStore.removeSearchHistory(kw)
+													} else {
+														submitSearch(kw, refresh = false)
+													}
+												},
+												onRemove = { settingsStore.removeSearchHistory(kw) },
 											)
 										}
 									}
@@ -747,30 +781,93 @@ internal fun IosDiscoverSearchContent(
 			},
 		)
 	}
+
+	if (showClearHistoryDialog) {
+		AlertDialog(
+			onDismissRequest = { showClearHistoryDialog = false },
+			title = { Text("清空搜索历史") },
+			text = { Text("确定清空全部 ${searchState.searchHistory.size} 条全网搜索历史吗？") },
+			confirmButton = {
+				TextButton(
+					onClick = {
+						settingsStore.clearSearchHistory()
+						historyManageMode = false
+						showClearHistoryDialog = false
+					},
+					colors = ButtonDefaults.textButtonColors(
+						contentColor = MaterialTheme.colorScheme.error,
+					),
+				) {
+					Text("清空")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { showClearHistoryDialog = false }) {
+					Text("取消")
+				}
+			},
+		)
+	}
 }
 
 @Composable
 private fun IosDiscoverQuietTagChip(
 	label: String,
+	manageMode: Boolean = false,
 	onClick: () -> Unit,
+	onRemove: (() -> Unit)? = null,
 ) {
 	Surface(
 		onClick = onClick,
 		shape = CircleShape,
-		color = MaterialTheme.colorScheme.surfaceContainer,
+		color = if (manageMode) {
+			MaterialTheme.colorScheme.surfaceContainerHigh
+		} else {
+			MaterialTheme.colorScheme.surfaceContainer
+		},
 		border = BorderStroke(
 			width = IosHairlineWidth,
-			color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+			color = if (manageMode) {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+			} else {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+			},
 		),
 	) {
-		Text(
-			text = label,
-			style = MaterialTheme.typography.bodySmall,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-		)
+		Row(
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(4.dp),
+			modifier = Modifier.padding(
+				start = 12.dp,
+				end = if (manageMode) 8.dp else 12.dp,
+				top = 6.dp,
+				bottom = 6.dp,
+			),
+		) {
+			Text(
+				text = label,
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			if (manageMode) {
+				Box(
+					contentAlignment = Alignment.Center,
+					modifier = Modifier
+						.size(18.dp)
+						.clip(CircleShape)
+						.clickable { onRemove?.invoke() },
+				) {
+					Icon(
+						imageVector = Icons.Outlined.Close,
+						contentDescription = "删除历史记录",
+						tint = MaterialTheme.colorScheme.onSurfaceVariant,
+						modifier = Modifier.size(13.dp),
+					)
+				}
+			}
+		}
 	}
 }
 

@@ -81,6 +81,7 @@ import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -89,9 +90,11 @@ import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -911,10 +914,12 @@ private fun NowPlayingFullScreenSheet(
 ) {
 	val scope = rememberCoroutineScope()
 	val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+	val prefs by subsonicManager.prefs.collectAsState()
 	var showLyricsMode by remember { mutableStateOf(false) }
 	var showQueueSheet by remember { mutableStateOf(false) }
 	var showSleepSheet by remember { mutableStateOf(false) }
 	var showSpeedSheet by remember { mutableStateOf(false) }
+	var showLyricsSettingsSheet by remember { mutableStateOf(false) }
 	var moreMenuOpen by remember { mutableStateOf(false) }
 	var verticalSwipeOffset by remember { mutableFloatStateOf(0f) }
 
@@ -1012,7 +1017,7 @@ private fun NowPlayingFullScreenSheet(
 								IconButton(onClick = { moreMenuOpen = true }, modifier = Modifier.size(36.dp)) {
 									Icon(
 										imageVector = Icons.Rounded.MoreHoriz,
-										contentDescription = "歌词偏移",
+										contentDescription = "歌词设置",
 										tint = MaterialTheme.colorScheme.onSurface,
 									)
 								}
@@ -1055,6 +1060,21 @@ private fun NowPlayingFullScreenSheet(
 											)
 										}
 									}
+									HorizontalDivider()
+									DropdownMenuItem(
+										text = { Text("歌词样式与设置") },
+										leadingIcon = {
+											Icon(
+												imageVector = Icons.Rounded.Settings,
+												contentDescription = null,
+												modifier = Modifier.size(18.dp),
+											)
+										},
+										onClick = {
+											moreMenuOpen = false
+											showLyricsSettingsSheet = true
+										},
+									)
 								}
 							}
 						}
@@ -1083,6 +1103,7 @@ private fun NowPlayingFullScreenSheet(
 							loading = playerState.lyricsLoading,
 							progressFlow = audioPlayer.progressFlow,
 							offsetMs = playerState.lyricsOffsetMs,
+							prefs = prefs,
 							onSeekTo = { audioPlayer.seekTo(it) },
 						)
 					} else {
@@ -1355,6 +1376,13 @@ private fun NowPlayingFullScreenSheet(
 			onDismiss = { showSpeedSheet = false },
 		)
 	}
+
+	IosLyricsAndStageSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = showLyricsSettingsSheet,
+		onDismissRequest = { showLyricsSettingsSheet = false },
+	)
 }
 
 @Composable
@@ -1427,11 +1455,22 @@ private fun NowPlayingLyricsPanel(
 	loading: Boolean,
 	progressFlow: StateFlow<IosPlaybackProgress>,
 	offsetMs: Int,
+	prefs: IosPlaybackPrefs,
 	onSeekTo: (Long) -> Unit,
 ) {
 	val progress by progressFlow.collectAsState()
 	val listState = rememberLazyListState()
 	val density = LocalDensity.current
+
+	val clampedFontSp = prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val inactiveFontSp = (clampedFontSp - 4f).coerceAtLeast(13f)
+	val clampedInactiveAlpha = prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
+	val resolvedAlign = if (prefs.lyricsAlign == "start") TextAlign.Start else TextAlign.Center
+	val customActiveColor = remember(prefs.lyricsActiveColorHex) {
+		parseIosLyricsHexColorOrNull(prefs.lyricsActiveColorHex)
+	}
+	val activeColor = customActiveColor ?: MaterialTheme.colorScheme.onBackground
+	val inactiveColor = MaterialTheme.colorScheme.onBackground.copy(alpha = clampedInactiveAlpha)
 
 	val activeIndex = if (lyrics.synced) {
 		val effectivePosMs = progress.positionMs - offsetMs
@@ -1486,11 +1525,11 @@ private fun NowPlayingLyricsPanel(
 					val isActive = !lyrics.synced || idx == activeIndex
 					Text(
 						text = line.text,
-						fontSize = if (isActive) 22.sp else 18.sp,
-						lineHeight = if (isActive) 30.sp else 25.sp,
+						fontSize = if (isActive) clampedFontSp.sp else inactiveFontSp.sp,
+						lineHeight = if (isActive) (clampedFontSp * 1.36f).sp else (inactiveFontSp * 1.36f).sp,
 						fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-						color = if (isActive) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.52f),
-						textAlign = TextAlign.Center,
+						color = if (isActive) activeColor else inactiveColor,
+						textAlign = resolvedAlign,
 						modifier = Modifier
 							.fillMaxWidth()
 							.clip(RoundedCornerShape(10.dp))

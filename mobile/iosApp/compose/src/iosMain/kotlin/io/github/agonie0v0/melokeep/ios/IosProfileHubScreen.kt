@@ -31,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.HighQuality
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
@@ -95,7 +94,6 @@ fun IosHubProfileRoute(
 	var showMeloSheet by rememberSaveable { mutableStateOf(false) }
 	var showNavidromeSheet by rememberSaveable { mutableStateOf(false) }
 	var showPhoneDownloadsSheet by rememberSaveable { mutableStateOf(false) }
-	var showLyricsStageSheet by rememberSaveable { mutableStateOf(false) }
 	var showAudioEngineSheet by rememberSaveable { mutableStateOf(false) }
 	var showSourcesSheet by rememberSaveable { mutableStateOf(false) }
 
@@ -295,16 +293,6 @@ fun IosHubProfileRoute(
 						IosHairlineDivider(startIndent = 46.dp)
 
 						IosHubActionRow(
-							icon = Icons.Rounded.MusicNote,
-							title = "歌词偏移",
-							value = IosSettingsFormatOffsetLabel(playerState.lyricsOffsetMs),
-							valueHighlight = playerState.lyricsOffsetMs != 0,
-							onClick = { showLyricsStageSheet = true },
-						)
-
-						IosHairlineDivider(startIndent = 46.dp)
-
-						IosHubActionRow(
 							icon = Icons.Rounded.HighQuality,
 							title = "音质与播放",
 							value = audioValue,
@@ -475,13 +463,6 @@ fun IosHubProfileRoute(
 			onDismiss = { showPhoneDownloadsSheet = false },
 		)
 	}
-
-	IosLyricsAndStageSheet(
-		audioPlayer = audioPlayer,
-		subsonicManager = subsonicManager,
-		presented = showLyricsStageSheet,
-		onDismissRequest = { showLyricsStageSheet = false },
-	)
 
 	IosAudioEngineSheet(
 		audioPlayer = audioPlayer,

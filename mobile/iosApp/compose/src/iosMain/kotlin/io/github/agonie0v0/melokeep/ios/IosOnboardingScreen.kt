@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -120,9 +121,108 @@ fun IosOnboardingOverlay(
 	var navidromeFeedback by rememberSaveable { mutableStateOf<String?>(null) }
 	var navidromeFeedbackOk by rememberSaveable { mutableStateOf(false) }
 
+	var enteringApp by rememberSaveable { mutableStateOf(false) }
+	var enterErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+	var showForceEnterOption by rememberSaveable { mutableStateOf(false) }
+	var verifiedMeloSignature by remember { mutableStateOf<String?>(null) }
+
 	val finishOnboarding: () -> Unit = {
 		settingsStore.setOnboardingDismissed(true)
 		onDismiss()
+	}
+
+	val handleEnterApp: () -> Unit = {
+		focusManager.clearFocus()
+		enterErrorMessage = null
+		showForceEnterOption = false
+
+		val trimmedMeloUrl = meloUrl.trim()
+		val trimmedMeloUser = meloUser.trim()
+		val normalizedMeloUrl = MeloSettingsStore.normalizeBaseUrl(trimmedMeloUrl)
+		val meloSignature = "$normalizedMeloUrl|$trimmedMeloUser|$meloPass"
+		val meloAlreadyVerified = meloConfig.isAuthenticated &&
+			meloConfig.baseUrl == normalizedMeloUrl &&
+			meloConfig.username == trimmedMeloUser &&
+			(meloPass.isEmpty() || verifiedMeloSignature == meloSignature)
+		val needsMeloVerify = trimmedMeloUrl.isNotEmpty() && !meloAlreadyVerified
+
+		val trimmedNavUrl = navidromeUrl.trim()
+		val trimmedNavUser = navidromeUser.trim()
+		val hasNavInput = trimmedNavUrl.isNotEmpty() || trimmedNavUser.isNotEmpty() || navidromePass.isNotEmpty()
+		val navMatchesActive = activeServer != null &&
+			IosSubsonicManager.normalizeUrl(trimmedNavUrl) == activeServer.url &&
+			trimmedNavUser == activeServer.username &&
+			navidromePass.isEmpty()
+		val needsNavVerify = hasNavInput && !navMatchesActive
+
+		if (!needsMeloVerify && !needsNavVerify) {
+			finishOnboarding()
+		} else {
+			enteringApp = true
+			scope.launch {
+				if (needsMeloVerify) {
+					try {
+						val health = apiClient.health(trimmedMeloUrl)
+						val loginResp = apiClient.login(
+							baseUrl = trimmedMeloUrl,
+							username = trimmedMeloUser,
+							password = meloPass,
+							deviceName = "MeloKeep iOS",
+						)
+						settingsController.loadConfig()
+						verifiedMeloSignature = meloSignature
+						healthStatusSuccess = true
+						healthStatusMessage = if (loginResp.authEnabled) {
+							"已连接 MeloKeep ${health.version}（${health.sources} 个音源），登录成功"
+						} else {
+							"已连接 MeloKeep ${health.version}（免密码模式，${health.sources} 个音源）"
+						}
+					} catch (e: CancellationException) {
+						enteringApp = false
+						throw e
+					} catch (e: Throwable) {
+						val msg = e.message ?: "请检查服务器地址或账号密码"
+						healthStatusSuccess = false
+						healthStatusMessage = "探测/登录失败：$msg"
+						enterErrorMessage = "MeloKeep 保存并验证失败：$msg"
+						showForceEnterOption = true
+						enteringApp = false
+						return@launch
+					}
+				}
+
+				if (needsNavVerify) {
+					navidromeConnecting = true
+					val res = subsonicManager.testAndSaveServer(
+						name = navidromeName,
+						url = trimmedNavUrl,
+						username = trimmedNavUser,
+						password = navidromePass,
+						editingServerId = activeServer?.id,
+					)
+					navidromeConnecting = false
+					if (res.isFailure) {
+						val errMsg = res.exceptionOrNull()?.message ?: "连接 Navidrome 失败"
+						navidromeExpanded = true
+						navidromeFeedbackOk = false
+						navidromeFeedback = errMsg
+						enterErrorMessage = "Navidrome 保存并连接失败：$errMsg"
+						showForceEnterOption = true
+						enteringApp = false
+						return@launch
+					} else {
+						val srv = res.getOrNull()
+						if (srv != null) {
+							navidromeFeedbackOk = true
+							navidromeFeedback = "已连接：${srv.name}"
+						}
+					}
+				}
+
+				enteringApp = false
+				finishOnboarding()
+			}
+		}
 	}
 
 	Column(
@@ -200,8 +300,11 @@ fun IosOnboardingOverlay(
 								onValueChange = {
 									meloUrl = it
 									healthStatusMessage = null
+									enterErrorMessage = null
+									showForceEnterOption = false
 								},
 								singleLine = true,
+								enabled = !enteringApp,
 								shape = RoundedCornerShape(12.dp),
 								label = { Text("服务器地址", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 								placeholder = { Text("http://192.168.1.10:8765", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -249,9 +352,11 @@ fun IosOnboardingOverlay(
 										),
 										modifier = Modifier
 											.clip(CircleShape)
-											.clickable {
+											.clickable(enabled = !enteringApp) {
 												meloUrl = endpoint
 												healthStatusMessage = null
+												enterErrorMessage = null
+												showForceEnterOption = false
 											},
 									) {
 										Text(
@@ -278,8 +383,13 @@ fun IosOnboardingOverlay(
 								OutlinedTextField(
 									modifier = Modifier.weight(1f),
 									value = meloUser,
-									onValueChange = { meloUser = it },
+									onValueChange = {
+										meloUser = it
+										enterErrorMessage = null
+										showForceEnterOption = false
+									},
 									singleLine = true,
+									enabled = !enteringApp,
 									shape = RoundedCornerShape(12.dp),
 									label = { Text("用户名", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 									placeholder = { Text("可选", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -291,8 +401,13 @@ fun IosOnboardingOverlay(
 								OutlinedTextField(
 									modifier = Modifier.weight(1f),
 									value = meloPass,
-									onValueChange = { meloPass = it },
+									onValueChange = {
+										meloPass = it
+										enterErrorMessage = null
+										showForceEnterOption = false
+									},
 									singleLine = true,
+									enabled = !enteringApp,
 									shape = RoundedCornerShape(12.dp),
 									label = { Text("密码", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 									placeholder = { Text("可选", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -362,7 +477,7 @@ fun IosOnboardingOverlay(
 								modifier = Modifier.fillMaxWidth(),
 								horizontalArrangement = Arrangement.spacedBy(10.dp),
 							) {
-								val probeEnabled = !probingHealth && meloUrl.isNotBlank()
+								val probeEnabled = !probingHealth && !enteringApp && meloUrl.isNotBlank()
 								OutlinedButton(
 									modifier = Modifier.weight(0.42f),
 									enabled = probeEnabled,
@@ -412,7 +527,7 @@ fun IosOnboardingOverlay(
 								Button(
 									modifier = Modifier.weight(0.58f),
 									shape = RoundedCornerShape(12.dp),
-									enabled = !settingsState.testingConnection && meloUrl.isNotBlank(),
+									enabled = !settingsState.testingConnection && !enteringApp && meloUrl.isNotBlank(),
 									onClick = {
 										focusManager.clearFocus()
 										settingsController.testAndLogin(
@@ -534,9 +649,13 @@ fun IosOnboardingOverlay(
 									OutlinedTextField(
 										modifier = Modifier.fillMaxWidth(),
 										value = navidromeName,
-										onValueChange = { navidromeName = it },
+										onValueChange = {
+											navidromeName = it
+											enterErrorMessage = null
+											showForceEnterOption = false
+										},
 										singleLine = true,
-										enabled = !navidromeConnecting,
+										enabled = !navidromeConnecting && !enteringApp,
 										shape = RoundedCornerShape(12.dp),
 										label = { Text("别名（可选）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 										placeholder = { Text("Navidrome", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -548,9 +667,11 @@ fun IosOnboardingOverlay(
 										onValueChange = {
 											navidromeUrl = it
 											navidromeFeedback = null
+											enterErrorMessage = null
+											showForceEnterOption = false
 										},
 										singleLine = true,
-										enabled = !navidromeConnecting,
+										enabled = !navidromeConnecting && !enteringApp,
 										shape = RoundedCornerShape(12.dp),
 										label = { Text("服务器地址", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 										placeholder = { Text("http://192.168.1.10:4533", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -572,9 +693,11 @@ fun IosOnboardingOverlay(
 											onValueChange = {
 												navidromeUser = it
 												navidromeFeedback = null
+												enterErrorMessage = null
+												showForceEnterOption = false
 											},
 											singleLine = true,
-											enabled = !navidromeConnecting,
+											enabled = !navidromeConnecting && !enteringApp,
 											shape = RoundedCornerShape(12.dp),
 											label = { Text("账号", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 											keyboardOptions = KeyboardOptions(
@@ -588,9 +711,11 @@ fun IosOnboardingOverlay(
 											onValueChange = {
 												navidromePass = it
 												navidromeFeedback = null
+												enterErrorMessage = null
+												showForceEnterOption = false
 											},
 											singleLine = true,
-											enabled = !navidromeConnecting,
+											enabled = !navidromeConnecting && !enteringApp,
 											shape = RoundedCornerShape(12.dp),
 											label = { Text("密码", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 											visualTransformation = if (navidromePassVisible) {
@@ -635,6 +760,7 @@ fun IosOnboardingOverlay(
 											MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
 										),
 										enabled = !navidromeConnecting &&
+											!enteringApp &&
 											navidromeUrl.isNotBlank() &&
 											navidromeUser.isNotBlank() &&
 											navidromePass.isNotBlank(),
@@ -684,25 +810,82 @@ fun IosOnboardingOverlay(
 
 		// 底部完成按钮
 		IosHairlineDivider()
-		Box(
+		Column(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(horizontal = 16.dp, vertical = 12.dp),
-			contentAlignment = Alignment.Center,
+			horizontalAlignment = Alignment.CenterHorizontally,
+			verticalArrangement = Arrangement.spacedBy(8.dp),
 		) {
-			Button(
+			AnimatedVisibility(visible = !enterErrorMessage.isNullOrBlank()) {
+				Text(
+					text = enterErrorMessage.orEmpty(),
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.error,
+					modifier = Modifier
+						.widthIn(max = 520.dp)
+						.fillMaxWidth(),
+				)
+			}
+
+			Row(
 				modifier = Modifier
 					.widthIn(max = 520.dp)
-					.fillMaxWidth()
-					.height(48.dp),
-				shape = RoundedCornerShape(12.dp),
-				onClick = finishOnboarding,
+					.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+				verticalAlignment = Alignment.CenterVertically,
 			) {
-				Text(
-					text = "进入应用",
-					style = MaterialTheme.typography.titleSmall,
-					fontWeight = FontWeight.SemiBold,
-				)
+				if (showForceEnterOption) {
+					OutlinedButton(
+						modifier = Modifier
+							.weight(0.42f)
+							.height(48.dp),
+						shape = RoundedCornerShape(12.dp),
+						enabled = !enteringApp,
+						border = BorderStroke(
+							width = IosHairlineWidth,
+							color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+						),
+						onClick = finishOnboarding,
+					) {
+						Text(
+							text = "仍要进入",
+							style = MaterialTheme.typography.titleSmall,
+							maxLines = 1,
+						)
+					}
+				}
+
+				Button(
+					modifier = Modifier
+						.weight(if (showForceEnterOption) 0.58f else 1f)
+						.height(48.dp),
+					shape = RoundedCornerShape(12.dp),
+					enabled = !enteringApp && !settingsState.testingConnection && !navidromeConnecting,
+					onClick = handleEnterApp,
+				) {
+					if (enteringApp) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(16.dp),
+							strokeWidth = 2.dp,
+							color = MaterialTheme.colorScheme.onPrimary,
+						)
+						Spacer(Modifier.width(8.dp))
+						Text(
+							text = "验证并保存中…",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.SemiBold,
+							maxLines = 1,
+						)
+					} else {
+						Text(
+							text = if (showForceEnterOption) "重试并进入" else "进入应用",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.SemiBold,
+							maxLines = 1,
+						)
+					}
+				}
 			}
 		}
 	}

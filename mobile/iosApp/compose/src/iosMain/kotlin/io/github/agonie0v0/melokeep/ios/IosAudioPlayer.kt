@@ -35,6 +35,7 @@ import platform.AVFAudio.AVAudioSessionInterruptionOptionShouldResume
 import platform.AVFAudio.AVAudioSessionInterruptionTypeBegan
 import platform.AVFAudio.AVAudioSessionInterruptionTypeEnded
 import platform.AVFAudio.AVAudioSessionInterruptionTypeKey
+import platform.AVFAudio.AVAudioSessionModeDefault
 import platform.AVFAudio.AVAudioSessionRouteChangeNotification
 import platform.AVFAudio.AVAudioSessionRouteChangeReasonKey
 import platform.AVFAudio.AVAudioSessionRouteChangeReasonOldDeviceUnavailable
@@ -240,11 +241,18 @@ class IosAudioPlayer(
 	}
 
 	private fun configureAudioSession() {
-		runOnMain {
-			val session = AVAudioSession.sharedInstance()
-			session.setCategory(AVAudioSessionCategoryPlayback, error = null)
-			session.setActive(true, error = null)
-		}
+		runOnMain { configureAudioSessionOnMain() }
+	}
+
+	private fun configureAudioSessionOnMain() {
+		val session = AVAudioSession.sharedInstance()
+		session.setCategory(
+			AVAudioSessionCategoryPlayback,
+			mode = AVAudioSessionModeDefault,
+			options = 0uL,
+			error = null,
+		)
+		session.setActive(true, error = null)
 	}
 
 	private fun registerNotificationObservers() {
@@ -1130,7 +1138,7 @@ class IosAudioPlayer(
 				val nsUrl = resolvePlayableNsUrl(track)
 					?: throw IllegalStateException("无法获取该曲目的播放地址")
 				runOnMain {
-					configureAudioSession()
+					configureAudioSessionOnMain()
 					val item = AVPlayerItem(uRL = nsUrl)
 					queuePlayer.removeAllItems()
 					queuePlayer.insertItem(item, afterItem = null)
@@ -1266,7 +1274,7 @@ class IosAudioPlayer(
 			loadAndPlayTrackAt(_state.value.currentIndex)
 			return
 		}
-		configureAudioSession()
+		configureAudioSessionOnMain()
 		queuePlayer.playImmediatelyAtRate(_state.value.playbackSpeed)
 		_state.update { it.copy(isPlaying = true) }
 		updateNowPlayingMetadata()
@@ -1279,13 +1287,18 @@ class IosAudioPlayer(
 
 	private fun applyReplayGainAndVolumeOnMain(track: IosTrackItem?) {
 		val userVolume = _state.value.volume
-		val mode = subsonicManager.prefs.value.replayGainMode
-		val gainDb = when (mode) {
+		val prefs = subsonicManager.prefs.value
+		val gainDb = when (prefs.replayGainMode) {
 			ReplayGainMode.OFF -> null
 			ReplayGainMode.ALBUM -> track?.albumGainDb ?: track?.trackGainDb ?: track?.fallbackGainDb
 			ReplayGainMode.TRACK -> track?.trackGainDb ?: track?.albumGainDb ?: track?.fallbackGainDb
 		}
-		val linear = gainDb?.let { 10.0f.pow(it / 20.0f) } ?: 1.0f
+		val linear = if (prefs.replayGainMode != ReplayGainMode.OFF && gainDb != null) {
+			val effectiveDb = gainDb + prefs.replayGainPreampDb.coerceIn(-6f, 12f)
+			10.0f.pow(effectiveDb / 20.0f)
+		} else {
+			1.0f
+		}
 		queuePlayer.volume = (userVolume * linear).coerceIn(0f, 1f)
 	}
 

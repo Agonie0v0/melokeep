@@ -131,11 +131,42 @@ enum class IosThemeMode {
 data class IosPlaybackPrefs(
 	val maxBitRate: Int = 0,
 	val transcodeFormat: String = "raw",
-	val replayGainMode: ReplayGainMode = ReplayGainMode.TRACK,
+	val replayGainMode: ReplayGainMode = ReplayGainMode.OFF,
+	val replayGainPreampDb: Float = 6.0f,
+	val replayGainDefaultMigrated: Boolean = false,
 	val lyricsOffsetMs: Int = 0,
+	val lyricsFontSizeSp: Float = 22f,
+	val lyricsActiveColorHex: String = "",
+	val lyricsInactiveAlpha: Float = 0.48f,
+	val lyricsAlign: String = "center",
 	val themeMode: IosThemeMode = IosThemeMode.SYSTEM,
 	val amoledBlack: Boolean = false,
 )
+
+internal fun normalizeIosLyricsHexOrEmpty(raw: String): String {
+	val clean = raw.trim().removePrefix("#").uppercase()
+	if (clean.isEmpty()) return ""
+	if (!clean.all { it in '0'..'9' || it in 'A'..'F' }) return ""
+	return when (clean.length) {
+		6, 8 -> "#$clean"
+		else -> ""
+	}
+}
+
+internal fun sanitizeIosPlaybackPrefs(prefs: IosPlaybackPrefs): IosPlaybackPrefs {
+	val safePreamp = if (prefs.replayGainPreampDb.isNaN()) 6.0f else prefs.replayGainPreampDb.coerceIn(-6f, 12f)
+	val safeFontSp = if (prefs.lyricsFontSizeSp.isNaN()) 22f else prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val safeAlpha = if (prefs.lyricsInactiveAlpha.isNaN()) 0.48f else prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
+	val safeAlign = if (prefs.lyricsAlign.trim().lowercase() == "start") "start" else "center"
+	return prefs.copy(
+		replayGainPreampDb = safePreamp,
+		lyricsOffsetMs = prefs.lyricsOffsetMs.coerceIn(-5000, 5000),
+		lyricsFontSizeSp = safeFontSp,
+		lyricsActiveColorHex = normalizeIosLyricsHexOrEmpty(prefs.lyricsActiveColorHex),
+		lyricsInactiveAlpha = safeAlpha,
+		lyricsAlign = safeAlign,
+	)
+}
 
 data class IosAlbumSummary(
 	val id: String,
@@ -271,13 +302,34 @@ class IosSubsonicManager(
 
 	private fun readPrefs(): IosPlaybackPrefs {
 		val raw = settings.getString(KEY_PLAYBACK_PREFS, "")
-		if (raw.isBlank()) return IosPlaybackPrefs()
-		return runCatching { json.decodeFromString<IosPlaybackPrefs>(raw) }
+		if (raw.isBlank()) {
+			val initial = IosPlaybackPrefs(replayGainDefaultMigrated = true)
+			runCatching { settings.putString(KEY_PLAYBACK_PREFS, json.encodeToString(initial)) }
+			return initial
+		}
+		val decoded = runCatching { json.decodeFromString<IosPlaybackPrefs>(raw) }
 			.getOrDefault(IosPlaybackPrefs())
+		val sanitized = sanitizeIosPlaybackPrefs(decoded)
+		if (!sanitized.replayGainDefaultMigrated) {
+			val migratedMode = if (sanitized.replayGainMode == ReplayGainMode.TRACK) {
+				ReplayGainMode.OFF
+			} else {
+				sanitized.replayGainMode
+			}
+			val migrated = sanitized.copy(
+				replayGainMode = migratedMode,
+				replayGainDefaultMigrated = true,
+			)
+			runCatching { settings.putString(KEY_PLAYBACK_PREFS, json.encodeToString(migrated)) }
+			return migrated
+		}
+		return sanitized
 	}
 
 	fun updatePrefs(transform: (IosPlaybackPrefs) -> IosPlaybackPrefs) {
-		val updated = transform(_prefs.value)
+		val updated = sanitizeIosPlaybackPrefs(transform(_prefs.value)).let { next ->
+			if (next.replayGainDefaultMigrated) next else next.copy(replayGainDefaultMigrated = true)
+		}
 		_prefs.value = updated
 		runCatching { settings.putString(KEY_PLAYBACK_PREFS, json.encodeToString(updated)) }
 	}

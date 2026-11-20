@@ -370,6 +370,7 @@ fun IosDiscoverRoute(
 							currentTrackId = currentTrackId,
 							isPlayerPlaying = isPlayerPlaying,
 							searchController = searchController,
+							settingsStore = settingsStore,
 							subsonicManager = subsonicManager,
 							audioPlayer = audioPlayer,
 							safeBottomDp = safeBottomDp,
@@ -792,6 +793,17 @@ fun IosStudioRoute(
 				studioController.createScrapeJob(action = "both", autoApply = true)
 				filePickerOpen = false
 			},
+			onScopeScrape = {
+				studioController.clearJobDetail()
+				autoOpenNextJobDetail = true
+				studioController.createScrapeJob(
+					paths = emptyList(),
+					action = "both",
+					autoApply = false,
+					scopeDir = state.currentFolder.orEmpty(),
+				)
+				filePickerOpen = false
+			},
 		)
 	}
 
@@ -800,6 +812,10 @@ fun IosStudioRoute(
 			job = state.activeJobDetail,
 			jobsLoading = state.jobsLoading,
 			fileTagVersions = state.fileTagVersions,
+			errorMessage = state.errorMessage,
+			noticeMessage = state.noticeMessage,
+			onDismissError = { studioController.clearError() },
+			onDismissNotice = { studioController.clearNotice() },
 			onDismiss = {
 				diffSheetVisible = false
 				studioController.clearJobDetail()
@@ -807,6 +823,16 @@ fun IosStudioRoute(
 			onRefreshJob = { jobId -> studioController.loadLibraryJobDetail(jobId) },
 			onPreviewCandidate = { jobId, itemKey, candidateId ->
 				studioController.previewCandidateChoice(jobId, itemKey, candidateId)
+			},
+			onKeepExistingForPending = { jobId ->
+				studioController.keepExistingForPendingItems(jobId)
+			},
+			onSearchItemCandidates = { jobId, itemId, query ->
+				studioController.searchJobItemCandidates(
+					jobId = jobId,
+					itemId = itemId,
+					query = query,
+				)
 			},
 			onLoadFileVersions = { path -> studioController.loadFileVersions(path) },
 			onRestoreFileVersion = { versionJobId, itemId ->

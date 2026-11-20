@@ -11,6 +11,7 @@ package io.github.agonie0v0.melokeep.ios
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
@@ -79,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -86,10 +89,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
 import kotlinx.coroutines.launch
 import platform.Foundation.NSBundle
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private const val IOS_LYRICS_OFFSET_MIN_MS = -5000
@@ -98,8 +103,18 @@ private const val IOS_LYRICS_OFFSET_STEP_MS = 100
 private const val IOS_LYRICS_OFFSET_SLIDER_STEPS =
 	(IOS_LYRICS_OFFSET_MAX_MS - IOS_LYRICS_OFFSET_MIN_MS) / IOS_LYRICS_OFFSET_STEP_MS - 1
 
+private val IOS_LYRICS_COLOR_PRESETS = listOf(
+	"" to "跟随主题",
+	"#FFFFFF" to "纯白",
+	"#60A5FA" to "冰蓝",
+	"#FACC15" to "流金",
+	"#4ADE80" to "翡翠",
+	"#FB7185" to "珊瑚",
+	"#A78BFA" to "紫罗兰",
+)
+
 // =============================================================================
-// 1. 公共独立抽屉：歌词偏移 (IosLyricsAndStageSheet)
+// 1. 公共独立抽屉：歌词设置 (IosLyricsAndStageSheet)
 // =============================================================================
 
 @Composable
@@ -126,10 +141,11 @@ fun IosLyricsAndStageSheet(
 		Column(
 			modifier = Modifier
 				.fillMaxWidth()
+				.imePadding()
 				.padding(bottom = 32.dp),
 		) {
 			IosCleanTopBar(
-				title = "歌词偏移",
+				title = "歌词设置",
 				onBack = onDismissRequest,
 			)
 
@@ -141,17 +157,14 @@ fun IosLyricsAndStageSheet(
 				verticalArrangement = Arrangement.spacedBy(18.dp),
 			) {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "播放页")
-					IosGroupedCard {
-						IosSettingsLyricsOffsetControl(
-							title = "播放页歌词",
-							offsetMs = currentOffset,
-							onOffsetChange = { next ->
-								audioPlayer.setLyricsOffset(next)
-							},
-							modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-						)
-					}
+					IosSectionLabel(title = "歌词设置")
+					IosSettingsLyricsSectionCard(
+						offsetMs = currentOffset,
+						prefs = prefs,
+						onOffsetChange = { next -> audioPlayer.setLyricsOffset(next) },
+						onUpdatePrefs = { transform -> subsonicManager.updatePrefs(transform) },
+						onResetAll = { resetIosLyricsPreferences(audioPlayer, subsonicManager) },
+					)
 				}
 			}
 		}
@@ -235,25 +248,111 @@ fun IosAudioEngineSheet(
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					IosSectionLabel(title = "ReplayGain")
 					IosGroupedCard {
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(12.dp),
-							horizontalArrangement = Arrangement.spacedBy(6.dp),
-						) {
-							listOf(
-								ReplayGainMode.TRACK to "单曲",
-								ReplayGainMode.ALBUM to "专辑",
-								ReplayGainMode.OFF to "关闭",
-							).forEach { (mode, label) ->
-								IosSettingsChoicePill(
-									label = label,
-									selected = prefs.replayGainMode == mode,
-									onClick = {
-										subsonicManager.updatePrefs { it.copy(replayGainMode = mode) }
-										audioPlayer.refreshReplayGain()
+						Column(modifier = Modifier.fillMaxWidth()) {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(12.dp),
+								horizontalArrangement = Arrangement.spacedBy(6.dp),
+							) {
+								listOf(
+									ReplayGainMode.TRACK to "单曲",
+									ReplayGainMode.ALBUM to "专辑",
+									ReplayGainMode.OFF to "关闭",
+								).forEach { (mode, label) ->
+									IosSettingsChoicePill(
+										label = label,
+										selected = prefs.replayGainMode == mode,
+										onClick = {
+											subsonicManager.updatePrefs {
+												it.copy(
+													replayGainMode = mode,
+													replayGainDefaultMigrated = true,
+												)
+											}
+											audioPlayer.refreshReplayGain()
+										},
+										modifier = Modifier.weight(1f),
+									)
+								}
+							}
+
+							IosHairlineDivider(startIndent = 16.dp)
+
+							val clampedPreamp = prefs.replayGainPreampDb.coerceIn(-6f, 12f)
+							Column(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 16.dp, vertical = 12.dp),
+								verticalArrangement = Arrangement.spacedBy(6.dp),
+							) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.SpaceBetween,
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									Text(
+										text = "前级增益 (Preamp)",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium,
+									)
+									Row(
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(8.dp),
+									) {
+										Text(
+											text = formatIosDbLabel(clampedPreamp),
+											style = MaterialTheme.typography.labelMedium.tabularNums(),
+											fontWeight = FontWeight.SemiBold,
+											color = if (prefs.replayGainMode != ReplayGainMode.OFF) {
+												MaterialTheme.colorScheme.primary
+											} else {
+												MaterialTheme.colorScheme.onSurfaceVariant
+											},
+										)
+										if (abs(clampedPreamp - 6.0f) > 0.05f) {
+											Text(
+												text = "重置",
+												style = MaterialTheme.typography.labelSmall,
+												color = MaterialTheme.colorScheme.primary,
+												modifier = Modifier
+													.clip(RoundedCornerShape(6.dp))
+													.clickable {
+														subsonicManager.updatePrefs { it.copy(replayGainPreampDb = 6.0f) }
+														audioPlayer.refreshReplayGain()
+													}
+													.padding(horizontal = 4.dp, vertical = 2.dp),
+											)
+										}
+									}
+								}
+								Slider(
+									value = clampedPreamp,
+									onValueChange = { raw ->
+										val stepped = ((raw * 2f).roundToInt() / 2f).coerceIn(-6f, 12f)
+										if (abs(stepped - clampedPreamp) >= 0.05f) {
+											subsonicManager.updatePrefs { it.copy(replayGainPreampDb = stepped) }
+											audioPlayer.refreshReplayGain()
+										}
 									},
-									modifier = Modifier.weight(1f),
+									valueRange = -6f..12f,
+									steps = 35,
+									modifier = Modifier.fillMaxWidth(),
+									colors = SliderDefaults.colors(
+										thumbColor = MaterialTheme.colorScheme.primary,
+										activeTrackColor = MaterialTheme.colorScheme.primary,
+										activeTickColor = Color.Transparent,
+										inactiveTickColor = Color.Transparent,
+									),
+								)
+								Text(
+									text = if (prefs.replayGainMode == ReplayGainMode.OFF) {
+										"当前 ReplayGain 已关闭，曲目按原始音量无衰减播放；开启单曲或专辑模式后将叠加此前级增益（默认 +6.0 dB）。"
+									} else {
+										"范围 -6.0 dB ~ +12.0 dB（默认 +6.0 dB），用于补偿音轨响度衰减。"
+									},
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
 								)
 							}
 						}
@@ -673,18 +772,17 @@ internal fun IosSettingsHomeSheet(
 				contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
 				verticalArrangement = Arrangement.spacedBy(20.dp),
 			) {
-				// 1. 歌词偏移
+				// 1. 歌词设置（统一归拢偏移与样式自定义）
 				item(key = "ios-settings-lyrics") {
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-						IosSectionLabel(title = "歌词偏移")
-						IosGroupedCard {
-							IosSettingsLyricsOffsetControl(
-								title = "播放页歌词",
-								offsetMs = playerState.lyricsOffsetMs,
-								onOffsetChange = { audioPlayer.setLyricsOffset(it) },
-								modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-							)
-						}
+						IosSectionLabel(title = "歌词设置")
+						IosSettingsLyricsSectionCard(
+							offsetMs = playerState.lyricsOffsetMs,
+							prefs = prefs,
+							onOffsetChange = { audioPlayer.setLyricsOffset(it) },
+							onUpdatePrefs = { transform -> subsonicManager.updatePrefs(transform) },
+							onResetAll = { resetIosLyricsPreferences(audioPlayer, subsonicManager) },
+						)
 					}
 				}
 
@@ -1552,6 +1650,411 @@ internal fun IosSettingsFormatOffsetLabel(offsetMs: Int): String = when {
 	offsetMs > 0 -> "+$offsetMs ms"
 	offsetMs < 0 -> "$offsetMs ms"
 	else -> "0 ms"
+}
+
+internal fun formatIosDbLabel(db: Float): String {
+	val tenths = (db * 10f).roundToInt()
+	val sign = when {
+		tenths > 0 -> "+"
+		tenths < 0 -> "-"
+		else -> ""
+	}
+	val absTenths = abs(tenths)
+	return "$sign${absTenths / 10}.${absTenths % 10} dB"
+}
+
+internal fun parseIosLyricsHexColorOrNull(raw: String): Color? {
+	val clean = raw.trim().removePrefix("#")
+	if (clean.length != 6 && clean.length != 8) return null
+	val parsed = clean.toLongOrNull(16) ?: return null
+	val argb = if (clean.length == 6) {
+		0xFF000000L or parsed
+	} else {
+		parsed
+	}
+	return Color(argb)
+}
+
+internal fun resetIosLyricsPreferences(
+	audioPlayer: IosAudioPlayer,
+	subsonicManager: IosSubsonicManager,
+) {
+	audioPlayer.setLyricsOffset(0)
+	subsonicManager.updatePrefs {
+		it.copy(
+			lyricsOffsetMs = 0,
+			lyricsFontSizeSp = 22f,
+			lyricsActiveColorHex = "",
+			lyricsInactiveAlpha = 0.48f,
+			lyricsAlign = "center",
+		)
+	}
+}
+
+@Composable
+internal fun IosSettingsLyricsSectionCard(
+	offsetMs: Int,
+	prefs: IosPlaybackPrefs,
+	onOffsetChange: (Int) -> Unit,
+	onUpdatePrefs: ((IosPlaybackPrefs) -> IosPlaybackPrefs) -> Unit,
+	onResetAll: () -> Unit,
+) {
+	IosGroupedCard {
+		IosSettingsLyricsOffsetControl(
+			title = "时间偏移",
+			offsetMs = offsetMs,
+			onOffsetChange = onOffsetChange,
+			modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+		)
+		IosHairlineDivider(startIndent = 16.dp)
+		IosSettingsLyricsStyleControl(
+			prefs = prefs,
+			offsetMs = offsetMs,
+			onUpdatePrefs = onUpdatePrefs,
+			onResetAll = onResetAll,
+			modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+		)
+	}
+}
+
+@Composable
+internal fun IosSettingsLyricsStyleControl(
+	prefs: IosPlaybackPrefs,
+	offsetMs: Int,
+	onUpdatePrefs: ((IosPlaybackPrefs) -> IosPlaybackPrefs) -> Unit,
+	onResetAll: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	val clampedFontSp = prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val inactiveFontSp = (clampedFontSp - 4f).coerceAtLeast(13f)
+	val clampedInactiveAlpha = prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
+	val currentAlign = if (prefs.lyricsAlign == "start") "start" else "center"
+	val currentHex = normalizeIosLyricsHexOrEmpty(prefs.lyricsActiveColorHex)
+	val activePreviewColor = parseIosLyricsHexColorOrNull(currentHex) ?: MaterialTheme.colorScheme.onSurface
+	val previewAlign = if (currentAlign == "start") TextAlign.Start else TextAlign.Center
+
+	var hexInput by remember(currentHex) { mutableStateOf(currentHex) }
+	var hexError by remember { mutableStateOf<String?>(null) }
+
+	val isDefault = offsetMs == 0 &&
+		abs(clampedFontSp - 22f) < 0.05f &&
+		currentHex.isEmpty() &&
+		abs(clampedInactiveAlpha - 0.48f) < 0.005f &&
+		currentAlign == "center"
+
+	Column(
+		modifier = modifier.fillMaxWidth(),
+		verticalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		// 实时样式预览
+		Surface(
+			shape = RoundedCornerShape(12.dp),
+			color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+			border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+			modifier = Modifier.fillMaxWidth(),
+		) {
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 12.dp, vertical = 10.dp),
+				verticalArrangement = Arrangement.spacedBy(4.dp),
+			) {
+				Text(
+					text = "正在高亮显示当前歌词",
+					fontSize = clampedFontSp.sp,
+					lineHeight = (clampedFontSp * 1.36f).sp,
+					fontWeight = FontWeight.Bold,
+					color = activePreviewColor,
+					textAlign = previewAlign,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+					modifier = Modifier.fillMaxWidth(),
+				)
+				Text(
+					text = "非高亮歌词预览效果",
+					fontSize = inactiveFontSp.sp,
+					lineHeight = (inactiveFontSp * 1.36f).sp,
+					fontWeight = FontWeight.Medium,
+					color = MaterialTheme.colorScheme.onSurface.copy(alpha = clampedInactiveAlpha),
+					textAlign = previewAlign,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+					modifier = Modifier.fillMaxWidth(),
+				)
+			}
+		}
+
+		// 字号 16..34 sp
+		Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "歌词字号",
+					style = MaterialTheme.typography.bodyMedium,
+					fontWeight = FontWeight.Medium,
+				)
+				Text(
+					text = "${clampedFontSp.roundToInt()} sp",
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					fontWeight = FontWeight.SemiBold,
+					color = MaterialTheme.colorScheme.primary,
+				)
+			}
+			Slider(
+				value = clampedFontSp,
+				onValueChange = { raw ->
+					val stepped = raw.roundToInt().toFloat().coerceIn(16f, 34f)
+					if (abs(stepped - clampedFontSp) >= 0.5f) {
+						onUpdatePrefs { it.copy(lyricsFontSizeSp = stepped) }
+					}
+				},
+				valueRange = 16f..34f,
+				steps = 17,
+				modifier = Modifier.fillMaxWidth(),
+				colors = SliderDefaults.colors(
+					thumbColor = MaterialTheme.colorScheme.primary,
+					activeTrackColor = MaterialTheme.colorScheme.primary,
+					activeTickColor = Color.Transparent,
+					inactiveTickColor = Color.Transparent,
+				),
+			)
+		}
+
+		// 高亮颜色
+		Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "高亮颜色",
+					style = MaterialTheme.typography.bodyMedium,
+					fontWeight = FontWeight.Medium,
+				)
+				Text(
+					text = currentHex.ifBlank { "跟随主题" },
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+
+			FlowRow(
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalArrangement = Arrangement.spacedBy(8.dp),
+			) {
+				IOS_LYRICS_COLOR_PRESETS.forEach { (hex, label) ->
+					val selected = currentHex.equals(hex, ignoreCase = true)
+					val swatchColor = parseIosLyricsHexColorOrNull(hex)
+					Surface(
+						onClick = {
+							hexError = null
+							hexInput = hex
+							onUpdatePrefs { it.copy(lyricsActiveColorHex = hex) }
+						},
+						shape = CircleShape,
+						color = if (selected) {
+							MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainerHigh
+						},
+						border = BorderStroke(
+							width = if (selected) 1.25.dp else IosHairlineWidth,
+							color = if (selected) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+							},
+						),
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							if (swatchColor != null) {
+								Box(
+									modifier = Modifier
+										.size(13.dp)
+										.clip(CircleShape)
+										.background(swatchColor)
+										.border(
+											width = IosHairlineWidth,
+											color = if (swatchColor.luminance() > 0.85f) {
+												MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+											} else {
+												Color.Transparent
+											},
+											shape = CircleShape,
+										),
+									contentAlignment = Alignment.Center,
+								) {
+									if (selected) {
+										Icon(
+											imageVector = Icons.Rounded.Check,
+											contentDescription = null,
+											tint = if (swatchColor.luminance() > 0.6f) Color.Black else Color.White,
+											modifier = Modifier.size(9.dp),
+										)
+									}
+								}
+							} else if (selected) {
+								Icon(
+									imageVector = Icons.Rounded.Check,
+									contentDescription = null,
+									tint = MaterialTheme.colorScheme.primary,
+									modifier = Modifier.size(13.dp),
+								)
+							}
+							Text(
+								text = label,
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+								color = if (selected) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									MaterialTheme.colorScheme.onSurface
+								},
+							)
+						}
+					}
+				}
+			}
+
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				OutlinedTextField(
+					value = hexInput,
+					onValueChange = {
+						hexInput = it
+						hexError = null
+					},
+					singleLine = true,
+					shape = RoundedCornerShape(10.dp),
+					placeholder = { Text("自定义 Hex，如 #60A5FA", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+					modifier = Modifier.weight(1f),
+				)
+				FilledTonalButton(
+					onClick = {
+						val trimmed = hexInput.trim()
+						if (trimmed.isEmpty()) {
+							hexError = null
+							onUpdatePrefs { it.copy(lyricsActiveColorHex = "") }
+						} else {
+							val normalized = normalizeIosLyricsHexOrEmpty(trimmed)
+							if (normalized.isEmpty()) {
+								hexError = "请输入 6 位或 8 位十六进制颜色，如 #FFFFFF"
+							} else {
+								hexError = null
+								hexInput = normalized
+								onUpdatePrefs { it.copy(lyricsActiveColorHex = normalized) }
+							}
+						}
+					},
+					shape = RoundedCornerShape(10.dp),
+				) {
+					Text("应用")
+				}
+			}
+			if (!hexError.isNullOrBlank()) {
+				Text(
+					text = hexError.orEmpty(),
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.error,
+				)
+			}
+		}
+
+		// 非高亮透明度 0.2..0.85
+		Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "非高亮透明度",
+					style = MaterialTheme.typography.bodyMedium,
+					fontWeight = FontWeight.Medium,
+				)
+				Text(
+					text = "${(clampedInactiveAlpha * 100f).roundToInt()}%",
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					fontWeight = FontWeight.SemiBold,
+					color = MaterialTheme.colorScheme.primary,
+				)
+			}
+			Slider(
+				value = clampedInactiveAlpha,
+				onValueChange = { raw ->
+					val rounded = ((raw * 100f).roundToInt() / 100f).coerceIn(0.2f, 0.85f)
+					if (abs(rounded - clampedInactiveAlpha) >= 0.005f) {
+						onUpdatePrefs { it.copy(lyricsInactiveAlpha = rounded) }
+					}
+				},
+				valueRange = 0.2f..0.85f,
+				modifier = Modifier.fillMaxWidth(),
+				colors = SliderDefaults.colors(
+					thumbColor = MaterialTheme.colorScheme.primary,
+					activeTrackColor = MaterialTheme.colorScheme.primary,
+				),
+			)
+		}
+
+		// 对齐方式
+		Row(
+			modifier = Modifier.fillMaxWidth(),
+			horizontalArrangement = Arrangement.SpaceBetween,
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			Text(
+				text = "对齐方式",
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Medium,
+			)
+			Row(
+				modifier = Modifier.width(160.dp),
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+			) {
+				IosSettingsChoicePill(
+					label = "居中",
+					selected = currentAlign == "center",
+					onClick = { onUpdatePrefs { it.copy(lyricsAlign = "center") } },
+					modifier = Modifier.weight(1f),
+				)
+				IosSettingsChoicePill(
+					label = "左对齐",
+					selected = currentAlign == "start",
+					onClick = { onUpdatePrefs { it.copy(lyricsAlign = "start") } },
+					modifier = Modifier.weight(1f),
+				)
+			}
+		}
+
+		// 恢复默认
+		OutlinedButton(
+			onClick = {
+				hexError = null
+				hexInput = ""
+				onResetAll()
+			},
+			enabled = !isDefault,
+			shape = RoundedCornerShape(10.dp),
+			border = BorderStroke(
+				width = IosHairlineWidth,
+				color = MaterialTheme.colorScheme.outline.copy(alpha = if (isDefault) 0.25f else 0.45f),
+			),
+			modifier = Modifier.fillMaxWidth(),
+		) {
+			Text("恢复默认")
+		}
+	}
 }
 
 internal fun IosSettingsResolveAppVersion(): String {

@@ -11,7 +11,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
@@ -71,6 +73,7 @@ import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -197,6 +200,12 @@ internal data class IosLibLocalTrackEntry(
 
 internal val IosLibLosslessExtensions = setOf("flac", "wav", "alac", "ape", "dsf", "dff", "aiff", "aif", "wv")
 
+private sealed interface IosLibPageState {
+	data object Root : IosLibPageState
+	data class NavDetail(val route: IosLibNavDetailRoute) : IosLibPageState
+	data class LocalDetail(val route: IosLibLocalDetailRoute) : IosLibPageState
+}
+
 /**
  * 平等双库「曲库」主入口：Navidrome 库与本地库并列。
  * 等宽双库胶囊（216.dp）、无右上角离线按钮、真实全库多选与极简视觉层次。
@@ -224,6 +233,7 @@ fun IosLibraryRoute(
 	val studioState by studioController.state.collectAsState()
 	val localState by activeLocalController.state.collectAsState()
 	val meloConfig by settingsStore.config.collectAsState()
+	val librarySearchHistory by settingsStore.librarySearchHistory.collectAsState()
 
 	val isNavidromeConnected = libState.activeServer != null
 	val isMeloConnected = meloConfig.isAuthenticated
@@ -263,6 +273,14 @@ fun IosLibraryRoute(
 	var navSearchOpen by rememberSaveable { mutableStateOf(false) }
 	var localSearchOpen by rememberSaveable { mutableStateOf(false) }
 	var localSearchDraft by rememberSaveable { mutableStateOf(studioState.fileQuery) }
+	var libHistoryManageMode by remember { mutableStateOf(false) }
+	var showClearLibHistoryConfirm by remember { mutableStateOf(false) }
+
+	LaunchedEffect(librarySearchHistory.isEmpty()) {
+		if (librarySearchHistory.isEmpty()) {
+			libHistoryManageMode = false
+		}
+	}
 
 	// 弹窗与抽屉
 	var showServerDialog by remember { mutableStateOf(false) }
@@ -358,395 +376,492 @@ fun IosLibraryRoute(
 		studioState.libraryFiles.filter { it.path in studioState.selectedFilePaths }
 	}
 
-	val activeNavDetail = navDetailRoute
-	if (sourceMode == IosLibSourceMode.NAVIDROME && activeNavDetail != null) {
-		when (activeNavDetail) {
-			is IosLibNavDetailRoute.Album -> IosLibAlbumDetailScreen(
-				albumId = activeNavDetail.albumId,
-				albumTitle = activeNavDetail.albumTitle,
-				refreshSeq = navMutationSeq,
-				subsonicManager = subsonicManager,
-				audioPlayer = audioPlayer,
-				currentTrackId = playerState.currentTrack?.id,
-				starredIds = libState.starredIds,
-				unstarredIds = libState.unstarredIds,
-				offlineIds = playerState.offlineTracks.keys,
-				downloadingProgress = playerState.downloadingProgress,
-				onOpenArtist = { id, name -> navDetailRoute = IosLibNavDetailRoute.Artist(id, name) },
-				onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
-				onRequestPhysicalDelete = triggerPhysicalDelete,
-				onShowNotice = { inlineNotice = it },
-				onBack = { navDetailRoute = null },
-				bottomPadding = bottomPadding,
-			)
-
-			is IosLibNavDetailRoute.Artist -> IosLibArtistDetailScreen(
-				artistId = activeNavDetail.artistId,
-				artistName = activeNavDetail.artistName,
-				subsonicManager = subsonicManager,
-				audioPlayer = audioPlayer,
-				currentTrackId = playerState.currentTrack?.id,
-				starredIds = libState.starredIds,
-				unstarredIds = libState.unstarredIds,
-				offlineIds = playerState.offlineTracks.keys,
-				downloadingProgress = playerState.downloadingProgress,
-				onOpenAlbum = { album -> navDetailRoute = IosLibNavDetailRoute.Album(album.id, album.name) },
-				onOpenArtist = { artist -> navDetailRoute = IosLibNavDetailRoute.Artist(artist.id, artist.name) },
-				onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
-				onRequestPhysicalDelete = triggerPhysicalDelete,
-				onShowNotice = { inlineNotice = it },
-				onBack = { navDetailRoute = null },
-				bottomPadding = bottomPadding,
-			)
-
-			is IosLibNavDetailRoute.Playlist -> IosLibPlaylistDetailScreen(
-				playlistId = activeNavDetail.playlistId,
-				playlistName = activeNavDetail.playlistName,
-				refreshSeq = navMutationSeq,
-				subsonicManager = subsonicManager,
-				audioPlayer = audioPlayer,
-				currentTrackId = playerState.currentTrack?.id,
-				starredIds = libState.starredIds,
-				unstarredIds = libState.unstarredIds,
-				offlineIds = playerState.offlineTracks.keys,
-				downloadingProgress = playerState.downloadingProgress,
-				onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
-				onRequestPhysicalDelete = triggerPhysicalDelete,
-				onShowNotice = { inlineNotice = it },
-				onBack = { navDetailRoute = null },
-				bottomPadding = bottomPadding,
-			)
-
-			IosLibNavDetailRoute.Favorites -> IosLibNavFavoritesScreen(
-				libState = libState,
-				subsonicManager = subsonicManager,
-				audioPlayer = audioPlayer,
-				currentTrackId = playerState.currentTrack?.id,
-				offlineIds = playerState.offlineTracks.keys,
-				downloadingProgress = playerState.downloadingProgress,
-				onOpenAlbum = { album -> navDetailRoute = IosLibNavDetailRoute.Album(album.id, album.name) },
-				onOpenArtist = { artist -> navDetailRoute = IosLibNavDetailRoute.Artist(artist.id, artist.name) },
-				onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
-				onRequestPhysicalDelete = triggerPhysicalDelete,
-				onShowNotice = { inlineNotice = it },
-				onBack = { navDetailRoute = null },
-				bottomPadding = bottomPadding,
-			)
+	val recordActiveNavSearchIfNeeded: () -> Unit = {
+		val q = libState.searchQuery.trim()
+		if (q.isNotBlank()) {
+			settingsStore.recordLibrarySearchHistory(q)
 		}
-	} else {
-		Box(
-			modifier = Modifier
-				.fillMaxSize()
-				.background(MaterialTheme.colorScheme.background),
-		) {
-			Column(modifier = Modifier.fillMaxSize()) {
-				IosLibTopHeader(
-					sourceMode = sourceMode,
-					onSelectSourceMode = { next ->
-						if (next != sourceMode) {
-							studioController.clearFileSelection()
-							sourceModeName = next.name
-						}
-					},
-					isNavidromeConnected = isNavidromeConnected,
-					hasSavedServers = libState.servers.isNotEmpty(),
-					isMeloConnected = isMeloConnected,
-					scanningNavidrome = studioState.scanningNavidrome,
-					scanTrackCount = studioState.scanStatus?.count,
-					navSearchOpen = navSearchOpen,
-					navSearchQuery = libState.searchQuery,
-					onNavSearchQueryChange = { subsonicManager.searchLibrary(it) },
-					onToggleNavSearch = {
-						val next = !navSearchOpen
-						navSearchOpen = next
-						if (!next && libState.searchQuery.isNotBlank()) {
-							subsonicManager.searchLibrary("")
-						}
-					},
-					onOpenServerSheet = {
-						editingServer = null
-						showServerDialog = true
-					},
-					onTriggerScan = {
-						if (isMeloConnected) {
-							studioController.triggerNavidromeScan()
-						} else {
-							inlineNotice = "请先连接 MeloKeep 服务以触发扫库"
-							onOpenSettings()
-						}
-					},
-					onOpenCreateFolder = { mkdirDialogOpen = true },
-					localSearchOpen = localSearchOpen,
-					localSearchInput = localSearchDraft,
-					onLocalSearchInputChange = { localSearchDraft = it },
-					onToggleLocalSearch = {
-						val next = !localSearchOpen
-						localSearchOpen = next
-						if (!next && studioState.fileQuery.isNotBlank()) {
+	}
+	val recordActiveLocalSearchIfNeeded: () -> Unit = {
+		val q = (localSearchDraft.ifBlank { studioState.fileQuery }).trim()
+		if (q.isNotBlank()) {
+			settingsStore.recordLibrarySearchHistory(q)
+		}
+	}
+
+	val activeNavDetail = if (sourceMode == IosLibSourceMode.NAVIDROME) navDetailRoute else null
+	val activeLocalDetail = if (sourceMode == IosLibSourceMode.LOCAL && isMeloConnected) localDetailRoute else null
+	val pageState: IosLibPageState = when {
+		activeNavDetail != null -> IosLibPageState.NavDetail(activeNavDetail)
+		activeLocalDetail != null -> IosLibPageState.LocalDetail(activeLocalDetail)
+		else -> IosLibPageState.Root
+	}
+
+	AnimatedContent(
+		targetState = pageState,
+		transitionSpec = {
+			if (targetState != IosLibPageState.Root && initialState == IosLibPageState.Root) {
+				(slideInHorizontally(tween(180)) { it / 5 } + fadeIn(tween(180))) togetherWith
+					(slideOutHorizontally(tween(180)) { -it / 6 } + fadeOut(tween(140)))
+			} else if (targetState == IosLibPageState.Root && initialState != IosLibPageState.Root) {
+				(slideInHorizontally(tween(180)) { -it / 5 } + fadeIn(tween(180))) togetherWith
+					(slideOutHorizontally(tween(180)) { it / 5 } + fadeOut(tween(140)))
+			} else {
+				fadeIn(tween(160)) togetherWith fadeOut(tween(140))
+			}
+		},
+		contentKey = { state ->
+			when (state) {
+				IosLibPageState.Root -> "root"
+				is IosLibPageState.NavDetail -> "nav-${state.route}"
+				is IosLibPageState.LocalDetail -> "local-${state.route}"
+			}
+		},
+		label = "IosLibraryPageTransition",
+	) { page ->
+		when (page) {
+			is IosLibPageState.NavDetail -> when (val active = page.route) {
+				is IosLibNavDetailRoute.Album -> IosLibAlbumDetailScreen(
+					albumId = active.albumId,
+					albumTitle = active.albumTitle,
+					refreshSeq = navMutationSeq,
+					subsonicManager = subsonicManager,
+					audioPlayer = audioPlayer,
+					currentTrackId = playerState.currentTrack?.id,
+					starredIds = libState.starredIds,
+					unstarredIds = libState.unstarredIds,
+					offlineIds = playerState.offlineTracks.keys,
+					downloadingProgress = playerState.downloadingProgress,
+					onOpenArtist = { id, name -> navDetailRoute = IosLibNavDetailRoute.Artist(id, name) },
+					onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
+					onRequestPhysicalDelete = triggerPhysicalDelete,
+					onShowNotice = { inlineNotice = it },
+					onBack = { navDetailRoute = null },
+					bottomPadding = bottomPadding,
+				)
+
+				is IosLibNavDetailRoute.Artist -> IosLibArtistDetailScreen(
+					artistId = active.artistId,
+					artistName = active.artistName,
+					subsonicManager = subsonicManager,
+					audioPlayer = audioPlayer,
+					currentTrackId = playerState.currentTrack?.id,
+					starredIds = libState.starredIds,
+					unstarredIds = libState.unstarredIds,
+					offlineIds = playerState.offlineTracks.keys,
+					downloadingProgress = playerState.downloadingProgress,
+					onOpenAlbum = { album -> navDetailRoute = IosLibNavDetailRoute.Album(album.id, album.name) },
+					onOpenArtist = { artist -> navDetailRoute = IosLibNavDetailRoute.Artist(artist.id, artist.name) },
+					onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
+					onRequestPhysicalDelete = triggerPhysicalDelete,
+					onShowNotice = { inlineNotice = it },
+					onBack = { navDetailRoute = null },
+					bottomPadding = bottomPadding,
+				)
+
+				is IosLibNavDetailRoute.Playlist -> IosLibPlaylistDetailScreen(
+					playlistId = active.playlistId,
+					playlistName = active.playlistName,
+					refreshSeq = navMutationSeq,
+					subsonicManager = subsonicManager,
+					audioPlayer = audioPlayer,
+					currentTrackId = playerState.currentTrack?.id,
+					starredIds = libState.starredIds,
+					unstarredIds = libState.unstarredIds,
+					offlineIds = playerState.offlineTracks.keys,
+					downloadingProgress = playerState.downloadingProgress,
+					onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
+					onRequestPhysicalDelete = triggerPhysicalDelete,
+					onShowNotice = { inlineNotice = it },
+					onBack = { navDetailRoute = null },
+					bottomPadding = bottomPadding,
+				)
+
+				IosLibNavDetailRoute.Favorites -> IosLibNavFavoritesScreen(
+					libState = libState,
+					subsonicManager = subsonicManager,
+					audioPlayer = audioPlayer,
+					currentTrackId = playerState.currentTrack?.id,
+					offlineIds = playerState.offlineTracks.keys,
+					downloadingProgress = playerState.downloadingProgress,
+					onOpenAlbum = { album -> navDetailRoute = IosLibNavDetailRoute.Album(album.id, album.name) },
+					onOpenArtist = { artist -> navDetailRoute = IosLibNavDetailRoute.Artist(artist.id, artist.name) },
+					onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
+					onRequestPhysicalDelete = triggerPhysicalDelete,
+					onShowNotice = { inlineNotice = it },
+					onBack = { navDetailRoute = null },
+					bottomPadding = bottomPadding,
+				)
+			}
+
+			is IosLibPageState.LocalDetail -> IosLibLocalDetailScreen(
+				route = page.route,
+				studioState = studioState,
+				localState = localState,
+				localController = activeLocalController,
+				subsonicManager = subsonicManager,
+				audioPlayer = audioPlayer,
+				apiClient = apiClient,
+				currentTrackId = playerState.currentTrack?.id,
+				offlineIds = playerState.offlineTracks.keys,
+				downloadingProgress = playerState.downloadingProgress,
+				onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it },
+				onShowNotice = { inlineNotice = it },
+				onBack = { localDetailRoute = null },
+				bottomPadding = bottomPadding,
+			)
+
+			IosLibPageState.Root -> Box(
+				modifier = Modifier
+					.fillMaxSize()
+					.background(MaterialTheme.colorScheme.background),
+			) {
+				Column(modifier = Modifier.fillMaxSize()) {
+					IosLibTopHeader(
+						sourceMode = sourceMode,
+						onSelectSourceMode = { next ->
+							if (next != sourceMode) {
+								studioController.clearFileSelection()
+								libHistoryManageMode = false
+								sourceModeName = next.name
+							}
+						},
+						isNavidromeConnected = isNavidromeConnected,
+						hasSavedServers = libState.servers.isNotEmpty(),
+						isMeloConnected = isMeloConnected,
+						scanningNavidrome = studioState.scanningNavidrome,
+						scanTrackCount = studioState.scanStatus?.count,
+						navSearchOpen = navSearchOpen,
+						navSearchQuery = libState.searchQuery,
+						onNavSearchQueryChange = { subsonicManager.searchLibrary(it) },
+						onToggleNavSearch = {
+							val next = !navSearchOpen
+							navSearchOpen = next
+							libHistoryManageMode = false
+							if (!next && libState.searchQuery.isNotBlank()) {
+								subsonicManager.searchLibrary("")
+							}
+						},
+						onNavSearchSubmit = {
+							val q = libState.searchQuery.trim()
+							if (q.isNotBlank()) {
+								subsonicManager.searchLibrary(q)
+								settingsStore.recordLibrarySearchHistory(q)
+							}
+						},
+						onSelectNavSearchHistory = { kw ->
+							subsonicManager.searchLibrary(kw)
+							settingsStore.recordLibrarySearchHistory(kw)
+						},
+						onOpenServerSheet = {
+							editingServer = null
+							showServerDialog = true
+						},
+						onTriggerScan = {
+							if (isMeloConnected) {
+								studioController.triggerNavidromeScan()
+							} else {
+								inlineNotice = "请先连接 MeloKeep 服务以触发扫库"
+								onOpenSettings()
+							}
+						},
+						onOpenCreateFolder = { mkdirDialogOpen = true },
+						localSearchOpen = localSearchOpen,
+						localSearchInput = localSearchDraft,
+						onLocalSearchInputChange = { localSearchDraft = it },
+						onToggleLocalSearch = {
+							val next = !localSearchOpen
+							localSearchOpen = next
+							libHistoryManageMode = false
+							if (!next && studioState.fileQuery.isNotBlank()) {
+								localSearchDraft = ""
+								studioController.loadLibraryFiles(
+									query = "",
+									folder = folderArg,
+									reset = true,
+								)
+							}
+						},
+						onLocalSearchSubmit = {
+							val q = localSearchDraft.trim()
+							if (q.isNotBlank()) {
+								settingsStore.recordLibrarySearchHistory(q)
+							}
+							studioController.loadLibraryFiles(
+								query = q,
+								folder = folderArg,
+								reset = true,
+							)
+						},
+						onLocalSearchClear = {
 							localSearchDraft = ""
 							studioController.loadLibraryFiles(
 								query = "",
 								folder = folderArg,
 								reset = true,
 							)
-						}
-					},
-					onLocalSearchSubmit = {
-						studioController.loadLibraryFiles(
-							query = localSearchDraft,
-							folder = folderArg,
-							reset = true,
-						)
-					},
-					onLocalSearchClear = {
-						localSearchDraft = ""
-						studioController.loadLibraryFiles(
-							query = "",
-							folder = folderArg,
-							reset = true,
-						)
-					},
-					navSubTab = navSubTab,
-					onSelectNavSubTab = { navSubTabName = it.name },
-					localSubTab = localSubTab,
-					onSelectLocalSubTab = {
-						localSubTabName = it.name
-						localDetailRoute = null
-					},
-					showLocalSubTabs = localDetailRoute == null,
-				)
-
-				// 紧凑提示横幅
-				val errorText = studioState.errorMessage?.takeIf { it.isNotBlank() }
-					?: localState.errorMessage?.takeIf { it.isNotBlank() }
-				val feedbackText = errorText ?: inlineNotice?.takeIf { it.isNotBlank() }
-				val isFeedbackError = errorText != null
-				if (feedbackText != null) {
-					Surface(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 16.dp, vertical = 4.dp),
-						shape = RoundedCornerShape(12.dp),
-						color = if (isFeedbackError) {
-							MaterialTheme.colorScheme.errorContainer
-						} else {
-							MaterialTheme.colorScheme.surfaceContainerHigh
 						},
-						border = BorderStroke(
-							IosHairlineWidth,
-							if (isFeedbackError) {
-								MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
-							} else {
-								iosLibHairlineBorderColor()
-							},
-						),
-					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(8.dp),
-						) {
-							Text(
-								text = feedbackText,
-								style = MaterialTheme.typography.bodySmall,
-								color = if (isFeedbackError) {
-									MaterialTheme.colorScheme.onErrorContainer
-								} else {
-									MaterialTheme.colorScheme.onSurface
-								},
-								modifier = Modifier.weight(1f),
-								maxLines = 2,
-								overflow = TextOverflow.Ellipsis,
+						onSelectLocalSearchHistory = { kw ->
+							localSearchDraft = kw
+							settingsStore.recordLibrarySearchHistory(kw)
+							studioController.loadLibraryFiles(
+								query = kw,
+								folder = folderArg,
+								reset = true,
 							)
-							Box(
-								modifier = Modifier
-									.size(22.dp)
-									.clip(CircleShape)
-									.clickable {
-										if (isFeedbackError) {
-											studioController.clearError()
-											activeLocalController.clearError()
-										} else {
-											inlineNotice = null
-											studioController.clearNotice()
-											activeLocalController.clearNotice()
-										}
-									},
-								contentAlignment = Alignment.Center,
+						},
+						searchHistory = librarySearchHistory,
+						historyManageMode = libHistoryManageMode,
+						onToggleHistoryManage = { libHistoryManageMode = !libHistoryManageMode },
+						onRemoveSearchHistory = { settingsStore.removeLibrarySearchHistory(it) },
+						onRequestClearSearchHistory = { showClearLibHistoryConfirm = true },
+						navSubTab = navSubTab,
+						onSelectNavSubTab = { navSubTabName = it.name },
+						localSubTab = localSubTab,
+						onSelectLocalSubTab = {
+							localSubTabName = it.name
+							localDetailRoute = null
+						},
+					)
+
+					// 紧凑提示横幅
+					val errorText = studioState.errorMessage?.takeIf { it.isNotBlank() }
+						?: localState.errorMessage?.takeIf { it.isNotBlank() }
+					val feedbackText = errorText ?: inlineNotice?.takeIf { it.isNotBlank() }
+					val isFeedbackError = errorText != null
+					if (feedbackText != null) {
+						Surface(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 4.dp),
+							shape = RoundedCornerShape(12.dp),
+							color = if (isFeedbackError) {
+								MaterialTheme.colorScheme.errorContainer
+							} else {
+								MaterialTheme.colorScheme.surfaceContainerHigh
+							},
+							border = BorderStroke(
+								IosHairlineWidth,
+								if (isFeedbackError) {
+									MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+								} else {
+									iosLibHairlineBorderColor()
+								},
+							),
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
 							) {
-								Icon(
-									imageVector = Icons.Rounded.Close,
-									contentDescription = "关闭提示",
-									modifier = Modifier.size(14.dp),
-									tint = if (isFeedbackError) {
+								Text(
+									text = feedbackText,
+									style = MaterialTheme.typography.bodySmall,
+									color = if (isFeedbackError) {
 										MaterialTheme.colorScheme.onErrorContainer
 									} else {
-										MaterialTheme.colorScheme.onSurfaceVariant
+										MaterialTheme.colorScheme.onSurface
 									},
+									modifier = Modifier.weight(1f),
+									maxLines = 2,
+									overflow = TextOverflow.Ellipsis,
 								)
-							}
-						}
-					}
-				}
-
-				AnimatedContent(
-					targetState = sourceMode,
-					transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
-					modifier = Modifier.weight(1f),
-					label = "IosUnifiedLibrarySourceSwitch",
-				) { activeSource ->
-					when (activeSource) {
-						IosLibSourceMode.NAVIDROME -> {
-							if (!isNavidromeConnected) {
-								NavidromeUnconnectedView(
-									onConfigureNavidrome = {
-										editingServer = null
-										showServerDialog = true
-									},
-									onSwitchToLocal = { sourceModeName = IosLibSourceMode.LOCAL.name },
-									bottomPadding = bottomPadding,
-								)
-							} else {
-								IosLibNavidromeSection(
-									subTab = navSubTab,
-									albumCardsMode = albumCardsMode,
-									songCardsMode = songCardsMode,
-									libState = libState,
-									subsonicManager = subsonicManager,
-									audioPlayer = audioPlayer,
-									currentTrackId = playerState.currentTrack?.id,
-									offlineIds = playerState.offlineTracks.keys,
-									downloadingProgress = playerState.downloadingProgress,
-									onSelectSubTab = { navSubTabName = it.name },
-									onToggleAlbumCardsMode = { albumCardsMode = !albumCardsMode },
-									onToggleSongCardsMode = { songCardsMode = !songCardsMode },
-									onOpenDailyMix = { showDailyMixSheet = true },
-									onOpenFavorites = { navDetailRoute = IosLibNavDetailRoute.Favorites },
-									onOpenAlbum = { navDetailRoute = IosLibNavDetailRoute.Album(it.id, it.name) },
-									onOpenArtist = { navDetailRoute = IosLibNavDetailRoute.Artist(it.id, it.name) },
-									onOpenPlaylist = { navDetailRoute = IosLibNavDetailRoute.Playlist(it.id, it.name) },
-									onCreatePlaylist = { showCreateNavPlaylistDialog = true },
-									onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
-									onRequestPhysicalDelete = triggerPhysicalDelete,
-									onShowNotice = { inlineNotice = it },
-									bottomPadding = bottomPadding,
-								)
-							}
-						}
-
-						IosLibSourceMode.LOCAL -> {
-							if (!isMeloConnected) {
 								Box(
 									modifier = Modifier
-										.fillMaxSize()
-										.padding(bottomPadding),
+										.size(22.dp)
+										.clip(CircleShape)
+										.clickable {
+											if (isFeedbackError) {
+												studioController.clearError()
+												activeLocalController.clearError()
+											} else {
+												inlineNotice = null
+												studioController.clearNotice()
+												activeLocalController.clearNotice()
+											}
+										},
 									contentAlignment = Alignment.Center,
 								) {
-									IosQuietEmptyState(
-										message = "未连接 MeloKeep 本地服务",
-										icon = Icons.Rounded.Folder,
-										actionLabel = "前往配置",
-										onAction = onOpenSettings,
+									Icon(
+										imageVector = Icons.Rounded.Close,
+										contentDescription = "关闭提示",
+										modifier = Modifier.size(14.dp),
+										tint = if (isFeedbackError) {
+											MaterialTheme.colorScheme.onErrorContainer
+										} else {
+											MaterialTheme.colorScheme.onSurfaceVariant
+										},
 									)
 								}
-							} else {
-								IosLibLocalSection(
-									subTab = localSubTab,
-									detailRoute = localDetailRoute,
-									onOpenRoute = { localDetailRoute = it },
-									onSelectSubTab = {
-										localSubTabName = it.name
-										localDetailRoute = null
-									},
-									studioState = studioState,
-									studioController = studioController,
-									localState = localState,
-									localController = activeLocalController,
-									subsonicManager = subsonicManager,
-									audioPlayer = audioPlayer,
-									apiClient = apiClient,
-									currentTrackId = playerState.currentTrack?.id,
-									isPlaybackPaused = !playerState.isPlaying,
-									offlineIds = playerState.offlineTracks.keys,
-									downloadingProgress = playerState.downloadingProgress,
-									onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it },
-									onRenameFolder = { renameFolderTarget = it },
-									onEditTags = { file -> editingFilePath = file.path },
-									onRefreshFiles = reloadLocalFiles,
-									onShowNotice = { inlineNotice = it },
-									bottomPadding = bottomPadding,
-								)
+							}
+						}
+					}
+
+					AnimatedContent(
+						targetState = sourceMode,
+						transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+						modifier = Modifier.weight(1f),
+						label = "IosUnifiedLibrarySourceSwitch",
+					) { activeSource ->
+						when (activeSource) {
+							IosLibSourceMode.NAVIDROME -> {
+								if (!isNavidromeConnected) {
+									NavidromeUnconnectedView(
+										onConfigureNavidrome = {
+											editingServer = null
+											showServerDialog = true
+										},
+										onSwitchToLocal = { sourceModeName = IosLibSourceMode.LOCAL.name },
+										bottomPadding = bottomPadding,
+									)
+								} else {
+									IosLibNavidromeSection(
+										subTab = navSubTab,
+										albumCardsMode = albumCardsMode,
+										songCardsMode = songCardsMode,
+										libState = libState,
+										subsonicManager = subsonicManager,
+										audioPlayer = audioPlayer,
+										currentTrackId = playerState.currentTrack?.id,
+										offlineIds = playerState.offlineTracks.keys,
+										downloadingProgress = playerState.downloadingProgress,
+										onSelectSubTab = { navSubTabName = it.name },
+										onToggleAlbumCardsMode = { albumCardsMode = !albumCardsMode },
+										onToggleSongCardsMode = { songCardsMode = !songCardsMode },
+										onOpenDailyMix = { showDailyMixSheet = true },
+										onOpenFavorites = { navDetailRoute = IosLibNavDetailRoute.Favorites },
+										onOpenAlbum = { navDetailRoute = IosLibNavDetailRoute.Album(it.id, it.name) },
+										onOpenArtist = { navDetailRoute = IosLibNavDetailRoute.Artist(it.id, it.name) },
+										onOpenPlaylist = { navDetailRoute = IosLibNavDetailRoute.Playlist(it.id, it.name) },
+										onCreatePlaylist = { showCreateNavPlaylistDialog = true },
+										onOpenAddToPlaylist = { tracks -> navPlaylistTargetSongs = tracks },
+										onRequestPhysicalDelete = triggerPhysicalDelete,
+										onShowNotice = { inlineNotice = it },
+										bottomPadding = bottomPadding,
+										onRecordSearchResult = recordActiveNavSearchIfNeeded,
+									)
+								}
+							}
+
+							IosLibSourceMode.LOCAL -> {
+								if (!isMeloConnected) {
+									Box(
+										modifier = Modifier
+											.fillMaxSize()
+											.padding(bottomPadding),
+										contentAlignment = Alignment.Center,
+									) {
+										IosQuietEmptyState(
+											message = "未连接 MeloKeep 本地服务",
+											icon = Icons.Rounded.Folder,
+											actionLabel = "前往配置",
+											onAction = onOpenSettings,
+										)
+									}
+								} else {
+									IosLibLocalSection(
+										subTab = localSubTab,
+										onOpenRoute = { route ->
+											recordActiveLocalSearchIfNeeded()
+											localDetailRoute = route
+										},
+										onSelectSubTab = {
+											localSubTabName = it.name
+											localDetailRoute = null
+										},
+										studioState = studioState,
+										studioController = studioController,
+										localState = localState,
+										localController = activeLocalController,
+										subsonicManager = subsonicManager,
+										audioPlayer = audioPlayer,
+										apiClient = apiClient,
+										currentTrackId = playerState.currentTrack?.id,
+										isPlaybackPaused = !playerState.isPlaying,
+										offlineIds = playerState.offlineTracks.keys,
+										downloadingProgress = playerState.downloadingProgress,
+										onRequestAddToLocalPlaylist = { localPlaylistPickerIds = it },
+										onRenameFolder = { renameFolderTarget = it },
+										onEditTags = { file ->
+											recordActiveLocalSearchIfNeeded()
+											editingFilePath = file.path
+										},
+										onRefreshFiles = reloadLocalFiles,
+										onShowNotice = { inlineNotice = it },
+										onRecordSearchResult = recordActiveLocalSearchIfNeeded,
+										bottomPadding = bottomPadding,
+									)
+								}
 							}
 						}
 					}
 				}
-			}
 
-			// 本地库「文件夹」多选批处理悬浮坞（去刮削 / 离线 / 加歌单 / 移动 / 删除）
-			AnimatedVisibility(
-				visible = sourceMode == IosLibSourceMode.LOCAL &&
-					isMeloConnected &&
-					localSubTab == IosLibLocalSubTab.FOLDERS &&
-					localDetailRoute == null &&
-					studioState.selectedFilePaths.isNotEmpty(),
-				enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { it / 2 },
-				exit = fadeOut(tween(110)) + slideOutVertically(tween(140)) { it / 2 },
-				modifier = Modifier
-					.align(Alignment.BottomCenter)
-					.padding(
-						start = 16.dp,
-						end = 16.dp,
-						bottom = bottomPadding.calculateBottomPadding() + 8.dp,
-					),
-			) {
-				IosLibLocalFolderBatchDock(
-					selectedCount = studioState.selectedFilePaths.size,
-					allSelected = studioState.libraryFiles.isNotEmpty() &&
-						studioState.selectedFilePaths.size == studioState.libraryFiles.size,
-					busy = studioState.filesLoading || studioState.jobsLoading,
-					onToggleSelectAll = {
-						if (studioState.selectedFilePaths.size == studioState.libraryFiles.size) {
-							studioController.clearFileSelection()
-						} else {
-							studioController.selectAllFiles()
-						}
-					},
-					onClear = studioController::clearFileSelection,
-					onScrape = {
-						val count = studioState.selectedFilePaths.size
-						studioController.createScrapeJob(
-							paths = studioState.selectedFilePaths.toList(),
-							action = "both",
-							autoApply = false,
-						)
-						if (onNavigateToStudioScrape != null) {
-							onNavigateToStudioScrape()
-						} else {
-							studioController.selectTab(MeloStudioTab.LIBRARY)
-							inlineNotice = "已将 $count 个文件送往工坊生成刮削预览"
-						}
-					},
-					onOffline = {
-						val tracks = selectedFolderFiles.map { file ->
-							iosLibMapFileToIosTrack(file, subsonicManager, apiClient)
-						}
-						if (tracks.isNotEmpty()) {
-							audioPlayer.downloadTracksOffline(tracks)
-							inlineNotice = iosLibOfflineQueueNotice(tracks.size)
-							studioController.clearFileSelection()
-						}
-					},
-					onAddToPlaylist = {
-						val ids = selectedFolderFiles.map { file ->
-							(file.track ?: iosLibBuildFallbackMeloTrack(file, apiClient)).id
-						}.filter { it.isNotBlank() }
-						if (ids.isNotEmpty()) {
-							localPlaylistPickerIds = ids
-						}
-					},
-					onMove = { moveFilesDialogOpen = true },
-					onDelete = { deleteFilesConfirmOpen = true },
-				)
+				// 本地库「文件夹」多选批处理悬浮坞（去刮削 / 离线 / 加歌单 / 移动 / 删除）
+				AnimatedVisibility(
+					visible = sourceMode == IosLibSourceMode.LOCAL &&
+						isMeloConnected &&
+						localSubTab == IosLibLocalSubTab.FOLDERS &&
+						studioState.selectedFilePaths.isNotEmpty(),
+					enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { it / 2 },
+					exit = fadeOut(tween(110)) + slideOutVertically(tween(140)) { it / 2 },
+					modifier = Modifier
+						.align(Alignment.BottomCenter)
+						.padding(
+							start = 16.dp,
+							end = 16.dp,
+							bottom = bottomPadding.calculateBottomPadding() + 8.dp,
+						),
+				) {
+					IosLibLocalFolderBatchDock(
+						selectedCount = studioState.selectedFilePaths.size,
+						allSelected = studioState.libraryFiles.isNotEmpty() &&
+							studioState.selectedFilePaths.size == studioState.libraryFiles.size,
+						busy = studioState.filesLoading || studioState.jobsLoading,
+						onToggleSelectAll = {
+							if (studioState.selectedFilePaths.size == studioState.libraryFiles.size) {
+								studioController.clearFileSelection()
+							} else {
+								studioController.selectAllFiles()
+							}
+						},
+						onClear = studioController::clearFileSelection,
+						onScrape = {
+							val count = studioState.selectedFilePaths.size
+							studioController.createScrapeJob(
+								paths = studioState.selectedFilePaths.toList(),
+								action = "both",
+								autoApply = false,
+							)
+							if (onNavigateToStudioScrape != null) {
+								onNavigateToStudioScrape()
+							} else {
+								studioController.selectTab(MeloStudioTab.LIBRARY)
+								inlineNotice = "已将 $count 个文件送往工坊生成刮削预览"
+							}
+						},
+						onOffline = {
+							val tracks = selectedFolderFiles.map { file ->
+								iosLibMapFileToIosTrack(file, subsonicManager, apiClient)
+							}
+							if (tracks.isNotEmpty()) {
+								audioPlayer.downloadTracksOffline(tracks)
+								inlineNotice = iosLibOfflineQueueNotice(tracks.size)
+								studioController.clearFileSelection()
+							}
+						},
+						onAddToPlaylist = {
+							val ids = selectedFolderFiles.map { file ->
+								(file.track ?: iosLibBuildFallbackMeloTrack(file, apiClient)).id
+							}.filter { it.isNotBlank() }
+							if (ids.isNotEmpty()) {
+								localPlaylistPickerIds = ids
+							}
+						},
+						onMove = { moveFilesDialogOpen = true },
+						onDelete = { deleteFilesConfirmOpen = true },
+					)
+				}
 			}
 		}
 	}
@@ -1003,6 +1118,33 @@ fun IosLibraryRoute(
 			},
 		)
 	}
+
+	if (showClearLibHistoryConfirm) {
+		AlertDialog(
+			onDismissRequest = { showClearLibHistoryConfirm = false },
+			title = { Text("清空搜索历史") },
+			text = { Text("确定清空全部 ${librarySearchHistory.size} 条曲库搜索历史吗？") },
+			confirmButton = {
+				TextButton(
+					onClick = {
+						settingsStore.clearLibrarySearchHistory()
+						libHistoryManageMode = false
+						showClearLibHistoryConfirm = false
+					},
+					colors = ButtonDefaults.textButtonColors(
+						contentColor = MaterialTheme.colorScheme.error,
+					),
+				) {
+					Text("清空")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { showClearLibHistoryConfirm = false }) {
+					Text("取消")
+				}
+			},
+		)
+	}
 }
 
 // =========================================================================
@@ -1022,6 +1164,8 @@ private fun IosLibTopHeader(
 	navSearchQuery: String,
 	onNavSearchQueryChange: (String) -> Unit,
 	onToggleNavSearch: () -> Unit,
+	onNavSearchSubmit: () -> Unit,
+	onSelectNavSearchHistory: (String) -> Unit,
 	onOpenServerSheet: () -> Unit,
 	onTriggerScan: () -> Unit,
 	onOpenCreateFolder: () -> Unit,
@@ -1031,11 +1175,16 @@ private fun IosLibTopHeader(
 	onToggleLocalSearch: () -> Unit,
 	onLocalSearchSubmit: () -> Unit,
 	onLocalSearchClear: () -> Unit,
+	onSelectLocalSearchHistory: (String) -> Unit,
+	searchHistory: List<String>,
+	historyManageMode: Boolean,
+	onToggleHistoryManage: () -> Unit,
+	onRemoveSearchHistory: (String) -> Unit,
+	onRequestClearSearchHistory: () -> Unit,
 	navSubTab: IosLibNavSubTab,
 	onSelectNavSubTab: (IosLibNavSubTab) -> Unit,
 	localSubTab: IosLibLocalSubTab,
 	onSelectLocalSubTab: (IosLibLocalSubTab) -> Unit,
-	showLocalSubTabs: Boolean,
 ) {
 	val focusManager = LocalFocusManager.current
 	val localSearchable = localSubTab == IosLibLocalSubTab.FOLDERS ||
@@ -1173,7 +1322,7 @@ private fun IosLibTopHeader(
 								active = navSearchOpen,
 							)
 						}
-					} else if (isMeloConnected && showLocalSubTabs) {
+					} else if (isMeloConnected) {
 						if (localSubTab == IosLibLocalSubTab.FOLDERS) {
 							IosLibHeaderCircleButton(
 								icon = Icons.Rounded.Add,
@@ -1207,7 +1356,7 @@ private fun IosLibTopHeader(
 			}
 
 			// 第二行：本地库子栏目
-			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.LOCAL && isMeloConnected && showLocalSubTabs) {
+			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.LOCAL && isMeloConnected) {
 				IosLibHeaderSubTabRow(
 					tabs = IosLibLocalSubTab.entries,
 					selected = localSubTab,
@@ -1219,37 +1368,171 @@ private fun IosLibTopHeader(
 				)
 			}
 
-			// 第三行：Navidrome 搜索栏
+			// 第三行：Navidrome 搜索栏与搜索历史
 			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.NAVIDROME && isNavidromeConnected && navSearchOpen) {
-				IosLibCompactSearchBar(
-					value = navSearchQuery,
-					placeholder = "搜索歌曲、专辑或歌手…",
-					onValueChange = onNavSearchQueryChange,
-					onClear = { onNavSearchQueryChange("") },
-					onSubmit = { focusManager.clearFocus() },
-					showSubmitButton = false,
-				)
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosLibCompactSearchBar(
+						value = navSearchQuery,
+						placeholder = "搜索歌曲、专辑或歌手…",
+						onValueChange = onNavSearchQueryChange,
+						onClear = { onNavSearchQueryChange("") },
+						onSubmit = {
+							focusManager.clearFocus()
+							onNavSearchSubmit()
+						},
+						showSubmitButton = true,
+					)
+					if (navSearchQuery.isBlank() && searchHistory.isNotEmpty()) {
+						IosLibSearchHistoryPanel(
+							history = searchHistory,
+							manageMode = historyManageMode,
+							onToggleManageMode = onToggleHistoryManage,
+							onRequestClearAll = onRequestClearSearchHistory,
+							onSelectQuery = { kw ->
+								focusManager.clearFocus()
+								onSelectNavSearchHistory(kw)
+							},
+							onRemoveQuery = onRemoveSearchHistory,
+						)
+					}
+				}
 			}
 
-			// 第三行：本地库搜索栏
+			// 第三行：本地库搜索栏与搜索历史
 			AnimatedVisibility(
 				visible = sourceMode == IosLibSourceMode.LOCAL &&
 					isMeloConnected &&
 					localSearchOpen &&
-					localSearchable &&
-					showLocalSubTabs,
+					localSearchable,
 			) {
-				IosLibCompactSearchBar(
-					value = localSearchInput,
-					placeholder = "搜索歌名、歌手、专辑或路径…",
-					onValueChange = onLocalSearchInputChange,
-					onClear = onLocalSearchClear,
-					onSubmit = {
-						focusManager.clearFocus()
-						onLocalSearchSubmit()
-					},
-					showSubmitButton = true,
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosLibCompactSearchBar(
+						value = localSearchInput,
+						placeholder = "搜索歌名、歌手、专辑或路径…",
+						onValueChange = onLocalSearchInputChange,
+						onClear = onLocalSearchClear,
+						onSubmit = {
+							focusManager.clearFocus()
+							onLocalSearchSubmit()
+						},
+						showSubmitButton = true,
+					)
+					if (localSearchInput.isBlank() && searchHistory.isNotEmpty()) {
+						IosLibSearchHistoryPanel(
+							history = searchHistory,
+							manageMode = historyManageMode,
+							onToggleManageMode = onToggleHistoryManage,
+							onRequestClearAll = onRequestClearSearchHistory,
+							onSelectQuery = { kw ->
+								focusManager.clearFocus()
+								onSelectLocalSearchHistory(kw)
+							},
+							onRemoveQuery = onRemoveSearchHistory,
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun IosLibSearchHistoryPanel(
+	history: List<String>,
+	manageMode: Boolean,
+	onToggleManageMode: () -> Unit,
+	onRequestClearAll: () -> Unit,
+	onSelectQuery: (String) -> Unit,
+	onRemoveQuery: (String) -> Unit,
+) {
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 16.dp),
+		verticalArrangement = Arrangement.spacedBy(6.dp),
+	) {
+		Row(
+			modifier = Modifier.fillMaxWidth(),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.SpaceBetween,
+		) {
+			Text(
+				text = "最近搜索",
+				style = MaterialTheme.typography.labelMedium,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = if (manageMode) "完成" else "管理",
+					style = MaterialTheme.typography.labelMedium,
+					color = MaterialTheme.colorScheme.primary,
+					modifier = Modifier
+						.clip(CircleShape)
+						.clickable(onClick = onToggleManageMode)
+						.padding(horizontal = 6.dp, vertical = 2.dp),
 				)
+				Text(
+					text = "清空",
+					style = MaterialTheme.typography.labelMedium,
+					color = MaterialTheme.colorScheme.error,
+					modifier = Modifier
+						.clip(CircleShape)
+						.clickable(onClick = onRequestClearAll)
+						.padding(horizontal = 6.dp, vertical = 2.dp),
+				)
+			}
+		}
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			history.forEach { kw ->
+				Surface(
+					onClick = {
+						if (manageMode) {
+							onRemoveQuery(kw)
+						} else {
+							onSelectQuery(kw)
+						}
+					},
+					shape = CircleShape,
+					color = if (manageMode) {
+						MaterialTheme.colorScheme.surfaceContainerHigh
+					} else {
+						MaterialTheme.colorScheme.surfaceContainer
+					},
+					border = iosLibHairlineBorder(),
+				) {
+					Row(
+						modifier = Modifier.padding(
+							start = 11.dp,
+							end = if (manageMode) 8.dp else 11.dp,
+							top = 5.dp,
+							bottom = 5.dp,
+						),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(4.dp),
+					) {
+						Text(
+							text = kw,
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurface,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+						if (manageMode) {
+							Icon(
+								imageVector = Icons.Rounded.Close,
+								contentDescription = "删除此历史",
+								tint = MaterialTheme.colorScheme.onSurfaceVariant,
+								modifier = Modifier.size(13.dp),
+							)
+						}
+					}
+				}
 			}
 		}
 	}
