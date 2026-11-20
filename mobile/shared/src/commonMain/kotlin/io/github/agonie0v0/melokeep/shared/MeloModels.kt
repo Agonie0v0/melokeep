@@ -1,5 +1,6 @@
 package io.github.agonie0v0.melokeep.shared
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -538,6 +539,39 @@ data class MeloAvailableSource(
 	val version: String = "",
 	val description: String = "",
 )
+
+object MeloSourceLabelRegistry {
+	private val labelsFlow = MutableStateFlow<Map<String, String>>(emptyMap())
+
+	fun snapshot(): Map<String, String> = labelsFlow.value
+
+	fun register(sources: List<MeloAvailableSource>) {
+		val merged = labelsFlow.value.toMutableMap()
+		for (src in sources) {
+			val label = src.label.trim()
+			if (label.isEmpty()) continue
+			for (key in listOf(src.id, src.engineName, src.pluginId)) {
+				val k = key.trim().lowercase()
+				if (k.isNotEmpty()) merged[k] = label
+			}
+		}
+		labelsFlow.value = merged.toMap()
+	}
+
+	fun resolve(source: String, overrides: Map<String, String> = emptyMap()): String? {
+		val raw = source.trim()
+		if (raw.isEmpty()) return null
+		overrides[raw]?.takeIf { it.isNotBlank() }?.let { return it }
+		for ((k, v) in overrides) {
+			if (v.isNotBlank() && k.trim().equals(raw, ignoreCase = true)) return v
+		}
+		return labelsFlow.value[raw.lowercase()]
+	}
+
+	internal fun clearForTest() {
+		labelsFlow.value = emptyMap()
+	}
+}
 
 @Serializable
 data class MeloSourceSetting(

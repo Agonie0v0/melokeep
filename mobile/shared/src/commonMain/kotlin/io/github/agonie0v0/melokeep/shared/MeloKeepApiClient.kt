@@ -868,7 +868,7 @@ class MeloKeepApiClient(
 			if (r.status.isSuccess()) decodeResponse<MeloEngineConfig>(r) else null
 		}.getOrNull()
 
-		return if (engineCfg != null) {
+		val merged = if (engineCfg != null) {
 			baseCfg.copy(
 				proxyUrl = engineCfg.proxyUrl,
 				proxyScope = engineCfg.proxyScope,
@@ -877,6 +877,8 @@ class MeloKeepApiClient(
 		} else {
 			baseCfg
 		}
+		MeloSourceLabelRegistry.register(merged.availableSources)
+		return merged
 	}
 
 	suspend fun updateConfig(request: MeloConfigUpdateRequest): MeloConfigSaveResponse {

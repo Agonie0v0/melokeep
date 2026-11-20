@@ -1,5 +1,6 @@
 package io.github.agonie0v0.melokeep.ios
 
+import io.github.agonie0v0.melokeep.shared.MeloSourceLabelRegistry
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -983,19 +984,24 @@ fun translateIosTagKey(key: String): String = when (key.trim().lowercase()) {
 	else -> key
 }
 
-fun translateIosSourceName(source: String): String = when (source.trim().lowercase()) {
-	"audius", "audiusmusicclient" -> "Audius"
-	"fma", "fmamusicclient" -> "FMA"
-	"jamendo", "jamendomusicclient" -> "Jamendo"
-	"ccmixter", "ccmixtermusicclient" -> "ccMixter"
-	"opengameart", "opengameartmusicclient" -> "OpenGameArt"
-	"wikimedia", "wikimediacommons", "wikimediacommonsmusicclient" -> "Wikimedia Commons"
-	"itunes", "itunesmusicclient" -> "iTunes"
-	"musicbrainz" -> "MusicBrainz"
-	"acoustid" -> "AcoustID"
-	"lrclib" -> "LRCLIB"
-	"local" -> "本地曲库"
-	else -> source.ifBlank { "未知音源" }
+fun translateIosSourceName(source: String): String = translateIosSourceName(source, emptyMap())
+
+fun translateIosSourceName(source: String, sourceLabels: Map<String, String>): String {
+	MeloSourceLabelRegistry.resolve(source, sourceLabels)?.let { return it }
+	return when (source.trim().lowercase()) {
+		"audius", "audiusmusicclient" -> "Audius"
+		"fma", "fmamusicclient" -> "FMA"
+		"jamendo", "jamendomusicclient" -> "Jamendo"
+		"ccmixter", "ccmixtermusicclient" -> "ccMixter"
+		"opengameart", "opengameartmusicclient" -> "OpenGameArt"
+		"wikimedia", "wikimediacommons", "wikimediacommonsmusicclient" -> "Wikimedia Commons"
+		"itunes", "itunesmusicclient" -> "iTunes"
+		"musicbrainz" -> "MusicBrainz"
+		"acoustid" -> "AcoustID"
+		"lrclib" -> "LRCLIB"
+		"local" -> "本地曲库"
+		else -> source.ifBlank { "未知音源" }
+	}
 }
 
 fun formatIosJsonTimestamp(element: JsonElement?): String {

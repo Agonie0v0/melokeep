@@ -806,6 +806,7 @@ private fun DiscoverSearchModeBody(
 							val isExpanded = expandedGroups[group.groupKey] == true
 							DiscoverTrackGroupCard(
 								group = group,
+								sourceLabels = sourceLabels,
 								primarySong = primarySong,
 								coverShape = coverShape,
 								isFirst = index == 0,
@@ -1403,6 +1404,7 @@ private fun MultiSelectGlassDock(
 @Composable
 private fun DiscoverTrackGroupCard(
 	group: MeloTrackGroup,
+	sourceLabels: Map<String, String> = emptyMap(),
 	primarySong: DomainSong,
 	coverShape: Shape,
 	isFirst: Boolean,
@@ -1434,7 +1436,8 @@ private fun DiscoverTrackGroupCard(
 		primary.durationMs,
 		primary.source,
 		primary.sizeLabel,
-		primaryQuality
+		primaryQuality,
+		sourceLabels
 	) {
 		buildList {
 			primary.artist.trim().takeIf { it.isNotEmpty() }?.let(::add)
@@ -1443,15 +1446,15 @@ private fun DiscoverTrackGroupCard(
 				add(primarySong.duration.toHoursMinutesSeconds())
 			}
 			primary.source.trim().takeIf { it.isNotEmpty() }?.let {
-				add(translateMeloSourceName(it))
+				add(translateMeloSourceName(it, sourceLabels))
 			}
 			primaryQuality?.first?.takeIf { it.isNotBlank() }?.let(::add)
 			primary.sizeLabel?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
 		}.joinToString(" · ").ifEmpty { "全网音源" }
 	}
-	val altSourcesText = remember(group.groupKey, group.alternatives) {
+	val altSourcesText = remember(group.groupKey, group.alternatives, sourceLabels) {
 		val altSources = group.alternatives
-			.map { translateMeloSourceName(it.source) }
+			.map { translateMeloSourceName(it.source, sourceLabels) }
 			.distinct()
 			.take(3)
 			.joinToString(" · ")
@@ -1630,6 +1633,7 @@ private fun DiscoverTrackGroupCard(
 								MeloHairlineDivider(startIndent = rowIndent)
 								AlternativeTrackRow(
 									track = alt,
+									sourceLabels = sourceLabels,
 									startIndent = rowIndent,
 									multiSelectMode = multiSelectMode,
 									checked = alt.id in selectedTrackIds,
@@ -1656,6 +1660,7 @@ private fun DiscoverTrackGroupCard(
 @Composable
 private fun AlternativeTrackRow(
 	track: MeloTrack,
+	sourceLabels: Map<String, String> = emptyMap(),
 	startIndent: Dp,
 	multiSelectMode: Boolean,
 	checked: Boolean,
@@ -1669,7 +1674,7 @@ private fun AlternativeTrackRow(
 	val qualityBadge = remember(track.id, track.qualities, track.playback) {
 		extractTrackQualityBadge(track)
 	}
-	val sourceName = remember(track.source) { translateMeloSourceName(track.source) }
+	val sourceName = remember(track.source, sourceLabels) { translateMeloSourceName(track.source, sourceLabels) }
 	val inlineText = remember(track.id, track.album, track.sizeLabel, sourceName, qualityBadge) {
 		listOfNotNull(
 			sourceName.takeIf { it.isNotBlank() },
@@ -1757,6 +1762,7 @@ private fun AlternativeTrackRow(
 @Composable
 private fun TrackVersionsBottomSheet(
 	track: MeloTrack,
+	sourceLabels: Map<String, String> = emptyMap(),
 	controller: MeloSearchController,
 	hostNavBottom: Dp,
 	onDismissRequest: () -> Unit,
@@ -1815,7 +1821,7 @@ private fun TrackVersionsBottomSheet(
 					Text(
 						text = listOfNotNull(
 							detailedTrack.artist.takeIf { it.isNotBlank() },
-							detailedTrack.source.takeIf { it.isNotBlank() }?.let(::translateMeloSourceName)
+							detailedTrack.source.takeIf { it.isNotBlank() }?.let { translateMeloSourceName(it, sourceLabels) }
 						).joinToString(" · "),
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,

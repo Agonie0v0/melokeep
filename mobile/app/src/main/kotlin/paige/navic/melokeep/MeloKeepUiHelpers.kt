@@ -1,5 +1,6 @@
 package paige.navic.melokeep
 
+import io.github.agonie0v0.melokeep.shared.MeloSourceLabelRegistry
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -907,17 +908,22 @@ internal fun translateMeloTagKey(key: String): String = when (key.trim().lowerca
 	else -> key
 }
 
-internal fun translateMeloSourceName(source: String): String = when (source.trim().lowercase()) {
-	"audius", "audiusmusicclient" -> "Audius"
-	"fma", "fmamusicclient" -> "FMA"
-	"jamendo", "jamendomusicclient" -> "Jamendo"
-	"ccmixter", "ccmixtermusicclient" -> "ccMixter"
-	"opengameart", "opengameartmusicclient" -> "OpenGameArt"
-	"wikimedia", "wikimediacommons", "wikimediacommonsmusicclient" -> "Wikimedia Commons"
-	"itunes", "itunesmusicclient" -> "iTunes"
-	"musicbrainz" -> "MusicBrainz"
-	"acoustid" -> "AcoustID"
-	"lrclib" -> "LRCLIB"
-	"local" -> "本地曲库"
-	else -> source.ifBlank { "未知音源" }
+internal fun translateMeloSourceName(source: String): String = translateMeloSourceName(source, emptyMap())
+
+internal fun translateMeloSourceName(source: String, sourceLabels: Map<String, String>): String {
+	MeloSourceLabelRegistry.resolve(source, sourceLabels)?.let { return it }
+	return when (source.trim().lowercase()) {
+		"audius", "audiusmusicclient" -> "Audius"
+		"fma", "fmamusicclient" -> "FMA"
+		"jamendo", "jamendomusicclient" -> "Jamendo"
+		"ccmixter", "ccmixtermusicclient" -> "ccMixter"
+		"opengameart", "opengameartmusicclient" -> "OpenGameArt"
+		"wikimedia", "wikimediacommons", "wikimediacommonsmusicclient" -> "Wikimedia Commons"
+		"itunes", "itunesmusicclient" -> "iTunes"
+		"musicbrainz" -> "MusicBrainz"
+		"acoustid" -> "AcoustID"
+		"lrclib" -> "LRCLIB"
+		"local" -> "本地曲库"
+		else -> source.ifBlank { "未知音源" }
+	}
 }

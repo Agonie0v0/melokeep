@@ -1583,3 +1583,35 @@ class MeloKeepSharedTest {
 		client.close()
 	}
 }
+
+class MeloSourceLabelRegistryTest {
+	@kotlin.test.Test
+	fun resolvesDynamicLabelsCaseInsensitively() {
+		MeloSourceLabelRegistry.clearForTest()
+		try {
+			MeloSourceLabelRegistry.register(
+				listOf(
+					MeloAvailableSource(
+						id = "sample-plugin",
+						engineName = "SampleEngine",
+						pluginId = "community-sample",
+						label = "示例插件音源",
+					),
+					MeloAvailableSource(id = "blank-label", label = "  "),
+				)
+			)
+			assertEquals("示例插件音源", MeloSourceLabelRegistry.resolve("sample-plugin"))
+			assertEquals("示例插件音源", MeloSourceLabelRegistry.resolve(" SAMPLE-Plugin "))
+			assertEquals("示例插件音源", MeloSourceLabelRegistry.resolve("sampleengine"))
+			assertEquals("示例插件音源", MeloSourceLabelRegistry.resolve("Community-Sample"))
+			assertEquals("覆盖", MeloSourceLabelRegistry.resolve("sample-plugin", mapOf("sample-plugin" to "覆盖")))
+			assertEquals("覆盖2", MeloSourceLabelRegistry.resolve("Sample-Plugin", mapOf("SAMPLE-PLUGIN" to "覆盖2")))
+			assertEquals("示例插件音源", MeloSourceLabelRegistry.resolve("sample-plugin", mapOf("sample-plugin" to " ")))
+			assertNull(MeloSourceLabelRegistry.resolve("unknown-source"))
+			assertNull(MeloSourceLabelRegistry.resolve("blank-label"))
+			assertNull(MeloSourceLabelRegistry.resolve("   "))
+		} finally {
+			MeloSourceLabelRegistry.clearForTest()
+		}
+	}
+}

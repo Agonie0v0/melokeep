@@ -667,6 +667,7 @@ internal fun IosDiscoverSearchContent(
 							val isExpanded = expandedGroups[groupKey] == true
 							IosDiscoverTrackGroupRow(
 								group = group,
+								sourceLabels = sourceLabels,
 								isFirst = index == 0,
 								isLast = index == groupedList.lastIndex,
 								expanded = isExpanded,
@@ -731,6 +732,7 @@ internal fun IosDiscoverSearchContent(
 	if (sheetTrack != null) {
 		IosDiscoverTrackQualitySheet(
 			track = sheetTrack,
+			sourceLabels = sourceLabels,
 			loadingVersions = loadingVersions,
 			isEnqueued = sheetTrack.id in enqueuedIds,
 			apiClient = subsonicManager.meloApiClient,
@@ -1184,6 +1186,7 @@ private fun IosDiscoverSourceProgressRow(
 @Composable
 private fun IosDiscoverTrackGroupRow(
 	group: MeloTrackGroup,
+	sourceLabels: Map<String, String> = emptyMap(),
 	isFirst: Boolean,
 	isLast: Boolean,
 	expanded: Boolean,
@@ -1217,6 +1220,7 @@ private fun IosDiscoverTrackGroupRow(
 		primary.source,
 		primary.sizeLabel,
 		primaryQuality,
+		sourceLabels,
 	) {
 		buildList {
 			primary.artist.trim().takeIf { it.isNotEmpty() }?.let(::add)
@@ -1225,15 +1229,15 @@ private fun IosDiscoverTrackGroupRow(
 				add(formatDurationMs((primary.duration * 1000.0).toLong()))
 			}
 			primary.source.trim().takeIf { it.isNotEmpty() }?.let {
-				add(translateIosSourceName(it))
+				add(translateIosSourceName(it, sourceLabels))
 			}
 			primaryQuality?.takeIf { it.isNotBlank() }?.let(::add)
 			primary.sizeLabel?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
 		}.joinToString(" · ").ifEmpty { "全网音源" }
 	}
-	val altSourcesText = remember(group.groupKey, group.alternatives) {
+	val altSourcesText = remember(group.groupKey, group.alternatives, sourceLabels) {
 		val altSources = group.alternatives
-			.map { translateIosSourceName(it.source) }
+			.map { translateIosSourceName(it.source, sourceLabels) }
 			.distinct()
 			.take(3)
 			.joinToString(" · ")
@@ -1428,6 +1432,7 @@ private fun IosDiscoverTrackGroupRow(
 								IosHairlineDivider(startIndent = rowIndent)
 								IosDiscoverAlternativeTrackRow(
 									track = alt,
+									sourceLabels = sourceLabels,
 									startIndent = rowIndent,
 									multiSelectMode = multiSelectMode,
 									checked = alt.id in selectedTrackIds,
@@ -1456,6 +1461,7 @@ private fun IosDiscoverTrackGroupRow(
 @Composable
 private fun IosDiscoverAlternativeTrackRow(
 	track: MeloTrack,
+	sourceLabels: Map<String, String> = emptyMap(),
 	startIndent: Dp,
 	multiSelectMode: Boolean,
 	checked: Boolean,
@@ -1469,9 +1475,9 @@ private fun IosDiscoverAlternativeTrackRow(
 	val qualityBadge = remember(track.id, track.qualities, track.playback) {
 		extractIosTrackQualityBadge(track)?.first
 	}
-	val inlineText = remember(track.id, track.source, track.album, track.sizeLabel, qualityBadge) {
+	val inlineText = remember(track.id, track.source, sourceLabels, track.album, track.sizeLabel, qualityBadge) {
 		listOfNotNull(
-			translateIosSourceName(track.source).takeIf { it.isNotBlank() },
+			translateIosSourceName(track.source, sourceLabels).takeIf { it.isNotBlank() },
 			track.album.takeIf { it.isNotBlank() },
 			qualityBadge?.takeIf { it.isNotBlank() },
 			track.sizeLabel?.takeIf { it.isNotBlank() },
@@ -1746,6 +1752,7 @@ private fun IosDiscoverSourceSelectorSheet(
 @Composable
 private fun IosDiscoverTrackQualitySheet(
 	track: MeloTrack,
+	sourceLabels: Map<String, String> = emptyMap(),
 	loadingVersions: Boolean,
 	isEnqueued: Boolean,
 	apiClient: MeloKeepApiClient,
@@ -1789,7 +1796,7 @@ private fun IosDiscoverTrackQualitySheet(
 					Text(
 						text = listOfNotNull(
 							track.artist.takeIf { it.isNotBlank() },
-							track.source.takeIf { it.isNotBlank() }?.let(::translateIosSourceName),
+							track.source.takeIf { it.isNotBlank() }?.let { translateIosSourceName(it, sourceLabels) },
 						).joinToString(" · "),
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
