@@ -5428,6 +5428,19 @@ tr.current {
   gap: 16px;
   flex-wrap: wrap;
 }
+.update-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-header-actions button svg,
+.update-confirm-actions button svg,
+.update-summary-actions button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
 .update-header > div > p {
   margin: 0 0 18px;
   color: var(--muted);
@@ -5487,6 +5500,72 @@ tr.current {
   margin: 4px 0 0;
   font-size: 12.5px;
   color: var(--muted);
+}
+.update-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-confirm-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.update-confirm-box p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+  flex: 1 1 260px;
+}
+.update-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-progress-card {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+  display: grid;
+  gap: 8px;
+}
+.update-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.update-progress-meta span {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 600;
+}
+.update-progress-detail {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.update-sock-guide {
+  margin-top: 14px;
+}
+.update-sock-guide p {
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.6;
 }
 .update-ext-link {
   text-decoration: none;

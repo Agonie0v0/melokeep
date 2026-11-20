@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowUpCircle,
   Check,
   Copy,
   ExternalLink,
@@ -7,7 +8,17 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { AIMarkdown } from "./AIMarkdown";
-import type { SystemUpdateInfo } from "./types";
+import {
+  applySystemUpdate,
+  checkSystemHealth,
+  fetchSystemUpdateStatus,
+} from "./api";
+import type { SelfUpdateStatus, SystemUpdateInfo } from "./types";
+import {
+  DOCKER_SOCK_COMPOSE_LINE,
+  formatSelfUpdateState,
+  getSelfUpdateActionMode,
+} from "./update-utils";
 
 function formatTimestamp(raw?: string): string {
   if (!raw) return "—";
@@ -67,12 +78,107 @@ export function UpdateSettings({
   onCheck: (force: boolean) => Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
+  const [sockCopied, setSockCopied] = useState(false);
+  const [selfUpdate, setSelfUpdate] = useState<SelfUpdateStatus | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [healthPhase, setHealthPhase] = useState<
+    "idle" | "waiting_restart" | "ready_reloading" | "timeout"
+  >("idle");
 
   useEffect(() => {
     if (!info && !checking) {
       void onCheck(false);
     }
   }, [info, checking, onCheck]);
+
+  useEffect(() => {
+    if (!info?.self_update) return;
+    setSelfUpdate((prev) => {
+      if (prev?.in_progress || healthPhase !== "idle") return prev;
+      return info.self_update ?? null;
+    });
+  }, [info?.self_update, healthPhase]);
+
+  const effectiveSelfUpdate = selfUpdate ?? info?.self_update ?? null;
+  const selfState = formatSelfUpdateState(effectiveSelfUpdate);
+  const actionMode = getSelfUpdateActionMode(info);
+
+  useEffect(() => {
+    if (healthPhase !== "idle") return;
+    if (!selfState.isRunning) return;
+    if (selfState.isRestarting) {
+      setHealthPhase("waiting_restart");
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetchSystemUpdateStatus()
+        .then((next) => {
+          if (cancelled) return;
+          setSelfUpdate(next);
+          if (next.stage === "restarting") {
+            setHealthPhase("waiting_restart");
+          } else if (next.stage === "up_to_date") {
+            void onCheck(true);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setHealthPhase("waiting_restart");
+          }
+        });
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    effectiveSelfUpdate,
+    selfState.isRunning,
+    selfState.isRestarting,
+    healthPhase,
+    onCheck,
+  ]);
+
+  useEffect(() => {
+    if (healthPhase !== "waiting_restart") return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const startedAt = Date.now();
+
+    const probe = async () => {
+      if (cancelled) return;
+      const ok = await checkSystemHealth();
+      if (cancelled) return;
+      if (ok) {
+        setHealthPhase("ready_reloading");
+        await onCheck(true).catch(() => {});
+        if (cancelled) return;
+        timer = window.setTimeout(() => {
+          window.location.reload();
+        }, 900);
+        return;
+      }
+      if (Date.now() - startedAt >= 120_000) {
+        setHealthPhase("timeout");
+        return;
+      }
+      timer = window.setTimeout(() => {
+        void probe();
+      }, 2000);
+    };
+
+    timer = window.setTimeout(() => {
+      void probe();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [healthPhase, onCheck]);
 
   const current = info?.current;
   const issue = error || info?.error || "";
@@ -92,15 +198,39 @@ export function UpdateSettings({
 
   const dockerCommand = "docker compose pull && docker compose up -d";
 
-  async function copyCommand() {
+  async function copyText(value: string, onSuccess: (state: boolean) => void) {
     try {
-      await navigator.clipboard.writeText(dockerCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      onSuccess(true);
+      window.setTimeout(() => onSuccess(false), 2000);
     } catch {
       /* Clipboard may be unavailable in insecure HTTP contexts. */
     }
   }
+
+  async function startSelfUpdate() {
+    if (applyBusy || selfState.isRunning || healthPhase !== "idle") return;
+    setApplyBusy(true);
+    setActionError("");
+    setConfirmOpen(false);
+    try {
+      const next = await applySystemUpdate();
+      setSelfUpdate(next);
+      if (next.stage === "restarting") {
+        setHealthPhase("waiting_restart");
+      }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApplyBusy(false);
+    }
+  }
+
+  const updatingNow =
+    applyBusy ||
+    selfState.isRunning ||
+    healthPhase === "waiting_restart" ||
+    healthPhase === "ready_reloading";
 
   return (
     <div className="settings-form update-settings">
@@ -122,15 +252,45 @@ export function UpdateSettings({
               </small>
             </h2>
           </div>
-          <button
-            type="button"
-            className="primary"
-            disabled={checking}
-            onClick={() => void onCheck(true)}
-          >
-            <RefreshCw className={checking ? "spin" : undefined} />
-            {checking ? "正在检查…" : "立即检查更新"}
-          </button>
+          <div className="update-header-actions">
+            {actionMode === "primary" && !updatingNow && (
+              <button
+                type="button"
+                className="primary"
+                disabled={checking || applyBusy}
+                onClick={() => {
+                  setActionError("");
+                  setConfirmOpen(true);
+                }}
+              >
+                <ArrowUpCircle aria-hidden="true" />
+                立即更新
+              </button>
+            )}
+            {actionMode === "secondary" && !updatingNow && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={checking || applyBusy}
+                onClick={() => {
+                  setActionError("");
+                  setConfirmOpen(true);
+                }}
+              >
+                <ArrowUpCircle aria-hidden="true" />
+                拉取最新镜像并重启
+              </button>
+            )}
+            <button
+              type="button"
+              className={actionMode === "primary" ? "secondary" : "primary"}
+              disabled={checking || updatingNow}
+              onClick={() => void onCheck(true)}
+            >
+              <RefreshCw className={checking ? "spin" : undefined} />
+              {checking ? "正在检查…" : "立即检查更新"}
+            </button>
+          </div>
         </div>
 
         <dl className="update-meta-grid">
@@ -174,6 +334,112 @@ export function UpdateSettings({
           </p>
         )}
 
+        {actionError && (
+          <p className="update-alert" role="alert">
+            {actionError}
+          </p>
+        )}
+
+        {selfState.isFailed && (
+          <p className="update-alert" role="alert">
+            {selfState.detail ||
+              "容器自更新失败，请查看运行日志或使用命令行更新。"}
+          </p>
+        )}
+
+        {healthPhase === "timeout" && (
+          <p className="update-alert" role="alert">
+            等待新版本就绪超时（超过 120 秒），请手动刷新页面或检查容器日志。
+          </p>
+        )}
+
+        {confirmOpen && !updatingNow && (
+          <div
+            className="update-confirm-box"
+            role="region"
+            aria-label="确认更新"
+          >
+            <p>
+              更新期间服务将短暂重启约 5–10 秒，挂载的 <code>/music</code> 与{" "}
+              <code>/data</code> 数据会完整保留。
+            </p>
+            <div className="update-confirm-actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={applyBusy}
+                onClick={() => setConfirmOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={applyBusy}
+                onClick={() => void startSelfUpdate()}
+              >
+                <ArrowUpCircle aria-hidden="true" />
+                {applyBusy ? "正在提交…" : "确认更新"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {(selfState.showProgress ||
+          healthPhase === "waiting_restart" ||
+          healthPhase === "ready_reloading") && (
+          <div
+            className="update-progress-card"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="update-progress-meta">
+              <strong>
+                {healthPhase === "ready_reloading"
+                  ? "新版本已启动，正在刷新页面…"
+                  : healthPhase === "waiting_restart"
+                    ? "容器重启中，正在等待新版本就绪…"
+                    : selfState.label}
+              </strong>
+              <span>
+                {healthPhase === "ready_reloading"
+                  ? "100%"
+                  : `${selfState.progress}%`}
+              </span>
+            </div>
+            <div
+              className="processing-progress-track"
+              role="progressbar"
+              aria-label="系统更新进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={
+                healthPhase === "ready_reloading" ? 100 : selfState.progress
+              }
+            >
+              <span
+                className="processing-progress-fill"
+                style={{
+                  width: `${
+                    healthPhase === "ready_reloading"
+                      ? 100
+                      : Math.max(8, selfState.progress)
+                  }%`,
+                }}
+              />
+            </div>
+            {selfState.detail && healthPhase === "idle" && (
+              <p className="update-progress-detail">{selfState.detail}</p>
+            )}
+          </div>
+        )}
+
+        {actionMode === "disabled_hint" && effectiveSelfUpdate?.reason && (
+          <p className="update-hint" role="note">
+            Web 一键更新未启用：{effectiveSelfUpdate.reason}
+          </p>
+        )}
+
         {info && !issue && info.has_update && info.latest && (
           <div className="update-summary" role="status">
             <div>
@@ -186,17 +452,33 @@ export function UpdateSettings({
                     : "上游仓库已有新提交"}
               </p>
             </div>
-            {safeExternalHref(info.latest.url) && (
-              <a
-                className="secondary update-ext-link"
-                href={safeExternalHref(info.latest.url)!}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                查看 GitHub 对比
-                <ExternalLink aria-hidden="true" />
-              </a>
-            )}
+            <div className="update-summary-actions">
+              {actionMode === "primary" && !updatingNow && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={checking || applyBusy}
+                  onClick={() => {
+                    setActionError("");
+                    setConfirmOpen(true);
+                  }}
+                >
+                  <ArrowUpCircle aria-hidden="true" />
+                  立即更新
+                </button>
+              )}
+              {safeExternalHref(info.latest.url) && (
+                <a
+                  className="secondary update-ext-link"
+                  href={safeExternalHref(info.latest.url)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  查看 GitHub 对比
+                  <ExternalLink aria-hidden="true" />
+                </a>
+              )}
+            </div>
           </div>
         )}
 
@@ -268,12 +550,35 @@ export function UpdateSettings({
               <button
                 type="button"
                 className="secondary"
-                onClick={() => void copyCommand()}
+                onClick={() => void copyText(dockerCommand, setCopied)}
               >
                 {copied ? <Check /> : <Copy />}
                 {copied ? "已复制" : "复制命令"}
               </button>
             </div>
+            {actionMode === "disabled_hint" && (
+              <details className="library-advanced update-sock-guide">
+                <summary>如何开启 Web 单容器一键更新？</summary>
+                <p>
+                  只需在宿主机 <code>docker-compose.yml</code> 的{" "}
+                  <code>volumes:</code> 下增加一行挂载并重启容器，即可在 Web
+                  端一键拉取最新镜像并平滑更新：
+                </p>
+                <div className="update-command-row">
+                  <code>{DOCKER_SOCK_COMPOSE_LINE}</code>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      void copyText(DOCKER_SOCK_COMPOSE_LINE, setSockCopied)
+                    }
+                  >
+                    {sockCopied ? <Check /> : <Copy />}
+                    {sockCopied ? "已复制" : "复制挂载配置"}
+                  </button>
+                </div>
+              </details>
+            )}
           </>
         ) : (
           <p>

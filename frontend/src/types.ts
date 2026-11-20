@@ -225,6 +225,7 @@ export interface LibraryConfig {
   watch_apply?: boolean;
   watch_failure_dir?: string;
   has_acoustid_key?: boolean;
+  min_match_score?: number;
   tools?: Record<string, boolean>;
 }
 export interface MetadataSource {
@@ -234,6 +235,9 @@ export interface MetadataSource {
   fields: string[];
   note: string;
   url: string;
+  builtin?: boolean;
+  recommended?: boolean;
+  recommend_reason?: string;
 }
 export interface MetadataCandidate {
   id: string;
@@ -325,6 +329,13 @@ export interface BuildInfo {
   in_container: boolean;
 }
 
+export interface UpdateAsset {
+  name: string;
+  download_url: string;
+  size: number;
+  content_type?: string;
+}
+
 export interface UpdateTarget {
   version?: string;
   tag?: string;
@@ -333,6 +344,23 @@ export interface UpdateTarget {
   title?: string;
   published_at?: string;
   url?: string;
+  assets?: UpdateAsset[];
+}
+
+export type SelfUpdateStage =
+  "idle" | "pulling" | "recreating" | "restarting" | "up_to_date" | "failed";
+
+export interface SelfUpdateStatus {
+  supported: boolean;
+  mode: "docker_socket" | "webhook" | "none" | string;
+  reason?: string;
+  in_progress: boolean;
+  stage?: SelfUpdateStage | string;
+  message?: string;
+  progress?: number;
+  target_image?: string;
+  started_at?: string;
+  error?: string;
 }
 
 export interface UpdateCommitItem {
@@ -358,4 +386,5 @@ export interface SystemUpdateInfo {
   checked_at: string;
   cached: boolean;
   error?: string;
+  self_update?: SelfUpdateStatus;
 }

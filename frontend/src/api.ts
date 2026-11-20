@@ -1,3 +1,5 @@
+import type { SelfUpdateStatus } from "./types";
+
 export class ApiError extends Error {
   status: number;
 
@@ -173,4 +175,30 @@ export async function downloadNavidromeArchive(
   );
   triggerBlobDownload(blob, filename);
   return filename;
+}
+
+export function applySystemUpdate(): Promise<SelfUpdateStatus> {
+  return api<SelfUpdateStatus>("/system/update/apply", "POST");
+}
+
+export function fetchSystemUpdateStatus(): Promise<SelfUpdateStatus> {
+  return api<SelfUpdateStatus>("/system/update/status");
+}
+
+export async function checkSystemHealth(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/health", {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "X-MeloKeep-Request": "1" },
+    });
+    if (!response.ok) return false;
+    const data = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+    } | null;
+    return data?.ok === true;
+  } catch {
+    return false;
+  }
 }

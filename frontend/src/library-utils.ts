@@ -1,4 +1,9 @@
-import type { LibraryJob, LibraryJobItem, LibraryRefreshResult } from "./types";
+import type {
+  LibraryJob,
+  LibraryJobItem,
+  LibraryRefreshResult,
+  MetadataSource,
+} from "./types";
 
 export const RUNNING_JOB_STATUSES = new Set([
   "queued",
@@ -178,4 +183,113 @@ export function formatLibraryRefreshNotice(
   return unhealthy.length
     ? `${base}（异常目录：${unhealthy.join("、")}）`
     : base;
+}
+
+export const MIN_MATCH_SCORE_MIN = 50;
+export const MIN_MATCH_SCORE_MAX = 100;
+export const DEFAULT_MIN_MATCH_SCORE = 85;
+export const RECOMMENDED_FALLBACK_SOURCE_IDS = [
+  "itunes",
+  "musicbrainz",
+  "lrclib",
+] as const;
+
+export function sanitizeMinMatchScore(
+  value: unknown,
+  fallback = DEFAULT_MIN_MATCH_SCORE,
+): number {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "boolean") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(
+    MIN_MATCH_SCORE_MAX,
+    Math.max(MIN_MATCH_SCORE_MIN, Math.round(n)),
+  );
+}
+
+export function describeMinMatchScore(score: number): string {
+  const clean = sanitizeMinMatchScore(score);
+  if (clean >= 85) {
+    return "严格匹配：仅高置信度自动通过，降低误匹配风险";
+  }
+  if (clean >= 75) {
+    return "推荐均衡：兼顾自动整理覆盖率与准确度";
+  }
+  return "宽松匹配：更多曲目自动整理，建议留意结果复核";
+}
+
+export function pickRecommendedMetadataSourceIds(
+  metadataSources?: MetadataSource[],
+): string[] {
+  if (!metadataSources?.length) {
+    return [...RECOMMENDED_FALLBACK_SOURCE_IDS];
+  }
+  const explicit = metadataSources
+    .filter((source) => source.recommended === true)
+    .map((source) => source.id);
+  if (explicit.length) return explicit;
+  const fallbackSet = new Set<string>(RECOMMENDED_FALLBACK_SOURCE_IDS);
+  const matched = metadataSources
+    .filter((source) => fallbackSet.has(source.id))
+    .map((source) => source.id);
+  return matched.length ? matched : [...RECOMMENDED_FALLBACK_SOURCE_IDS];
+}
+
+export function pickBuiltinMetadataSourceIds(
+  metadataSources?: MetadataSource[],
+): string[] {
+  if (!metadataSources?.length) return [];
+  return metadataSources
+    .filter((source) => source.builtin !== false)
+    .map((source) => source.id);
+}
+
+export function partitionMetadataSources(
+  metadataSources: MetadataSource[] = [],
+  query = "",
+): {
+  builtin: MetadataSource[];
+  plugins: MetadataSource[];
+} {
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? metadataSources.filter((source) =>
+        [
+          source.id,
+          source.label,
+          source.description,
+          source.recommend_reason,
+          ...(source.fields || []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
+      )
+    : metadataSources;
+
+  return {
+    builtin: filtered.filter((source) => source.builtin !== false),
+    plugins: filtered.filter((source) => source.builtin === false),
+  };
+}
+
+export function buildMetadataSourcesSummary(
+  selectedSources: string[],
+  metadataSources?: MetadataSource[],
+): string {
+  const catalog = metadataSources ?? [];
+  const selectedSet = new Set(selectedSources);
+  const totalCount = catalog.length;
+  const selectedItems = catalog.length
+    ? catalog.filter((source) => selectedSet.has(source.id))
+    : selectedSources.map((id) => ({ id, label: id }));
+  const selectedCount = selectedItems.length;
+  const previewLabels = selectedItems.slice(0, 3).map((item) => item.label);
+  const extraCount = selectedItems.length - previewLabels.length;
+  const preview = previewLabels.length
+    ? `${previewLabels.join(" · ")}${extraCount > 0 ? ` 等 ${selectedCount} 个` : ""}`
+    : "未选择";
+  return `刮削资料来源 · 已选 ${selectedCount} / ${totalCount} 个（${preview}）`;
 }

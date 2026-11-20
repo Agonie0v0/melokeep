@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import { Check, PlugZap } from "lucide-react";
 import { api } from "./api";
-import type { LibraryConfig } from "./types";
+import {
+  buildMetadataSourcesSummary,
+  DEFAULT_MIN_MATCH_SCORE,
+  describeMinMatchScore,
+  MIN_MATCH_SCORE_MAX,
+  MIN_MATCH_SCORE_MIN,
+  partitionMetadataSources,
+  pickBuiltinMetadataSourceIds,
+  pickRecommendedMetadataSourceIds,
+  sanitizeMinMatchScore,
+} from "./library-utils";
+import { SourceDisclosure } from "./SourceDisclosure";
+import type { LibraryConfig, MetadataSource } from "./types";
 import "./library.css";
 
 export const tagLabels: Record<string, string> = {
@@ -40,6 +52,90 @@ export const processingLabels: Record<string, string> = {
   restored: "已恢复",
 };
 
+function formatSourceFields(fields: string[]): string {
+  return fields
+    .map((field) =>
+      field === "cover"
+        ? "封面"
+        : field === "lyrics"
+          ? "歌词"
+          : tagLabels[field] || field,
+    )
+    .join(" · ");
+}
+
+function MetadataSourceRow({
+  source,
+  checked,
+  disabled,
+  onToggle,
+}: {
+  source: MetadataSource;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: (checked: boolean) => void;
+}) {
+  const isPlugin = source.builtin === false;
+  const fieldSummary = formatSourceFields(source.fields || []);
+  const summaryCopy = source.recommend_reason || source.description;
+  return (
+    <div className="metadata-source">
+      <div className="metadata-source-head">
+        <label className="check-label">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={checked}
+            onChange={(e) => onToggle(e.target.checked)}
+          />
+          <strong>{source.label}</strong>
+        </label>
+        <div className="metadata-source-badges">
+          {source.recommended && (
+            <span className="metadata-source-badge is-recommended">推荐</span>
+          )}
+          {isPlugin && (
+            <span className="metadata-source-badge is-plugin">插件</span>
+          )}
+        </div>
+      </div>
+      <div className="metadata-source-body">
+        <p className="metadata-source-desc">
+          {summaryCopy}
+          {fieldSummary && (
+            <span className="metadata-source-fields"> · {fieldSummary}</span>
+          )}
+        </p>
+        {(source.note ||
+          source.url ||
+          (source.recommend_reason && source.description)) && (
+          <details className="metadata-source-more">
+            <summary>详情与来源说明</summary>
+            <div className="metadata-source-more-body">
+              {source.recommend_reason && source.description && (
+                <small>{source.description}</small>
+              )}
+              {(source.note || source.url) && (
+                <small>
+                  {source.note}
+                  {source.url && (
+                    <>
+                      {" "}
+                      <a href={source.url} target="_blank" rel="noreferrer">
+                        来源网站
+                      </a>
+                    </>
+                  )}
+                </small>
+              )}
+            </div>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MetadataSources({
   config,
   change,
@@ -49,55 +145,110 @@ export function MetadataSources({
   change: (sources: string[]) => void;
   disabled?: boolean;
 }) {
+  const [sourceQuery, setSourceQuery] = useState("");
+  const allSources = config.metadata_sources ?? [];
+  const builtinIds = pickBuiltinMetadataSourceIds(allSources);
+  const { builtin, plugins } = partitionMetadataSources(
+    allSources,
+    sourceQuery,
+  );
+  const summaryText = buildMetadataSourcesSummary(config.sources, allSources);
+
+  const toggleSource = (id: string, nextChecked: boolean) => {
+    if (nextChecked) {
+      if (config.sources.includes(id)) return;
+      change([...config.sources, id]);
+    } else {
+      change(config.sources.filter((item) => item !== id));
+    }
+  };
+
   return (
     <fieldset className="library-fieldset metadata-sources">
-      <legend>刮削资料来源</legend>
-      <div className="metadata-source-list">
-        {config.metadata_sources?.map((source) => (
-          <div className="metadata-source" key={source.id}>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                disabled={disabled}
-                checked={config.sources.includes(source.id)}
-                onChange={(e) =>
-                  change(
-                    e.target.checked
-                      ? [...config.sources, source.id]
-                      : config.sources.filter((id) => id !== source.id),
-                  )
-                }
-              />
-              <strong>{source.label}</strong>
-            </label>
-            <div>
-              <p>{source.description}</p>
-              <small>
-                {source.fields
-                  .map((field) =>
-                    field === "cover"
-                      ? "封面"
-                      : field === "lyrics"
-                        ? "歌词"
-                        : tagLabels[field] || field,
-                  )
-                  .join(" · ")}
-              </small>
-              <small>
-                {source.note}
-                {source.url && (
-                  <>
-                    {" "}
-                    <a href={source.url} target="_blank" rel="noreferrer">
-                      来源网站
-                    </a>
-                  </>
-                )}
-              </small>
-            </div>
+      <SourceDisclosure summary={summaryText}>
+        <div className="metadata-sources-toolbar">
+          <div className="metadata-sources-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={disabled}
+              onClick={() =>
+                change(pickRecommendedMetadataSourceIds(allSources))
+              }
+            >
+              一键勾选推荐组合
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={disabled || !builtinIds.length}
+              onClick={() => change(builtinIds)}
+            >
+              全选内置
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={disabled || !config.sources.length}
+              onClick={() => change([])}
+            >
+              清空
+            </button>
           </div>
-        ))}
-      </div>
+          {allSources.length > 5 && (
+            <input
+              type="search"
+              className="metadata-sources-filter"
+              aria-label="筛选刮削资料来源"
+              placeholder="筛选来源名称或说明…"
+              value={sourceQuery}
+              onChange={(e) => setSourceQuery(e.target.value)}
+            />
+          )}
+        </div>
+
+        <div className="metadata-source-groups">
+          {builtin.length > 0 && (
+            <div className="metadata-source-group">
+              <h3 className="metadata-source-group-title">推荐与内置源</h3>
+              <div className="metadata-source-list">
+                {builtin.map((source) => (
+                  <MetadataSourceRow
+                    key={source.id}
+                    source={source}
+                    checked={config.sources.includes(source.id)}
+                    disabled={disabled}
+                    onToggle={(next) => toggleSource(source.id, next)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {plugins.length > 0 && (
+            <div className="metadata-source-group">
+              <h3 className="metadata-source-group-title">自定义插件资料源</h3>
+              <div className="metadata-source-list">
+                {plugins.map((source) => (
+                  <MetadataSourceRow
+                    key={source.id}
+                    source={source}
+                    checked={config.sources.includes(source.id)}
+                    disabled={disabled}
+                    onToggle={(next) => toggleSource(source.id, next)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {builtin.length === 0 && plugins.length === 0 && (
+            <p className="setting-help">
+              {sourceQuery.trim()
+                ? "没有匹配的刮削资料来源。"
+                : "暂无可用的刮削资料来源。"}
+            </p>
+          )}
+        </div>
+      </SourceDisclosure>
     </fieldset>
   );
 }
@@ -157,11 +308,12 @@ export function LibrarySettings({
         metadata_sources: _sources,
         ...settings
       } = config;
-      const saved = await api<LibraryConfig>(
-        "/library/settings",
-        "PUT",
-        settings,
-      );
+      const saved = await api<LibraryConfig>("/library/settings", "PUT", {
+        ...settings,
+        min_match_score: sanitizeMinMatchScore(
+          settings.min_match_score ?? DEFAULT_MIN_MATCH_SCORE,
+        ),
+      });
       setConfig(saved);
       setMessage("曲库设置已保存，后续新建任务将使用这些默认规则。");
     } catch (e) {
@@ -311,6 +463,51 @@ export function LibrarySettings({
                   <option value="file">仅同名图片</option>
                   <option value="none">不补全封面</option>
                 </select>
+              </label>
+              <label className="library-match-score-field">
+                默认自动匹配分数
+                <div className="library-match-score-controls">
+                  <input
+                    type="range"
+                    aria-label="默认自动匹配分数滑块"
+                    min={MIN_MATCH_SCORE_MIN}
+                    max={MIN_MATCH_SCORE_MAX}
+                    step={1}
+                    value={sanitizeMinMatchScore(config.min_match_score)}
+                    onChange={(e) =>
+                      update(
+                        "min_match_score",
+                        sanitizeMinMatchScore(e.target.value),
+                      )
+                    }
+                  />
+                  <input
+                    type="number"
+                    aria-label="默认自动匹配分数"
+                    min={MIN_MATCH_SCORE_MIN}
+                    max={MIN_MATCH_SCORE_MAX}
+                    step={1}
+                    value={config.min_match_score ?? DEFAULT_MIN_MATCH_SCORE}
+                    onChange={(e) => {
+                      const raw = Number(e.target.value);
+                      if (Number.isFinite(raw)) {
+                        update("min_match_score", raw);
+                      }
+                    }}
+                    onBlur={() =>
+                      update(
+                        "min_match_score",
+                        sanitizeMinMatchScore(config.min_match_score),
+                      )
+                    }
+                  />
+                </div>
+                <small>
+                  {describeMinMatchScore(
+                    sanitizeMinMatchScore(config.min_match_score),
+                  )}
+                  （85–100 严格 / 75–84 推荐均衡 / 50–74 宽松自动整理）
+                </small>
               </label>
             </div>
             <details className="library-advanced">
