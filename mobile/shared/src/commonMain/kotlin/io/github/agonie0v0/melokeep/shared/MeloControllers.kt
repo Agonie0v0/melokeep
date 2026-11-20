@@ -2039,11 +2039,22 @@ class MeloSettingsController(
 		}
 	}
 
+	fun updateDisplayName(name: String) {
+		val updated = apiClient.settingsStore.setDisplayName(name)
+		_state.update {
+			it.copy(
+				serverConfig = updated,
+				noticeMessage = "已更新服务名称为：${updated.effectiveName}",
+			)
+		}
+	}
+
 	fun testAndLogin(
 		baseUrl: String,
 		username: String = "",
 		password: String = "",
 		deviceName: String = "MeloKeep Mobile",
+		displayName: String = apiClient.settingsStore.currentConfig().displayName,
 	) {
 		scope.launch {
 			_state.update {
@@ -2060,6 +2071,7 @@ class MeloSettingsController(
 					username = username,
 					password = password,
 					deviceName = deviceName,
+					displayName = displayName,
 				)
 				val cfg = apiClient.getConfig()
 				val devices = runCatching { apiClient.listDevices() }.getOrDefault(emptyList())

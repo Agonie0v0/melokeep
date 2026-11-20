@@ -33,7 +33,10 @@ class MeloSettingsStore(
 	fun currentConfig(): MeloServerConfig = _config.value
 
 	fun saveConfig(newConfig: MeloServerConfig): MeloServerConfig {
-		val normalized = newConfig.copy(baseUrl = normalizeBaseUrl(newConfig.baseUrl))
+		val normalized = newConfig.copy(
+			baseUrl = normalizeBaseUrl(newConfig.baseUrl),
+			displayName = newConfig.displayName.trim(),
+		)
 		persistConfig(normalized)
 		_config.value = normalized
 		return normalized
@@ -42,6 +45,10 @@ class MeloSettingsStore(
 	fun updateConfig(transform: (MeloServerConfig) -> MeloServerConfig): MeloServerConfig {
 		val updated = transform(_config.value)
 		return saveConfig(updated)
+	}
+
+	fun setDisplayName(name: String): MeloServerConfig = updateConfig {
+		it.copy(displayName = name.trim())
 	}
 
 	fun saveSession(
@@ -53,6 +60,7 @@ class MeloSettingsStore(
 		mediaTokenExpiresAt: Long,
 		authEnabled: Boolean,
 		enabled: Boolean = true,
+		displayName: String = _config.value.displayName,
 	): MeloServerConfig = saveConfig(
 		MeloServerConfig(
 			baseUrl = baseUrl,
@@ -63,6 +71,7 @@ class MeloSettingsStore(
 			mediaTokenExpiresAt = mediaTokenExpiresAt,
 			enabled = enabled,
 			authEnabled = authEnabled,
+			displayName = displayName.trim(),
 		)
 	)
 
@@ -152,6 +161,7 @@ class MeloSettingsStore(
 		val mediaTokenExpiresAt = settings.getLong(KEY_MEDIA_TOKEN_EXPIRES_AT, 0L)
 		val enabled = settings.getBoolean(KEY_ENABLED, false)
 		val authEnabled = settings.getBoolean(KEY_AUTH_ENABLED, bearerToken.isNotBlank())
+		val displayName = settings.getString(KEY_DISPLAY_NAME, "").trim()
 		return MeloServerConfig(
 			baseUrl = baseUrl,
 			username = username,
@@ -161,6 +171,7 @@ class MeloSettingsStore(
 			mediaTokenExpiresAt = mediaTokenExpiresAt,
 			enabled = enabled,
 			authEnabled = authEnabled,
+			displayName = displayName,
 		)
 	}
 
@@ -173,6 +184,7 @@ class MeloSettingsStore(
 		settings.putLong(KEY_MEDIA_TOKEN_EXPIRES_AT, cfg.mediaTokenExpiresAt)
 		settings.putBoolean(KEY_ENABLED, cfg.enabled)
 		settings.putBoolean(KEY_AUTH_ENABLED, cfg.authEnabled)
+		settings.putString(KEY_DISPLAY_NAME, cfg.displayName.trim())
 	}
 
 	private fun recordHistory(
@@ -250,6 +262,7 @@ class MeloSettingsStore(
 		private const val KEY_MEDIA_TOKEN_EXPIRES_AT = "melokeep.media_token_expires_at"
 		private const val KEY_ENABLED = "melokeep.enabled"
 		private const val KEY_AUTH_ENABLED = "melokeep.auth_enabled"
+		private const val KEY_DISPLAY_NAME = "melokeep.display_name"
 		private const val KEY_SEARCH_HISTORY = "melokeep.search_history"
 		private const val KEY_LIBRARY_SEARCH_HISTORY = "melo_library_search_history"
 		private const val KEY_STUDIO_THEME_PRESET = "melo_studio_theme_preset"

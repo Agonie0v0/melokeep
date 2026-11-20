@@ -31,12 +31,17 @@ data class MeloServerConfig(
 	val enabled: Boolean = false,
 	@SerialName("auth_enabled")
 	val authEnabled: Boolean = false,
+	@SerialName("display_name")
+	val displayName: String = "",
 ) {
 	val isConfigured: Boolean
 		get() = enabled && baseUrl.isNotBlank()
 
 	val isAuthenticated: Boolean
 		get() = isConfigured && (!authEnabled || bearerToken.isNotBlank())
+
+	val effectiveName: String
+		get() = displayName.trim().ifBlank { "MeloKeep" }
 }
 
 @Serializable

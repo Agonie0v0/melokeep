@@ -83,6 +83,10 @@ class MeloKeepApiClient(
 		return decodeResponse(response)
 	}
 
+	suspend fun fetchLatestGitHubRelease(
+		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
+	): MeloGitHubRelease = MeloAppUpdateChecker.fetchLatestRelease(httpClient, repo)
+
 	suspend fun authStatus(baseUrl: String? = null, bearerToken: String? = null): MeloAuthStatus {
 		val url = buildUrl("/api/auth/status", baseUrl)
 		val response = httpClient.get(url) {
@@ -96,6 +100,7 @@ class MeloKeepApiClient(
 		username: String = "",
 		password: String = "",
 		deviceName: String = "MeloKeep Mobile",
+		displayName: String = settingsStore.currentConfig().displayName,
 	): MeloLoginResponse {
 		val normalizedBase = MeloSettingsStore.normalizeBaseUrl(baseUrl)
 		if (normalizedBase.isEmpty()) {
@@ -127,6 +132,7 @@ class MeloKeepApiClient(
 			mediaTokenExpiresAt = loginResp.mediaTokenExpiresAt,
 			authEnabled = loginResp.authEnabled,
 			enabled = true,
+			displayName = displayName,
 		)
 		return loginResp
 	}

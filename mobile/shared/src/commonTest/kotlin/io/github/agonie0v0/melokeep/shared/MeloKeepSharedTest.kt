@@ -1,6 +1,7 @@
 package io.github.agonie0v0.melokeep.shared
 
 import com.russhwolf.settings.Settings
+import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -30,6 +31,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -2053,8 +2055,8 @@ class MeloKeepSharedTest {
 		// Unconfigured / unauthenticated returns failure immediately without calling API
 		var unauthResult: Result<MeloLibraryRefreshResult>? = null
 		controller.refreshLibraryAndReload { unauthResult = it }
-		assertNotNull(unauthResult)
-		assertTrue(unauthResult!!.isFailure)
+		val capturedUnauth = assertNotNull(unauthResult)
+		assertTrue(capturedUnauth.isFailure)
 		assertEquals(0, refreshCalledCount)
 
 		// Configure authenticated session
@@ -2121,6 +2123,236 @@ class MeloKeepSharedTest {
 
 		controllerScope.cancel()
 		client.close()
+	}
+
+	@Test
+	fun displayNameAndEffectiveNamePersistAcrossSessionAndSettingsController() = runTest {
+		val backing = InMemorySettings()
+		val store = MeloSettingsStore(backing)
+
+		// Default effectiveName is "MeloKeep" when displayName is blank
+		assertEquals("", store.currentConfig().displayName)
+		assertEquals("MeloKeep", store.currentConfig().effectiveName)
+		assertEquals("MeloKeep", MeloServerConfig(displayName = "   ").effectiveName)
+
+		// setDisplayName trims and persists
+		store.setDisplayName("  家庭影音云  ")
+		assertEquals("家庭影音云", store.currentConfig().displayName)
+		assertEquals("家庭影音云", store.currentConfig().effectiveName)
+		assertEquals("家庭影音云", backing.getString("melokeep.display_name", ""))
+
+		// saveSession without explicit displayName preserves existing custom name
+		store.saveSession(
+			baseUrl = "192.168.1.10:8765",
+			username = "admin",
+			bearerToken = "tok-1",
+			tokenId = "tid-1",
+			mediaToken = "m-1",
+			mediaTokenExpiresAt = 1800000000L,
+			authEnabled = true,
+			enabled = true,
+		)
+		assertEquals("家庭影音云", store.currentConfig().displayName)
+		assertEquals("家庭影音云", store.currentConfig().effectiveName)
+
+		// Reloading from backing store restores displayName
+		val reloaded = MeloSettingsStore(backing)
+		assertEquals("家庭影音云", reloaded.currentConfig().displayName)
+		assertEquals("家庭影音云", reloaded.currentConfig().effectiveName)
+
+		// clearSession(keepServerUrl = true) keeps displayName
+		reloaded.clearSession(keepServerUrl = true)
+		assertEquals("http://192.168.1.10:8765", reloaded.currentConfig().baseUrl)
+		assertEquals("家庭影音云", reloaded.currentConfig().displayName)
+		assertEquals("家庭影音云", reloaded.currentConfig().effectiveName)
+
+		// MeloSettingsController.testAndLogin & updateDisplayName
+		val engine = MockEngine { request ->
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			when (request.url.encodedPath) {
+				"/api/health" -> respond(
+					"""{"ok":true,"version":"1.2.0","sources":4}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				"/api/auth/login" -> respond(
+					"""{"success":true,"auth_enabled":true,"token":"tok-2","token_id":"tid-2","media_token":"m-2","media_token_expires_at":1900000000}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				"/api/config" -> respond(
+					"""{"sources":["AudiusMusicClient"],"available_sources":[]}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				"/api/auth/devices" -> respond("""{"devices":[]}""", HttpStatusCode.OK, jsonHeaders)
+				else -> respond("{}", HttpStatusCode.OK, jsonHeaders)
+			}
+		}
+		val client = MeloKeepApiClient(reloaded, engine)
+		val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloSettingsController(client, scope)
+
+		controller.testAndLogin(
+			baseUrl = "192.168.1.10:8765",
+			username = "admin",
+			password = "pwd",
+			displayName = " 工作室曲库 ",
+		)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.testingConnection && it.serverConfig.displayName == "工作室曲库" }
+			}
+		}
+		assertEquals("工作室曲库", controller.state.value.serverConfig.effectiveName)
+
+		controller.updateDisplayName("NAS 主力源")
+		assertEquals("NAS 主力源", controller.state.value.serverConfig.displayName)
+		assertEquals("NAS 主力源", controller.state.value.serverConfig.effectiveName)
+
+		controller.updateDisplayName("   ")
+		assertEquals("", controller.state.value.serverConfig.displayName)
+		assertEquals("MeloKeep", controller.state.value.serverConfig.effectiveName)
+
+		// clearSession(keepServerUrl = false) and reset() clear displayName
+		reloaded.setDisplayName("Temp")
+		reloaded.clearSession(keepServerUrl = false)
+		assertEquals("", reloaded.currentConfig().displayName)
+		assertEquals("MeloKeep", reloaded.currentConfig().effectiveName)
+
+		scope.cancel()
+		client.close()
+	}
+
+	@Test
+	fun semVerCompareReleaseAssetMatchersAndUpdateCheckerWork() = runTest {
+		// SemVer comparisons
+		assertTrue(MeloSemVer.compare("v1.0.3", "v1.0.2") > 0)
+		assertTrue(MeloSemVer.compare("v1.0.2", "v1.0.3") < 0)
+		assertEquals(0, MeloSemVer.compare("v1.2.0", "1.2"))
+		assertEquals(0, MeloSemVer.compare("v1.2.0+20261121", "1.2.0+build1"))
+		assertTrue(MeloSemVer.compare("1.1.0", "1.1.0-rc1") > 0)
+		assertTrue(MeloSemVer.compare("1.1.0-rc1", "1.1.0") < 0)
+		assertTrue(MeloSemVer.compare("1.1.0-rc2", "1.1.0-rc1") > 0)
+		assertTrue(MeloSemVer.compare("1.1.0-rc10", "1.1.0-rc2") > 0)
+		assertTrue(MeloSemVer.compare("1.1.0-beta.1", "1.1.0-alpha.9") > 0)
+		assertTrue(MeloSemVer.compare("1.0.0-alpha.1", "1.0.0-alpha") > 0)
+		assertTrue(MeloSemVer.isNewer("v2.0.0", "1.9.9"))
+		assertFalse(MeloSemVer.isNewer("v1.0.0-rc1", "1.0.0"))
+
+		// Asset matching for Android APK and iOS IPA
+		val releaseWithMixedAssets = MeloGitHubRelease(
+			tagName = "v1.3.0",
+			name = "MeloKeep v1.3.0",
+			assets = listOf(
+				MeloGitHubAsset(
+					name = "MeloKeep-android-debug.apk",
+					downloadUrl = "https://github.com/Agonie0v0/melokeep/releases/download/v1.3.0/MeloKeep-android-debug.apk",
+					size = 48_000_000L,
+				),
+				MeloGitHubAsset(
+					name = "MeloKeep-empty-url.apk",
+					downloadUrl = "   ",
+					size = 100L,
+				),
+				MeloGitHubAsset(
+					name = "MeloKeep-android-release.apk",
+					downloadUrl = "https://github.com/Agonie0v0/melokeep/releases/download/v1.3.0/MeloKeep-android-release.apk",
+					size = 16_000_000L,
+					contentType = "application/vnd.android.package-archive",
+				),
+				MeloGitHubAsset(
+					name = "MeloKeep-iOS-unsigned.ipa",
+					downloadUrl = "https://github.com/Agonie0v0/melokeep/releases/download/v1.3.0/MeloKeep-iOS-unsigned.ipa",
+					size = 24_000_000L,
+					contentType = "application/octet-stream",
+				),
+			),
+		)
+		val pickedApk = assertNotNull(releaseWithMixedAssets.findAndroidApkAsset())
+		assertEquals("MeloKeep-android-release.apk", pickedApk.name)
+		val pickedIpa = assertNotNull(releaseWithMixedAssets.findIosIpaAsset())
+		assertEquals("MeloKeep-iOS-unsigned.ipa", pickedIpa.name)
+
+		val releaseWithoutMobileAssets = MeloGitHubRelease(
+			tagName = "v1.3.0",
+			assets = listOf(
+				MeloGitHubAsset(name = "source.tar.gz", downloadUrl = "https://example.com/source.tar.gz"),
+			),
+		)
+		assertNull(releaseWithoutMobileAssets.findAndroidApkAsset())
+		assertNull(releaseWithoutMobileAssets.findIosIpaAsset())
+
+		// MeloAppUpdateChecker with MockEngine
+		var capturedAccept: String? = null
+		var capturedUa: String? = null
+		var capturedUrl: String? = null
+		var shouldFail403 = false
+		val engine = MockEngine { request ->
+			capturedUrl = request.url.toString()
+			capturedAccept = request.headers[HttpHeaders.Accept]
+			capturedUa = request.headers[HttpHeaders.UserAgent]
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			if (shouldFail403) {
+				respond(
+					content = """{"message":"API rate limit exceeded"}""",
+					status = HttpStatusCode.Forbidden,
+					headers = jsonHeaders,
+				)
+			} else {
+				respond(
+					content = """
+						{
+						  "tag_name": "v1.4.0",
+						  "name": "MeloKeep 1.4.0",
+						  "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.4.0",
+						  "body": "### 新增\n- 支持应用内一键更新",
+						  "published_at": "2026-11-21T00:00:00Z",
+						  "assets": [
+						    {
+						      "name": "MeloKeep-v1.4.0.apk",
+						      "browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v1.4.0/MeloKeep-v1.4.0.apk",
+						      "size": 15857935,
+						      "content_type": "application/vnd.android.package-archive"
+						    },
+						    {
+						      "name": "MeloKeep-v1.4.0.ipa",
+						      "browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v1.4.0/MeloKeep-v1.4.0.ipa",
+						      "size": 21000000,
+						      "content_type": "application/octet-stream"
+						    }
+						  ]
+						}
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+			}
+		}
+		val httpClient = HttpClient(engine) {
+			expectSuccess = false
+		}
+		val latest = MeloAppUpdateChecker.fetchLatestRelease(httpClient)
+		assertEquals("https://api.github.com/repos/Agonie0v0/melokeep/releases/latest", capturedUrl)
+		assertEquals("application/vnd.github+json", capturedAccept)
+		assertEquals("MeloKeep-Mobile", capturedUa)
+		assertEquals("v1.4.0", latest.tagName)
+		assertEquals("MeloKeep 1.4.0", latest.name)
+		assertEquals("https://github.com/Agonie0v0/melokeep/releases/tag/v1.4.0", latest.htmlUrl)
+		assertEquals("2026-11-21T00:00:00Z", latest.publishedAt)
+		assertEquals(2, latest.assets.size)
+		assertEquals("MeloKeep-v1.4.0.apk", latest.findAndroidApkAsset()?.name)
+		assertEquals(15857935L, latest.findAndroidApkAsset()?.size)
+		assertEquals("MeloKeep-v1.4.0.ipa", latest.findIosIpaAsset()?.name)
+
+		shouldFail403 = true
+		val err = assertFailsWith<MeloApiException> {
+			MeloAppUpdateChecker.fetchLatestRelease(httpClient)
+		}
+		assertEquals(403, err.statusCode)
+		assertTrue(err.message.contains("获取 GitHub 最新版本失败"))
+
+		httpClient.close()
 	}
 }
 
