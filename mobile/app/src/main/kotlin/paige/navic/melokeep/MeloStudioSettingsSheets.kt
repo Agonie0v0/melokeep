@@ -528,7 +528,7 @@ fun MeloLyricsAndStageSheet(
 @Composable
 fun MeloAudioEngineScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "音质与解码",
+		title = "音质与增益",
 		onBack = onBack
 	) { modifier ->
 		SettingsAudioEnginePanel(modifier = modifier)
@@ -543,7 +543,7 @@ fun MeloAudioEngineSheet(
 ) {
 	if (!presented) return
 	SettingsSheetShell(
-		title = "音质与解码",
+		title = "音质与增益",
 		onDismissRequest = onDismissRequest
 	) {
 		SettingsAudioEnginePanel(
@@ -556,7 +556,7 @@ fun MeloAudioEngineSheet(
 @Composable
 fun MeloStorageAndAboutScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "存储与同步",
+		title = "离线模式与索引同步",
 		onBack = onBack
 	) { modifier ->
 		SettingsStorageAndAboutPanel(modifier = modifier)
@@ -571,7 +571,7 @@ fun MeloStorageAndAboutSheet(
 ) {
 	if (!presented) return
 	SettingsSheetShell(
-		title = "存储与同步",
+		title = "离线模式与索引同步",
 		onDismissRequest = onDismissRequest
 	) {
 		SettingsStorageAndAboutPanel(

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,7 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.dropUnlessResumed
 import coil3.ImageLoader
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import kotlinx.coroutines.Dispatchers
@@ -57,11 +55,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
-import paige.navic.di.LocalNavStack
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.playback.EqualizerManager
-import paige.navic.domain.manager.playback.SleepTimerManager
-import paige.navic.domain.manager.playback.SleepTimerMode
 import paige.navic.domain.manager.playback.StreamCacheManager
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.runtime.StorageManager
@@ -75,16 +70,12 @@ import paige.navic.domain.model.settings.ReplayGainMode
 import paige.navic.domain.model.settings.ThemeMode
 import paige.navic.domain.model.settings.UpdateCheckFrequency
 import paige.navic.ui.component.sheet.ChangelogViewModel
-import paige.navic.ui.component.sheet.SleepTimerSheet
 import paige.navic.ui.component.sheet.UpdateCheckFeedback
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.ChevronForward
-import paige.navic.ui.navigation.Screen
 import paige.navic.ui.theme.MeloBottomChromeClearance
 import paige.navic.ui.theme.MeloStudioPresets
-import paige.navic.ui.theme.positive
 import paige.navic.ui.theme.tabularNums
-import paige.navic.ui.util.label
 import paige.navic.util.toFileSize
 import kotlin.math.roundToInt
 
@@ -99,13 +90,11 @@ fun MeloHubProfileScreen(
 ) {
 	val meloSettingsStore = koinInject<MeloSettingsStore>()
 	val sessionManager = koinInject<SessionManager>()
-	val sleepTimerManager = koinInject<SleepTimerManager>()
 	val equalizerManager = koinInject<EqualizerManager>()
 	val streamCacheManager = koinInject<StreamCacheManager>()
 	val storageManager = koinInject<StorageManager>()
 	val imageLoader = koinInject<ImageLoader>()
 	val preferenceManager = koinInject<PreferenceManager>()
-	val backStack = LocalNavStack.current
 	val snackBarState = LocalSnackBarState.current
 	val scope = rememberCoroutineScope()
 
@@ -119,7 +108,6 @@ fun MeloHubProfileScreen(
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
 	val studioPreset by meloSettingsStore.studioThemePreset.collectAsStateWithLifecycle()
 	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
-	val sleepTimerMode by sleepTimerManager.mode.collectAsStateWithLifecycle()
 	val eqConfig by equalizerManager.config.collectAsStateWithLifecycle()
 	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
 	val availableRelease by changelogViewModel.release.collectAsStateWithLifecycle()
@@ -131,9 +119,17 @@ fun MeloHubProfileScreen(
 	var clearingCache by remember { mutableStateOf(false) }
 
 	var currentSheet by rememberSaveable { mutableStateOf<String?>(null) }
-	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
 
-	LaunchedEffect(backStack.lastOrNull(), currentSheet) {
+	// 兼容旧配置为 ManualOnly 的用户：当自动检查开启时自动归一回 Daily
+	LaunchedEffect(preferenceManager.checkForUpdates, preferenceManager.updateCheckFrequency) {
+		if (preferenceManager.checkForUpdates &&
+			preferenceManager.updateCheckFrequency == UpdateCheckFrequency.ManualOnly
+		) {
+			preferenceManager.updateCheckFrequency = UpdateCheckFrequency.Daily
+		}
+	}
+
+	LaunchedEffect(currentSheet) {
 		val (stream, image) = withContext(Dispatchers.IO) {
 			streamCacheManager.size to (imageLoader.diskCache?.size ?: 0L)
 		}
@@ -157,12 +153,6 @@ fun MeloHubProfileScreen(
 	}
 
 	val tempCacheBytes = streamCacheBytes + imageCacheBytes
-
-	val openMeloSources = dropUnlessResumed {
-		if (backStack.lastOrNull() != Screen.Settings.MeloKeep) {
-			backStack.add(Screen.Settings.MeloKeep)
-		}
-	}
 
 	Column(
 		modifier = Modifier
@@ -229,18 +219,11 @@ fun MeloHubProfileScreen(
 							statusConnected = navidromeConnected,
 							onClick = { currentSheet = "navidrome" }
 						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "音源与代理",
-							onClick = openMeloSources
-						)
 					}
 				}
 			}
 
-			// 2. 播放与音频
+			// 2. 播放与音频（仅保留 3 行：无缝播放、音质与增益、歌词与播放页）
 			item(key = "hub-audio", contentType = "hub-audio") {
 				val wifiTag = SettingsQualityShortTag(preferenceManager.streamingQualityWifi)
 				val cellTag = SettingsQualityShortTag(preferenceManager.streamingQualityCellular)
@@ -250,16 +233,16 @@ fun MeloHubProfileScreen(
 					ReplayGainMode.Album -> "专辑增益"
 					ReplayGainMode.Dynamic -> "动态增益"
 				}
-				val audioEngineSummary = listOfNotNull(
-					"Wi-Fi $wifiTag · 移动 $cellTag",
-					rgSummary
-				).joinToString(" · ")
-
 				val eqSummary = when (eqConfig.mode) {
 					EqualizerMode.BuiltIn -> "内置 EQ"
 					EqualizerMode.External -> "系统音效"
-					EqualizerMode.Disabled -> "关闭"
+					EqualizerMode.Disabled -> null
 				}
+				val audioEngineSummary = listOfNotNull(
+					"Wi-Fi $wifiTag · 移动 $cellTag",
+					rgSummary,
+					eqSummary
+				).joinToString(" · ")
 
 				val fontSizeLabel = "${preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f).roundToInt()}sp"
 				val offsetMs = preferenceManager.playerLyricsOffsetMs
@@ -267,13 +250,6 @@ fun MeloHubProfileScreen(
 					offsetMs > 0 -> "+${offsetMs}ms"
 					offsetMs < 0 -> "${offsetMs}ms"
 					else -> "0ms"
-				}
-
-				val timerValue = when (val mode = sleepTimerMode) {
-					is SleepTimerMode.Time -> sleepTimerManager.timeLeft?.label().orEmpty()
-					is SleepTimerMode.Songs -> "剩余 ${mode.remaining} 首"
-					is SleepTimerMode.EndOfQueue -> "播完当前队列"
-					SleepTimerMode.Disabled -> "关闭"
 				}
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -297,25 +273,9 @@ fun MeloHubProfileScreen(
 						MeloHairlineDivider(startIndent = 16.dp)
 
 						SettingsNavRow(
-							title = "均衡器",
-							value = eqSummary,
-							onClick = { currentSheet = "equalizer" }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
 							title = "歌词与播放页",
 							value = "$fontSizeLabel · 偏移 $offsetLabel",
 							onClick = { currentSheet = "lyrics" }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "睡眠定时",
-							value = timerValue,
-							onClick = { sleepTimerOpen = true }
 						)
 					}
 				}
@@ -530,7 +490,7 @@ fun MeloHubProfileScreen(
 				val updateTag = (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag
 					?: availableRelease?.tagName?.takeIf { it.isNotBlank() }
 				val isChecking = checkFeedback is UpdateCheckFeedback.Checking
-				val normalizedNewTag = updateTag?.let { if (it.startsWith("v", ignoreCase = true)) it else "v$it" }
+				val normalizedNewTag = updateTag?.let { "v" + it.trim().removePrefix("v").removePrefix("V") }
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					MeloSectionLabel(title = "更新与关于")
@@ -625,8 +585,7 @@ fun MeloHubProfileScreen(
 									listOf(
 										UpdateCheckFrequency.OnEveryLaunch to "每次启动",
 										UpdateCheckFrequency.Daily to "每天",
-										UpdateCheckFrequency.Weekly to "每周",
-										UpdateCheckFrequency.ManualOnly to "仅手动"
+										UpdateCheckFrequency.Weekly to "每周"
 									).forEach { (freq, label) ->
 										SettingsChoicePill(
 											label = label,
@@ -657,9 +616,6 @@ fun MeloHubProfileScreen(
 		}
 	}
 
-	if (sleepTimerOpen) {
-		SleepTimerSheet(onDismissRequest = { sleepTimerOpen = false })
-	}
 	MeloKeepConnectionSheet(
 		presented = currentSheet == "melokeep",
 		onDismissRequest = { currentSheet = null }
@@ -670,10 +626,6 @@ fun MeloHubProfileScreen(
 	)
 	MeloAudioEngineSheet(
 		presented = currentSheet == "audio",
-		onDismissRequest = { currentSheet = null }
-	)
-	MeloEqualizerSheet(
-		presented = currentSheet == "equalizer",
 		onDismissRequest = { currentSheet = null }
 	)
 	MeloLyricsAndStageSheet(

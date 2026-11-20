@@ -118,7 +118,10 @@ android {
 		minSdk = libs.versions.android.minSdk.get().toInt()
 		targetSdk = libs.versions.android.targetSdk.get().toInt()
 		versionCode = System.getenv("MELOKEEP_VERSION_CODE")?.toIntOrNull() ?: 60
-		versionName = System.getenv("MELOKEEP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "v1.0.0-beta01"
+		versionName = (System.getenv("MELOKEEP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.0-beta01")
+			.trim()
+			.removePrefix("v")
+			.removePrefix("V")
 		multiDexEnabled = true
 
 		ndk {

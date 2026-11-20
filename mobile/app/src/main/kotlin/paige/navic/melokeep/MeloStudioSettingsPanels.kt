@@ -7,7 +7,6 @@
 package paige.navic.melokeep
 
 import android.os.Build
-import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.animateFloatAsState
@@ -68,22 +67,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.ImageLoader
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
-import org.koin.compose.viewmodel.koinViewModel
-import paige.navic.generated.BuildInfo
 import paige.navic.domain.manager.playback.AudioGainManager
 import paige.navic.domain.manager.playback.EqualizerManager
-import paige.navic.domain.manager.playback.StreamCacheManager
 import paige.navic.domain.manager.runtime.PermissionManager
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.runtime.StorageManager
@@ -97,10 +90,7 @@ import paige.navic.domain.model.settings.NowPlayingSliderStyle
 import paige.navic.domain.model.settings.OfflineMode
 import paige.navic.domain.model.settings.ReplayGainMode
 import paige.navic.domain.model.settings.StreamingQuality
-import paige.navic.domain.model.settings.UpdateCheckFrequency
 import paige.navic.playback.exoplayer.ExoStateHolder
-import paige.navic.ui.component.sheet.ChangelogViewModel
-import paige.navic.ui.component.sheet.UpdateCheckFeedback
 import paige.navic.ui.component.common.VerticalSlider
 import paige.navic.ui.core.LoginUiState
 import paige.navic.ui.icons.Icons
@@ -131,7 +121,10 @@ internal fun rememberMeloVersionName(): String {
 			context.packageManager
 				.getPackageInfo(context.packageName, 0)
 				.versionName
-				?.takeIf { it.isNotBlank() }
+				?.trim()
+				?.removePrefix("v")
+				?.removePrefix("V")
+				?.takeIf { it.isNotEmpty() }
 		}.getOrNull() ?: "dev"
 	}
 }
@@ -1341,17 +1334,11 @@ internal fun SettingsAudioEnginePanel(
 			}
 		}
 
-		// 2. 解码与播放
+		// 2. 解码与输出（移除一级页已有的「无缝播放」开关）
 		item(key = "audio-decoder") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(title = "播放与输出")
+				MeloSectionLabel(title = "解码与输出")
 				MeloGroupedCard {
-					SettingsToggleRow(
-						title = "无缝播放",
-						checked = preferenceManager.gaplessPlayback,
-						onCheckedChange = { preferenceManager.gaplessPlayback = it }
-					)
-					MeloHairlineDivider(startIndent = 16.dp)
 					SettingsToggleRow(
 						title = "32-bit 浮点输出",
 						checked = preferenceManager.floatOutputEnabled,
@@ -1465,11 +1452,16 @@ internal fun SettingsAudioEnginePanel(
 				}
 			}
 		}
+
+		// 4. 均衡器（无嵌套滚动 Column，直接嵌入外层 LazyColumn item）
+		item(key = "audio-equalizer") {
+			SettingsEqualizerContent()
+		}
 	}
 }
 
 // =============================================================================
-// 4. 存储、同步与关于面板
+// 4. 离线模式与索引同步面板（无一级页重复项）
 // =============================================================================
 
 @Composable
@@ -1478,36 +1470,16 @@ internal fun SettingsStorageAndAboutPanel(
 	nestedInSheet: Boolean = false
 ) {
 	val storageManager = koinInject<StorageManager>()
-	val streamCacheManager = koinInject<StreamCacheManager>()
 	val syncManager = koinInject<SyncManager>()
-	val imageLoader = koinInject<ImageLoader>()
 	val preferenceManager = koinInject<PreferenceManager>()
-	val activityOwner = LocalActivity.current as? ViewModelStoreOwner
-	val changelogViewModel = if (activityOwner != null) {
-		koinViewModel<ChangelogViewModel>(viewModelStoreOwner = activityOwner)
-	} else {
-		koinViewModel<ChangelogViewModel>()
-	}
-	val updateFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
-	val appVersionName = rememberMeloVersionName()
-	val scope = rememberCoroutineScope()
 
 	val syncState by syncManager.syncState.collectAsStateWithLifecycle()
-
-	var streamCacheSizeStr by remember { mutableStateOf("计算中…") }
-	var imageCacheSizeStr by remember { mutableStateOf("计算中…") }
 	var freeSpaceFormatted by remember { mutableStateOf("计算中…") }
 
 	LaunchedEffect(Unit) {
-		val (imgBytes, streamBytes, freeBytes) = withContext(Dispatchers.IO) {
-			Triple(
-				imageLoader.diskCache?.size ?: 0L,
-				streamCacheManager.size,
-				storageManager.getCurrentFreeSpace()
-			)
+		val freeBytes = withContext(Dispatchers.IO) {
+			storageManager.getCurrentFreeSpace()
 		}
-		imageCacheSizeStr = imgBytes.toFileSize()
-		streamCacheSizeStr = streamBytes.toFileSize()
 		freeSpaceFormatted = freeBytes.toFileSize()
 	}
 
@@ -1526,98 +1498,38 @@ internal fun SettingsStorageAndAboutPanel(
 		),
 		verticalArrangement = Arrangement.spacedBy(18.dp)
 	) {
-		// 1. 缓存与空间
-		item(key = "storage-cache") {
+		// 1. 离线模式
+		item(key = "storage-offline") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(title = "缓存")
+				MeloSectionLabel(title = "离线模式")
 				MeloGroupedCard {
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 16.dp, vertical = 12.dp),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically
+					Column(
+						modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp)
 					) {
-						Column(modifier = Modifier.weight(1f)) {
-							Text("音频缓存", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-							Text(
-								text = streamCacheSizeStr,
-								style = MaterialTheme.typography.bodySmall.tabularNums(),
-								color = MaterialTheme.colorScheme.onSurfaceVariant
-							)
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(6.dp)
+						) {
+							OfflineMode.entries.forEach { mode ->
+								SettingsChoicePill(
+									label = when (mode) {
+										OfflineMode.Auto -> "自动"
+										OfflineMode.Forced -> "离线"
+										OfflineMode.NoWiFi -> "仅 Wi-Fi"
+									},
+									selected = preferenceManager.offlineMode == mode,
+									onClick = { preferenceManager.offlineMode = mode },
+									modifier = Modifier.weight(1f)
+								)
+							}
 						}
-						Text(
-							text = "清理",
-							style = MaterialTheme.typography.labelMedium,
-							color = MaterialTheme.colorScheme.primary,
-							modifier = Modifier
-								.clip(RoundedCornerShape(8.dp))
-								.clickable {
-									scope.launch {
-										withContext(Dispatchers.IO) {
-											streamCacheManager.clear()
-										}
-										streamCacheSizeStr = "0 B"
-									}
-								}
-								.padding(horizontal = 10.dp, vertical = 6.dp)
-						)
-					}
-
-					MeloHairlineDivider(startIndent = 16.dp)
-
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 16.dp, vertical = 12.dp),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically
-					) {
-						Column(modifier = Modifier.weight(1f)) {
-							Text("封面缓存", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-							Text(
-								text = imageCacheSizeStr,
-								style = MaterialTheme.typography.bodySmall.tabularNums(),
-								color = MaterialTheme.colorScheme.onSurfaceVariant
-							)
-						}
-						Text(
-							text = "清理",
-							style = MaterialTheme.typography.labelMedium,
-							color = MaterialTheme.colorScheme.primary,
-							modifier = Modifier
-								.clip(RoundedCornerShape(8.dp))
-								.clickable {
-									scope.launch {
-										withContext(Dispatchers.IO) {
-											imageLoader.memoryCache?.clear()
-											imageLoader.diskCache?.clear()
-											storageManager.clearCoverArts()
-										}
-										imageCacheSizeStr = "0 B"
-									}
-								}
-								.padding(horizontal = 10.dp, vertical = 6.dp)
-						)
-					}
-
-					MeloHairlineDivider(startIndent = 16.dp)
-
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 16.dp, vertical = 13.dp),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically
-					) {
-						Text("设备剩余空间", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-						Text(freeSpaceFormatted, style = MaterialTheme.typography.bodyMedium.tabularNums(), fontWeight = FontWeight.Medium)
 					}
 				}
 			}
 		}
 
-		// 2. 曲库同步
+		// 2. 曲库索引
 		item(key = "storage-sync") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 				MeloSectionLabel(title = "曲库索引")
@@ -1668,157 +1580,37 @@ internal fun SettingsStorageAndAboutPanel(
 			}
 		}
 
-		// 3. 离线策略与更新
-		item(key = "storage-offline") {
+		// 3. 设备存储
+		item(key = "storage-device") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(title = "网络")
+				MeloSectionLabel(title = "设备存储")
 				MeloGroupedCard {
-					Column(
-						modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp)
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp, vertical = 13.dp),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically
 					) {
 						Text(
-							text = "离线模式",
+							text = "设备剩余空间",
 							style = MaterialTheme.typography.bodyMedium,
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+						Text(
+							text = freeSpaceFormatted,
+							style = MaterialTheme.typography.bodyMedium.tabularNums(),
 							fontWeight = FontWeight.Medium
 						)
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(6.dp)
-						) {
-							OfflineMode.entries.forEach { mode ->
-								SettingsChoicePill(
-									label = when (mode) {
-										OfflineMode.Auto -> "自动"
-										OfflineMode.Forced -> "离线"
-										OfflineMode.NoWiFi -> "仅 Wi-Fi"
-									},
-									selected = preferenceManager.offlineMode == mode,
-									onClick = { preferenceManager.offlineMode = mode },
-									modifier = Modifier.weight(1f)
-								)
-							}
-						}
-					}
-
-					if (!BuildInfo.FDROID) {
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsToggleRow(
-							title = "自动检查更新",
-							checked = preferenceManager.checkForUpdates,
-							onCheckedChange = { preferenceManager.checkForUpdates = it }
-						)
-
-						if (preferenceManager.checkForUpdates) {
-							MeloHairlineDivider(startIndent = 16.dp)
-
-							Column(
-								modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-								verticalArrangement = Arrangement.spacedBy(8.dp)
-							) {
-								Text(
-									text = "检查更新频率",
-									style = MaterialTheme.typography.bodyMedium,
-									fontWeight = FontWeight.Medium
-								)
-								Row(
-									modifier = Modifier.fillMaxWidth(),
-									horizontalArrangement = Arrangement.spacedBy(6.dp)
-								) {
-									UpdateCheckFrequency.entries.forEach { freq ->
-										SettingsChoicePill(
-											label = when (freq) {
-												UpdateCheckFrequency.OnEveryLaunch -> "每次启动"
-												UpdateCheckFrequency.Daily -> "每天"
-												UpdateCheckFrequency.Weekly -> "每周"
-												UpdateCheckFrequency.ManualOnly -> "仅手动"
-											},
-											selected = preferenceManager.updateCheckFrequency == freq,
-											onClick = { preferenceManager.updateCheckFrequency = freq },
-											modifier = Modifier.weight(1f)
-										)
-									}
-								}
-							}
-						}
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(horizontal = 16.dp, vertical = 13.dp),
-							horizontalArrangement = Arrangement.SpaceBetween,
-							verticalAlignment = Alignment.CenterVertically
-						) {
-							Column(
-								modifier = Modifier.weight(1f),
-								verticalArrangement = Arrangement.spacedBy(2.dp)
-							) {
-								Text(
-									text = "检查更新",
-									style = MaterialTheme.typography.bodyMedium,
-									fontWeight = FontWeight.Medium
-								)
-								val statusText = when (val fb = updateFeedback) {
-									UpdateCheckFeedback.Checking -> "正在连接 GitHub Releases…"
-									UpdateCheckFeedback.UpToDate -> "当前已是最新版本 v$appVersionName"
-									is UpdateCheckFeedback.UpdateAvailable -> "发现新版本 ${fb.tag}"
-									is UpdateCheckFeedback.Error -> fb.message
-									UpdateCheckFeedback.Idle -> "当前版本 v$appVersionName"
-								}
-								Text(
-									text = statusText,
-									style = MaterialTheme.typography.bodySmall,
-									color = when (updateFeedback) {
-										is UpdateCheckFeedback.Error -> MaterialTheme.colorScheme.error
-										is UpdateCheckFeedback.UpdateAvailable -> MaterialTheme.colorScheme.primary
-										else -> MaterialTheme.colorScheme.onSurfaceVariant
-									}
-								)
-							}
-							Surface(
-								onClick = {
-									changelogViewModel.checkForUpdates(
-										currentVersion = appVersionName,
-										manual = true
-									)
-								},
-								enabled = updateFeedback !is UpdateCheckFeedback.Checking,
-								shape = RoundedCornerShape(10.dp),
-								color = MaterialTheme.colorScheme.primaryContainer
-							) {
-								Text(
-									text = if (updateFeedback is UpdateCheckFeedback.Checking) "检查中…" else "立即检查更新",
-									style = MaterialTheme.typography.labelMedium,
-									color = MaterialTheme.colorScheme.onPrimaryContainer,
-									modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-								)
-							}
-						}
 					}
 				}
 			}
-		}
-
-		// 4. 极简版本尾注
-		item(key = "storage-version") {
-			Text(
-				text = "MeloKeep v$appVersionName",
-				style = MaterialTheme.typography.labelSmall.tabularNums(),
-				color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-				textAlign = TextAlign.Center,
-				modifier = Modifier
-					.fillMaxWidth()
-					.padding(top = 4.dp)
-			)
 		}
 	}
 }
 
 // =============================================================================
-// 5. 硬件均衡器面板
+// 5. 硬件均衡器面板（无嵌套滚动的共享内容）
 // =============================================================================
 
 @Composable
@@ -1826,10 +1618,6 @@ internal fun SettingsEqualizerPanel(
 	modifier: Modifier = Modifier,
 	nestedInSheet: Boolean = false
 ) {
-	val equalizerManager = koinInject<EqualizerManager>()
-	val config by equalizerManager.config.collectAsStateWithLifecycle()
-	val scope = rememberCoroutineScope()
-
 	LazyColumn(
 		modifier = modifier.background(MaterialTheme.colorScheme.background),
 		contentPadding = PaddingValues(
@@ -1840,138 +1628,145 @@ internal fun SettingsEqualizerPanel(
 		),
 		verticalArrangement = Arrangement.spacedBy(18.dp)
 	) {
-		item(key = "eq-mode") {
-			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(
-					title = "均衡器模式",
-					trailing = if (config.mode == EqualizerMode.BuiltIn && config.bandLevels.isNotEmpty()) {
-						{
-							Row(
-								modifier = Modifier
-									.clip(RoundedCornerShape(6.dp))
-									.clickable {
-										scope.launch {
-											equalizerManager.setConfig(config.copy(bandLevels = emptyMap()))
-										}
-									}
-									.padding(horizontal = 4.dp, vertical = 2.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.spacedBy(4.dp)
-							) {
-								Icon(
-									imageVector = Icons.Outlined.Refresh,
-									contentDescription = null,
-									tint = MaterialTheme.colorScheme.primary,
-									modifier = Modifier.size(14.dp)
-								)
-								Text(
-									text = "重置",
-									style = MaterialTheme.typography.labelMedium,
-									color = MaterialTheme.colorScheme.primary
-								)
-							}
-						}
-					} else {
-						null
-					}
-				)
+		item(key = "eq-content") {
+			SettingsEqualizerContent()
+		}
+	}
+}
 
-				MeloGroupedCard {
-					Column(
-						modifier = Modifier.padding(12.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp)
-					) {
+@Composable
+private fun SettingsEqualizerContent() {
+	val equalizerManager = koinInject<EqualizerManager>()
+	val config by equalizerManager.config.collectAsStateWithLifecycle()
+	val scope = rememberCoroutineScope()
+
+	Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+		Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+			MeloSectionLabel(
+				title = "均衡器模式",
+				trailing = if (config.mode == EqualizerMode.BuiltIn && config.bandLevels.isNotEmpty()) {
+					{
 						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(6.dp)
+							modifier = Modifier
+								.clip(RoundedCornerShape(6.dp))
+								.clickable {
+									scope.launch {
+										equalizerManager.setConfig(config.copy(bandLevels = emptyMap()))
+									}
+								}
+								.padding(horizontal = 4.dp, vertical = 2.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(4.dp)
 						) {
-							EqualizerMode.entries.forEach { mode ->
-								SettingsChoicePill(
-									label = when (mode) {
-										EqualizerMode.BuiltIn -> "内置 EQ"
-										EqualizerMode.External -> "系统音效"
-										EqualizerMode.Disabled -> "关闭"
-									},
-									selected = config.mode == mode,
-									onClick = {
-										scope.launch {
-											equalizerManager.setConfig(config.copy(mode = mode))
-										}
-									},
-									modifier = Modifier.weight(1f)
-								)
-							}
+							Icon(
+								imageVector = Icons.Outlined.Refresh,
+								contentDescription = null,
+								tint = MaterialTheme.colorScheme.primary,
+								modifier = Modifier.size(14.dp)
+							)
+							Text(
+								text = "重置",
+								style = MaterialTheme.typography.labelMedium,
+								color = MaterialTheme.colorScheme.primary
+							)
 						}
-						Text(
-							text = "「系统音效」会将音频会话接入手机系统声效（如杜比全景声/厂商外放增强），推荐默认开启；「内置 EQ」可在此微调频段；「关闭」则旁路直出。",
-							style = MaterialTheme.typography.bodySmall,
-							color = MaterialTheme.colorScheme.onSurfaceVariant
-						)
 					}
+				} else {
+					null
+				}
+			)
+
+			MeloGroupedCard {
+				Column(
+					modifier = Modifier.padding(12.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp)
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(6.dp)
+					) {
+						EqualizerMode.entries.forEach { mode ->
+							SettingsChoicePill(
+								label = when (mode) {
+									EqualizerMode.BuiltIn -> "内置 EQ"
+									EqualizerMode.External -> "系统音效"
+									EqualizerMode.Disabled -> "关闭"
+								},
+								selected = config.mode == mode,
+								onClick = {
+									scope.launch {
+										equalizerManager.setConfig(config.copy(mode = mode))
+									}
+								},
+								modifier = Modifier.weight(1f)
+							)
+						}
+					}
+					Text(
+						text = "「系统音效」会将音频会话接入手机系统声效（如杜比全景声/厂商外放增强），推荐默认开启；「内置 EQ」可在此微调频段；「关闭」则旁路直出。",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
 				}
 			}
 		}
 
 		if (config.mode == EqualizerMode.BuiltIn) {
 			if (config.bandCount == 0) {
-				item(key = "eq-empty") {
-					MeloGroupedCard {
-						MeloQuietEmptyState(
-							message = "当前设备无可调频段，请在播放时重试"
-						)
-					}
+				MeloGroupedCard {
+					MeloQuietEmptyState(
+						message = "当前设备无可调频段，请在播放时重试"
+					)
 				}
 			} else {
-				item(key = "eq-bands") {
-					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-						MeloSectionLabel(title = "频段推子")
-						MeloGroupedCard {
-							Row(
-								modifier = Modifier
-									.fillMaxWidth()
-									.padding(16.dp),
-								horizontalArrangement = Arrangement.SpaceBetween
-							) {
-								repeat(config.bandCount) { band ->
-									val level = config.bandLevels[band] ?: 0f
-									val range = config.bandLowerRange..config.bandUpperRange
-									Column(
-										modifier = Modifier
-											.height(260.dp)
-											.weight(1f),
-										horizontalAlignment = Alignment.CenterHorizontally,
-										verticalArrangement = Arrangement.spacedBy(6.dp)
-									) {
-										Text(
-											text = "${(range.endInclusive / 100).toInt()}dB",
-											style = MaterialTheme.typography.labelSmall.tabularNums(),
-											color = MaterialTheme.colorScheme.onSurfaceVariant
-										)
-										VerticalSlider(
-											modifier = Modifier.weight(1f),
-											value = level,
-											onValueChange = { newLevel ->
-												val newLevels = config.bandLevels.toMutableMap().apply {
-													set(band, newLevel)
-												}
-												scope.launch {
-													equalizerManager.setConfig(config.copy(bandLevels = newLevels))
-												}
-											},
-											valueRange = range
-										)
-										Text(
-											text = "${(range.start / 100).toInt()}dB",
-											style = MaterialTheme.typography.labelSmall.tabularNums(),
-											color = MaterialTheme.colorScheme.onSurfaceVariant
-										)
-										Text(
-											text = "B${band + 1}",
-											style = MaterialTheme.typography.labelSmall,
-											fontWeight = FontWeight.SemiBold,
-											color = MaterialTheme.colorScheme.primary
-										)
-									}
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					MeloSectionLabel(title = "频段推子")
+					MeloGroupedCard {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(16.dp),
+							horizontalArrangement = Arrangement.SpaceBetween
+						) {
+							repeat(config.bandCount) { band ->
+								val level = config.bandLevels[band] ?: 0f
+								val range = config.bandLowerRange..config.bandUpperRange
+								Column(
+									modifier = Modifier
+										.height(260.dp)
+										.weight(1f),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(6.dp)
+								) {
+									Text(
+										text = "${(range.endInclusive / 100).toInt()}dB",
+										style = MaterialTheme.typography.labelSmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+									VerticalSlider(
+										modifier = Modifier.weight(1f),
+										value = level,
+										onValueChange = { newLevel ->
+											val newLevels = config.bandLevels.toMutableMap().apply {
+												set(band, newLevel)
+											}
+											scope.launch {
+												equalizerManager.setConfig(config.copy(bandLevels = newLevels))
+											}
+										},
+										valueRange = range
+									)
+									Text(
+										text = "${(range.start / 100).toInt()}dB",
+										style = MaterialTheme.typography.labelSmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant
+									)
+									Text(
+										text = "B${band + 1}",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.SemiBold,
+										color = MaterialTheme.colorScheme.primary
+									)
 								}
 							}
 						}

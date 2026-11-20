@@ -126,7 +126,10 @@ class ChangelogViewModel(
 		appContext.packageManager
 			.getPackageInfo(appContext.packageName, 0)
 			.versionName
-			?.takeIf { it.isNotBlank() }
+			?.trim()
+			?.removePrefix("v")
+			?.removePrefix("V")
+			?.takeIf { it.isNotEmpty() }
 	}.getOrNull() ?: "0.0.0"
 
 	val release: StateFlow<MeloGitHubRelease?>
@@ -270,7 +273,7 @@ class ChangelogViewModel(
 						if (!response.isSuccessful) {
 							throw IllegalStateException("下载失败 (HTTP ${response.code})")
 						}
-						val body = response.body ?: throw IllegalStateException("下载响应为空")
+						val body = response.body
 						val contentLength = body.contentLength().takeIf { it > 0L } ?: asset.size
 						var downloaded = 0L
 						val buffer = ByteArray(32 * 1024)
@@ -445,8 +448,9 @@ fun ChangelogSheet() {
 						style = MaterialTheme.typography.titleLarge,
 						fontFamily = defaultFont(round = 100f)
 					)
+					val displayTag = "v" + activeRelease.tagName.trim().removePrefix("v").removePrefix("V")
 					Text(
-						text = stringResource(R.string.info_update, activeRelease.tagName),
+						text = stringResource(R.string.info_update, displayTag),
 						style = MaterialTheme.typography.bodyMedium
 					)
 				}
