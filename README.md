@@ -11,10 +11,11 @@
 ![Go](https://img.shields.io/badge/Backend-Go_1.27+-00ADD8?style=flat-square&logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/Frontend-React_19_+_Vite-61DAFB?style=flat-square&logo=react&logoColor=black)
 ![Docker](https://img.shields.io/badge/Docker-amd64_%7C_arm64-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Mobile](https://img.shields.io/badge/Mobile-Android_%7C_iOS-3DDC84?style=flat-square&logo=kotlin&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![GHCR](https://img.shields.io/badge/Image-ghcr.io%2Fagonie0v0%2Fmelokeep-181717?style=flat-square&logo=github)
 
-[核心能力](#-核心能力) · [内置开放音源与插件平台](#-内置开放音源与-js-插件平台) · [Docker 部署与自动更新](#-docker-快速部署) · [合规声明与版权政策](#-合规声明与版权政策-compliance--dmca-policy)
+[核心能力](#-核心能力) · [内置开放音源与插件平台](#-内置开放音源与-js-插件平台) · [Docker 部署与一键更新](#-docker-快速部署) · [移动端安装与更新](#-原生移动端安装与更新) · [合规声明与版权政策](#-合规声明与版权政策-compliance--dmca-policy)
 
 </div>
 
@@ -26,12 +27,12 @@ MeloKeep 采用 **Go 单二进制核心服务**架构（内置纯 Go SQLite WAL�
 
 | 模块 | 核心能力 |
 | --- | --- |
-| 🗂️ **双栏本地曲库** | 类文件管理器「左目录树 + 面包屑 + 右表格」联动浏览；支持关键词筛选、游标分页、多选悬浮操作栏播放、加入歌单或一键送去刮削整理。 |
-| ✨ **标签刮削与归档** | 集成 **MusicBrainz + Cover Art Archive + iTunes + AcoustID（Chromaprint 指纹）+ LRCLIB**；17 项文字标签锁定防覆盖、模板批量重命名、差异预览、`/data/go/history` 备份隔离与可逆回滚。 |
-| 💿 **Navidrome 联动** | 支持 OpenSubsonic 协议浏览远程歌曲/专辑/歌手（卡片与列表双视图）、同步与编辑 Navidrome 歌单，可选整理后自动触发扫库及安全删除原文件。 |
+| 🗂️ **双栏本地曲库** | 类文件管理器「左目录树 + 面包屑 + 右表格」联动浏览；支持关键词筛选、游标分页、60 秒后台增量扫盘、手动真实扫盘刷新与残留空目录清理，多选悬浮操作栏支持播放、加入歌单或送去刮削整理。 |
+| ✨ **标签刮削与归档** | 集成 **MusicBrainz + Cover Art Archive + iTunes + AcoustID（Chromaprint 指纹）+ LRCLIB**；支持可配置默认自动匹配阈值（50–100 分，默认 85）、折叠式资料来源（内置源/插件源）与一键勾选推荐组合（iTunes + MusicBrainz + LRCLIB）；17 项文字标签锁定防覆盖、模板批量重命名、批量失败项对齐修订版本与异步重试、`/data/go/history` 备份隔离及可逆回滚。 |
+| 💿 **Navidrome 联动** | 支持 OpenSubsonic 协议浏览远程歌曲/专辑/歌手（卡片与列表双视图）、单曲下载与多选/整张专辑流式 ZIP 打包下载、同步编辑 Navidrome 歌单；App 端可独立直连 Navidrome 播放、离线与扫库（无需 Web 端重复配置）。 |
 | 🌐 **开放音源与 JS 插件** | 内置 **7 个开放许可/官方试听源**，并提供 **纯 Go 沙箱 JS 插件扩展**（`MeloKeep Provider Plugin API v1`），支持在界面在线测试、安装与配置自定义插件。 |
 | 🤖 **AI 助手与 5 大机器人** | 接入 OpenAI 兼容接口（Chat Completions / Responses、截图识别导入歌单、工具调用）；支持 **Telegram**（含内置 Local Bot API 2 GB 大文件）、**企业微信**、**飞书 / Lark**、**钉钉** 与 **Discord** 通知和对话。 |
-| 📱 **Web 与原生移动端** | React 19 + TypeScript 响应式前端（浅色/深色主题），并配套提供基于 Kotlin Multiplatform + Jetpack Compose 的纯原生 Android / iOS 客户端。 |
+| 📱 **Web 与原生移动端** | React 19 + TypeScript 响应式前端（内置 4 套外观预设与歌词字号/颜色/对齐/偏移自定义），配套 Kotlin Multiplatform + Jetpack Compose 原生 Android / iOS 客户端，全端支持版本检查与更新闭环。 |
 
 ```mermaid
 flowchart LR
@@ -96,6 +97,7 @@ services:
     volumes:
       - ./music:/music
       - ./data:/data
+      # - /var/run/docker.sock:/var/run/docker.sock # 可选：取消注释以启用 Web 端单容器一键更新
     environment:
       MELOKEEP_USER: admin
       MELOKEEP_PASS: "请改成你自己的强密码" # 若密码含 $ 请写成 $$
@@ -110,7 +112,7 @@ services:
 # 首次启动（访问 http://服务器IP:8765）
 mkdir -p music data && docker compose up -d
 
-# 拉取最新官方镜像并自动重建重启
+# 未启用 Web 单容器一键更新时，手动拉取最新官方镜像并重启
 docker compose pull && docker compose up -d
 
 # 本地源码修改后重新构建镜像并自动重启（含 Navidrome 联动示例）
@@ -120,10 +122,29 @@ docker compose -f docker-compose.navidrome.yml up -d --build
 docker compose logs -f --tail 100
 ```
 
+- **Web 单容器一键更新**：如需直接在网页一键升级且不想额外部署 Watchtower 等独立容器，只需取消上方 `docker-compose.yml` 中 `/var/run/docker.sock:/var/run/docker.sock` 的注释后重建一次容器。之后在 Web「设置 → 版本与更新」即可一键拉取最新镜像，内置 `self-update-helper` 会自动平滑替换容器并具备失败回滚保护，待容器重启就绪后网页自动刷新；未挂载 `docker.sock` 时仍可通过 `docker compose pull && docker compose up -d` 或外部更新 Webhook 完成升级（详见 [进阶配置手册](docs/configuration.md#web-单容器一键更新)）。
+
 | 宿主机目录 | 容器路径 | 存储内容 |
 | --- | --- | --- |
 | `./music` | `/music` | 下载音频、整理入库目录（默认 `/music/library`）及歌词封面 |
 | `./data` | `/data` | `data/go/` 数据库、应用配置、已安装插件、歌单收藏与任务历史备份 |
+
+---
+
+## 📱 原生移动端安装与更新
+
+前往 [GitHub Releases](https://github.com/Agonie0v0/melokeep/releases/latest) 获取最新双端安装包（版本发布时自动随镜像同步构建）：
+
+- **Android**：下载 `MeloKeep-<version>-android.apk` 直接安装（正式签名版支持无缝覆盖升级）。
+- **iOS**：下载 `MeloKeep-<version>-ios-unsigned.ipa`，通过 SideStore / AltStore / TrollStore 自签安装。
+
+移动端采用纯原生 **Kotlin Multiplatform + Jetpack Compose** 架构（无 WebView 套壳），主要特性包括：
+
+- **双源曲库与高频交互**：统一管理 Navidrome 与本地库，所有列表页均支持下拉刷新；歌曲行支持左滑下一首播放、右滑加入队尾（多选态自动禁用）；保留轻量离线下载能力并在副标题展示极简已离线微标。
+- **独立服务直连与工坊扫库**：工坊内触发扫库优先直连 App 自身配置的 Navidrome，无需在 Web 端重复填写配置；底部采用 4 Tab 布局（`曲库` / `探索` / `工坊` / `我的`），「我的」合并为 5 大分组工作台，服务列表优先显示自定义名称并默认隐藏敏感地址。
+- **应用内更新闭环**：Android 支持应用内检查新版本、直接下载 APK 并拉起系统安装；iOS 支持查看 Release 更新日志并一键拉起 SideStore / AltStore 或跳转到安装包下载。
+
+更多编译、联调与签名详情见 [移动端开发与构建指南](docs/mobile-app.md)。
 
 ---
 

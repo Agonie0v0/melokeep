@@ -39,7 +39,25 @@ Docker 在 Compose 中配置登录账号和密码；源码运行可复制 [.env.
 | `MELOKEEP_DATA_DIR` | 数据目录；Docker 默认 `/data` |
 | `MELOKEEP_CONFIG` | 引擎配置文件；Docker 默认 `/data/config.json` |
 | `MELOKEEP_MAX_DOWNLOAD_TASKS` | 下载并发数 `1–4`，默认 `2` |
+| `MELOKEEP_ALLOW_DOCKER_SELF_UPDATE` | 是否允许 Web 端通过 Docker Socket 执行单容器一键更新；挂载 `docker.sock` 时默认启用，设为 `0` / `false` 可禁用 |
+| `MELOKEEP_DOCKER_SOCKET` | 自定义 Docker Socket 路径或地址，默认 `/var/run/docker.sock` |
+| `MELOKEEP_UPDATE_WEBHOOK_URL` / `MELOKEEP_UPDATE_WEBHOOK_TOKEN` | 可选外部更新 Webhook（如 Watchtower HTTP API）地址与 Bearer Token |
 | `PUID` / `PGID` | Docker 应用用户和组，默认 `10001:10001` |
+
+## Web 单容器一键更新
+
+如希望直接在 Web「设置 → 版本与更新」一键拉取新镜像升级，且不额外部署 Watchtower 等伴生容器，只需在 `docker-compose.yml` 取消挂载宿主机 Docker Socket 的注释并重建一次容器：
+
+```yaml
+    volumes:
+      - ./music:/music
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+- **权限与安全机制**：容器入口脚本在以非 root（`PUID:PGID`）降权启动时会自动保留 `docker.sock` 对应的附加组 GID；更新检测与执行接口（`GET /api/system/update/status`、`POST /api/system/update/apply`）仅对已登录的管理员开放。
+- **平滑替换与回滚保护**：触发一键更新后，系统由内置 `melokeep self-update-helper` 拉取最新镜像、校验配置并重建新容器；若新容器启动异常则自动回滚旧容器，更新完成待 `/api/health` 恢复就绪后前端自动刷新页面。
+- **替代方式与禁用**：若出于环境安全策略不挂载 `docker.sock`，仍可通过配置 `MELOKEEP_UPDATE_WEBHOOK_URL`（可选配 `MELOKEEP_UPDATE_WEBHOOK_TOKEN`）接入外部更新 Webhook，或手动执行 `docker compose pull && docker compose up -d`；如需显式关闭 Docker 自更新，可设置 `MELOKEEP_ALLOW_DOCKER_SELF_UPDATE: '0'`。
 
 ## 机器人配置
 
@@ -189,4 +207,4 @@ docker build -t ghcr.io/agonie0v0/melokeep:latest .
 docker compose up -d --pull never
 ```
 
-推送 `main` 后，GitHub Actions 构建 `latest` 和对应提交的 `sha-...` 镜像，并检查容器启动与无冗余提取器依赖校验。发布成功后再拉取更新。
+推送 `main` 后，GitHub Actions 构建 `latest` 和对应提交的 `sha-...` 镜像，并检查容器启动与无冗余提取器依赖校验。仅修改 Markdown 文档或 `docs/**` 路径的提交会自动跳过 CI 与 Docker 镜像重建。发布成功后再拉取更新。
