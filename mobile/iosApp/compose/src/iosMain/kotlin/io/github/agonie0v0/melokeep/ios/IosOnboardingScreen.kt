@@ -101,6 +101,7 @@ fun IosOnboardingOverlay(
 	val settingsState by settingsController.state.collectAsState()
 	val libState by subsonicManager.state.collectAsState()
 
+	var meloDisplayName by rememberSaveable(meloConfig.displayName) { mutableStateOf(meloConfig.displayName) }
 	var meloUrl by rememberSaveable(meloConfig.baseUrl) { mutableStateOf(meloConfig.baseUrl) }
 	var meloUser by rememberSaveable(meloConfig.username) { mutableStateOf(meloConfig.username) }
 	var meloPass by rememberSaveable { mutableStateOf("") }
@@ -156,6 +157,9 @@ fun IosOnboardingOverlay(
 		val needsNavVerify = hasNavInput && !navMatchesActive
 
 		if (!needsMeloVerify && !needsNavVerify) {
+			if (meloConfig.isConfigured && meloDisplayName.trim() != meloConfig.displayName) {
+				settingsController.updateDisplayName(meloDisplayName.trim())
+			}
 			finishOnboarding()
 		} else {
 			enteringApp = true
@@ -168,6 +172,7 @@ fun IosOnboardingOverlay(
 							username = trimmedMeloUser,
 							password = meloPass,
 							deviceName = "MeloKeep iOS",
+							displayName = meloDisplayName.trim(),
 						)
 						settingsController.loadConfig()
 						verifiedMeloSignature = meloSignature
@@ -293,6 +298,20 @@ fun IosOnboardingOverlay(
 									overflow = TextOverflow.Ellipsis,
 								)
 							}
+
+							OutlinedTextField(
+								modifier = Modifier.fillMaxWidth(),
+								value = meloDisplayName,
+								onValueChange = { meloDisplayName = it },
+								singleLine = true,
+								enabled = !enteringApp,
+								shape = RoundedCornerShape(12.dp),
+								label = { Text("服务名称（可选，如 家里 NAS）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+								placeholder = { Text("MeloKeep", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+								keyboardOptions = KeyboardOptions(
+									imeAction = ImeAction.Next,
+								),
+							)
 
 							OutlinedTextField(
 								modifier = Modifier.fillMaxWidth(),
@@ -535,6 +554,7 @@ fun IosOnboardingOverlay(
 											username = meloUser,
 											password = meloPass,
 											deviceName = "MeloKeep iOS",
+											displayName = meloDisplayName.trim(),
 										)
 									},
 								) {

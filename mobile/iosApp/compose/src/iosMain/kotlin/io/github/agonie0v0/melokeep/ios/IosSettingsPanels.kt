@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -82,6 +83,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -90,10 +93,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
+import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
+import io.github.agonie0v0.melokeep.shared.findIosIpaAsset
+import io.ktor.http.encodeURLParameter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import platform.Foundation.NSBundle
+import platform.Foundation.NSURL
+import platform.UIKit.UIApplication
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -890,6 +901,9 @@ internal fun IosSettingsMeloConnectionSheet(
 	onDismiss: () -> Unit,
 ) {
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	var displayName by remember(settingsState.serverConfig.displayName) {
+		mutableStateOf(settingsState.serverConfig.displayName)
+	}
 	var serverUrl by remember(settingsState.serverConfig.baseUrl) { mutableStateOf(settingsState.serverConfig.baseUrl) }
 	var username by remember(settingsState.serverConfig.username) { mutableStateOf(settingsState.serverConfig.username) }
 	var password by remember { mutableStateOf("") }
@@ -931,6 +945,16 @@ internal fun IosSettingsMeloConnectionSheet(
 						modifier = Modifier.padding(16.dp),
 						verticalArrangement = Arrangement.spacedBy(10.dp),
 					) {
+						OutlinedTextField(
+							value = displayName,
+							onValueChange = { displayName = it },
+							label = { Text("服务名称（可选，如 家里 NAS）") },
+							placeholder = { Text("MeloKeep") },
+							singleLine = true,
+							shape = RoundedCornerShape(12.dp),
+							modifier = Modifier.fillMaxWidth(),
+						)
+
 						OutlinedTextField(
 							value = serverUrl,
 							onValueChange = { serverUrl = it },
@@ -1019,6 +1043,7 @@ internal fun IosSettingsMeloConnectionSheet(
 										username = username.trim(),
 										password = password,
 										deviceName = "MeloKeep iOS",
+										displayName = displayName.trim(),
 									)
 								},
 								enabled = !settingsState.testingConnection && serverUrl.isNotBlank(),
@@ -1037,6 +1062,14 @@ internal fun IosSettingsMeloConnectionSheet(
 							}
 
 							if (settingsState.serverConfig.isConfigured) {
+								if (displayName.trim() != settingsState.serverConfig.displayName) {
+									OutlinedButton(
+										onClick = { settingsController.updateDisplayName(displayName.trim()) },
+										shape = RoundedCornerShape(12.dp),
+									) {
+										Text("保存名称")
+									}
+								}
 								OutlinedButton(
 									onClick = { settingsController.logout() },
 									shape = RoundedCornerShape(12.dp),
@@ -1050,7 +1083,7 @@ internal fun IosSettingsMeloConnectionSheet(
 					}
 				}
 
-				AnimatedVisibility(visible = settingsState.devices.isNotEmpty()) {
+				androidx.compose.animation.AnimatedVisibility(visible = settingsState.devices.isNotEmpty()) {
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						IosSectionLabel(
 							title = "已授权设备",
@@ -2060,4 +2093,297 @@ internal fun IosSettingsLyricsStyleControl(
 internal fun IosSettingsResolveAppVersion(): String {
 	val raw = NSBundle.mainBundle.infoDictionary?.get("CFBundleShortVersionString") as? String
 	return raw?.trim()?.takeIf { it.isNotEmpty() } ?: "1.0.0"
+}
+
+internal fun iosOpenExternalUrl(rawUrl: String): Boolean {
+	val trimmed = rawUrl.trim()
+	if (trimmed.isEmpty()) return false
+	val nsUrl = NSURL.URLWithString(trimmed) ?: return false
+	return runCatching {
+		UIApplication.sharedApplication.openURL(
+			nsUrl,
+			options = emptyMap<Any?, Any?>(),
+			completionHandler = null,
+		)
+	}.isSuccess
+}
+
+@Composable
+internal fun IosAppUpdateDialog(
+	currentVersion: String,
+	initialRelease: MeloGitHubRelease? = null,
+	onReleaseLoaded: (MeloGitHubRelease) -> Unit = {},
+	onShowNotice: (String) -> Unit = {},
+	onDismiss: () -> Unit,
+) {
+	val scope = rememberCoroutineScope()
+	val clipboard = LocalClipboardManager.current
+
+	var release by remember(initialRelease) { mutableStateOf(initialRelease) }
+	var loading by remember { mutableStateOf(initialRelease == null) }
+	var errorMessage by remember { mutableStateOf<String?>(null) }
+	var launchFeedback by remember { mutableStateOf<String?>(null) }
+
+	val checkNow: () -> Unit = {
+		if (!loading) {
+			loading = true
+			errorMessage = null
+			launchFeedback = null
+			scope.launch {
+				try {
+					val fetched = MeloAppUpdateChecker.fetchLatestRelease()
+					release = fetched
+					onReleaseLoaded(fetched)
+				} catch (e: CancellationException) {
+					throw e
+				} catch (e: Throwable) {
+					errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
+				} finally {
+					loading = false
+				}
+			}
+		}
+	}
+
+	LaunchedEffect(Unit) {
+		if (release == null) {
+			try {
+				val fetched = MeloAppUpdateChecker.fetchLatestRelease()
+				release = fetched
+				onReleaseLoaded(fetched)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
+			} finally {
+				loading = false
+			}
+		}
+	}
+
+	val activeRelease = release
+	val hasUpdate = activeRelease != null && MeloSemVer.isNewer(activeRelease.tagName, currentVersion)
+	val ipaAsset = remember(activeRelease) { activeRelease?.findIosIpaAsset() }
+
+	AlertDialog(
+		onDismissRequest = onDismiss,
+		containerColor = MaterialTheme.colorScheme.surfaceContainer,
+		title = {
+			Text(
+				text = when {
+					loading && activeRelease == null -> "正在检查更新"
+					hasUpdate -> "发现新版本 ${activeRelease?.tagName.orEmpty()}"
+					activeRelease != null -> "版本检查"
+					else -> "应用更新"
+				},
+				style = MaterialTheme.typography.titleMedium,
+				fontWeight = FontWeight.SemiBold,
+			)
+		},
+		text = {
+			Column(
+				modifier = Modifier.fillMaxWidth(),
+				verticalArrangement = Arrangement.spacedBy(12.dp),
+			) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Text(
+						text = "当前版本 v$currentVersion",
+						style = MaterialTheme.typography.bodySmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+					)
+					if (activeRelease != null) {
+						Surface(
+							shape = CircleShape,
+							color = if (hasUpdate) {
+								MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+							} else {
+								MaterialTheme.colorScheme.surfaceContainerHigh
+							},
+						) {
+							Text(
+								text = if (hasUpdate) "最新 ${activeRelease.tagName}" else "已是最新 ${activeRelease.tagName}",
+								style = MaterialTheme.typography.labelSmall.tabularNums(),
+								fontWeight = FontWeight.SemiBold,
+								color = if (hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+								modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+							)
+						}
+					}
+				}
+
+				when {
+					loading -> {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(vertical = 12.dp),
+							horizontalArrangement = Arrangement.Center,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							CircularProgressIndicator(
+								modifier = Modifier.size(18.dp),
+								strokeWidth = 2.dp,
+							)
+							Spacer(Modifier.width(10.dp))
+							Text(
+								text = "正在拉取 GitHub Release…",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+					}
+
+					errorMessage != null -> {
+						Text(
+							text = errorMessage.orEmpty(),
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.error,
+						)
+					}
+
+					activeRelease != null -> {
+						val notes = activeRelease.body.trim().ifBlank { "暂无更新说明" }
+						Surface(
+							shape = RoundedCornerShape(12.dp),
+							color = MaterialTheme.colorScheme.surfaceContainerHigh,
+							border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Column(
+								modifier = Modifier
+									.fillMaxWidth()
+									.heightIn(max = 200.dp)
+									.verticalScroll(rememberScrollState())
+									.padding(12.dp),
+								verticalArrangement = Arrangement.spacedBy(6.dp),
+							) {
+								if (activeRelease.name.isNotBlank() && activeRelease.name != activeRelease.tagName) {
+									Text(
+										text = activeRelease.name,
+										style = MaterialTheme.typography.labelLarge,
+										fontWeight = FontWeight.SemiBold,
+										color = MaterialTheme.colorScheme.onSurface,
+									)
+								}
+								Text(
+									text = notes,
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+						}
+
+						if (ipaAsset != null) {
+							val encodedIpa = ipaAsset.downloadUrl.encodeURLParameter()
+							val sidestoreUrl = "sidestore://install?url=$encodedIpa"
+							val altstoreUrl = "altstore://install?url=$encodedIpa"
+
+							Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+								Button(
+									onClick = {
+										if (!iosOpenExternalUrl(sidestoreUrl)) {
+											launchFeedback = "未能拉起 SideStore，请确认已安装 SideStore 或尝试直接下载 IPA"
+										}
+									},
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier.fillMaxWidth(),
+								) {
+									Text("用 SideStore 安装")
+								}
+
+								FilledTonalButton(
+									onClick = {
+										if (!iosOpenExternalUrl(altstoreUrl)) {
+											launchFeedback = "未能拉起 AltStore，请确认已安装 AltStore 或尝试直接下载 IPA"
+										}
+									},
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier.fillMaxWidth(),
+								) {
+									Text("用 AltStore 安装")
+								}
+
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									OutlinedButton(
+										onClick = {
+											if (!iosOpenExternalUrl(ipaAsset.downloadUrl)) {
+												launchFeedback = "无法打开 IPA 下载地址"
+											}
+										},
+										shape = RoundedCornerShape(10.dp),
+										modifier = Modifier.weight(1f),
+									) {
+										Text("直接下载 IPA", maxLines = 1, overflow = TextOverflow.Ellipsis)
+									}
+									OutlinedButton(
+										onClick = {
+											clipboard.setText(AnnotatedString(ipaAsset.downloadUrl))
+											launchFeedback = "已复制 IPA 下载链接"
+											onShowNotice("已复制 IPA 下载链接")
+										},
+										shape = RoundedCornerShape(10.dp),
+										modifier = Modifier.weight(1f),
+									) {
+										Text("复制链接", maxLines = 1, overflow = TextOverflow.Ellipsis)
+									}
+								}
+							}
+						} else {
+							Text(
+								text = "该版本暂未附带 .ipa 安装包，可前往 GitHub Release 页面查看。",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+
+						OutlinedButton(
+							onClick = {
+								if (!iosOpenExternalUrl(activeRelease.htmlUrl)) {
+									launchFeedback = "无法打开 GitHub Release 页面"
+								}
+							},
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Text("前往 GitHub Release 页面")
+						}
+
+						launchFeedback?.let { fb ->
+							Text(
+								text = fb,
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.primary,
+							)
+						}
+
+						Text(
+							text = "说明：受 iOS 沙盒限制无法静默覆盖安装，请通过 SideStore / AltStore 安装，或下载 IPA 手动重签安装。",
+							style = MaterialTheme.typography.labelSmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+						)
+					}
+				}
+			}
+		},
+		confirmButton = {
+			TextButton(onClick = onDismiss) {
+				Text("关闭")
+			}
+		},
+		dismissButton = {
+			TextButton(
+				onClick = checkNow,
+				enabled = !loading,
+			) {
+				Text("重新检查")
+			}
+		},
+	)
 }

@@ -62,12 +62,17 @@ import platform.Foundation.NSDate
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileHandle
 import platform.Foundation.NSFileManager
+import platform.Foundation.NSFileSize
 import platform.Foundation.NSFileSystemFreeSize
+import platform.Foundation.NSFileType
+import platform.Foundation.NSFileTypeRegular
 import platform.Foundation.NSNumber
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
+import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
+import platform.Foundation.NSURLCache
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.closeFile
 import platform.Foundation.dataWithBytes
@@ -93,6 +98,7 @@ import platform.UIKit.UIBackgroundTaskInvalid
 import platform.UIKit.UIImage
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToLong
@@ -777,6 +783,86 @@ class IosAudioPlayer(
 			val attrs = NSFileManager.defaultManager.attributesOfFileSystemForPath(offlineDirPath, error = null)
 			(attrs?.get(NSFileSystemFreeSize) as? NSNumber)?.longValue ?: 0L
 		}.getOrDefault(0L)
+	}
+
+	/**
+	 * 估算本机可安全清理的临时缓存大小（不含已离线曲目）：
+	 * 包括 NSURLCache 磁盘响应缓存、系统 NSTemporaryDirectory 临时文件以及未在下载的残留 .part 文件。
+	 */
+	fun estimateTempCacheBytes(): Long {
+		val urlCacheBytes = runCatching {
+			NSURLCache.sharedURLCache.currentDiskUsage.toLong().coerceAtLeast(0L)
+		}.getOrDefault(0L)
+		val fm = NSFileManager.defaultManager
+		val tmpDir = NSTemporaryDirectory()
+		val tmpBytes = runCatching {
+			val subpaths = fm.subpathsOfDirectoryAtPath(tmpDir, error = null) ?: return@runCatching 0L
+			var sum = 0L
+			subpaths.forEach { relAny ->
+				val rel = relAny as? String ?: return@forEach
+				val full = if (tmpDir.endsWith("/")) "$tmpDir$rel" else "$tmpDir/$rel"
+				val attrs = fm.attributesOfItemAtPath(full, error = null) ?: return@forEach
+				val fileType = attrs[NSFileType] as? String
+				if (fileType == NSFileTypeRegular) {
+					sum += (attrs[NSFileSize] as? NSNumber)?.longValue ?: 0L
+				}
+			}
+			sum
+		}.getOrDefault(0L)
+		val activePartNames = activeDownloadJobs
+			.filterValues { it.isActive }
+			.keys
+			.map { trackId -> "${trackId.replace(Regex("[^a-zA-Z0-9._-]"), "_")}." }
+		val stalePartBytes = runCatching {
+			val entries = fm.contentsOfDirectoryAtPath(offlineDirPath, error = null) ?: return@runCatching 0L
+			var sum = 0L
+			entries.forEach { nameAny ->
+				val name = nameAny as? String ?: return@forEach
+				if (!name.endsWith(".part")) return@forEach
+				if (activePartNames.any { prefix -> name.startsWith(prefix) }) return@forEach
+				val full = "$offlineDirPath/$name"
+				val attrs = fm.attributesOfItemAtPath(full, error = null) ?: return@forEach
+				sum += (attrs[NSFileSize] as? NSNumber)?.longValue ?: 0L
+			}
+			sum
+		}.getOrDefault(0L)
+		return max(0L, urlCacheBytes + tmpBytes + stalePartBytes)
+	}
+
+	/**
+	 * 清理临时缓存（保留离线歌曲目录中的已下载音频文件）。
+	 */
+	fun clearTempCache(): Long {
+		val before = estimateTempCacheBytes()
+		artworkCache.clear()
+		runCatching {
+			NSURLCache.sharedURLCache.removeAllCachedResponses()
+		}
+		val fm = NSFileManager.defaultManager
+		val tmpDir = NSTemporaryDirectory()
+		runCatching {
+			val entries = fm.contentsOfDirectoryAtPath(tmpDir, error = null)
+			entries?.forEach { nameAny ->
+				val name = nameAny as? String ?: return@forEach
+				val full = if (tmpDir.endsWith("/")) "$tmpDir$name" else "$tmpDir/$name"
+				fm.removeItemAtPath(full, error = null)
+			}
+		}
+		val activePartNames = activeDownloadJobs
+			.filterValues { it.isActive }
+			.keys
+			.map { trackId -> "${trackId.replace(Regex("[^a-zA-Z0-9._-]"), "_")}." }
+		runCatching {
+			val entries = fm.contentsOfDirectoryAtPath(offlineDirPath, error = null)
+			entries?.forEach { nameAny ->
+				val name = nameAny as? String ?: return@forEach
+				if (!name.endsWith(".part")) return@forEach
+				if (activePartNames.any { prefix -> name.startsWith(prefix) }) return@forEach
+				fm.removeItemAtPath("$offlineDirPath/$name", error = null)
+			}
+		}
+		refreshOfflineState()
+		return before
 	}
 
 	fun isTrackOffline(trackId: String): Boolean {

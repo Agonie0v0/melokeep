@@ -65,11 +65,14 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shuffle
@@ -78,6 +81,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -88,6 +93,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -102,6 +108,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -247,7 +255,11 @@ internal fun IosLibLocalSection(
 	val hasMore = !studioState.nextCursor.isNullOrBlank()
 	val toggleFavorite: (MeloTrack) -> Unit = { localController.toggleFavorite(it) }
 
-	Box(modifier = Modifier.fillMaxSize()) {
+	PullToRefreshBox(
+		isRefreshing = studioState.filesLoading || localState.loading,
+		onRefresh = onRefreshFiles,
+		modifier = Modifier.fillMaxSize(),
+	) {
 		when (subTab) {
 			IosLibLocalSubTab.OVERVIEW -> LocalOverviewContent(
 				allItems = allItems,
@@ -897,6 +909,13 @@ private fun LocalOverviewContent(
 			item(key = "local-songs-group", contentType = "track-group") {
 				IosGroupedCard(modifier = Modifier.padding(horizontal = 16.dp)) {
 					previewSongs.forEachIndexed { idx, entry ->
+						val isFirst = idx == 0
+						val isLast = idx == previewSongs.lastIndex
+						val rowColor = if (currentTrackId == entry.iosTrack.id) {
+							MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainer
+						}
 						IosLibTrackRowContent(
 							track = entry.iosTrack,
 							isPlaying = currentTrackId == entry.iosTrack.id,
@@ -906,7 +925,10 @@ private fun LocalOverviewContent(
 							multiSelectMode = false,
 							isSelected = false,
 							onClick = { audioPlayer.playQueue(allIosTracks, idx) },
-							onPlayNext = { audioPlayer.playNext(entry.iosTrack) },
+							onPlayNext = {
+								audioPlayer.playNext(entry.iosTrack)
+								onShowNotice("已设为下一首播放")
+							},
 							onToggleStar = { onToggleFavorite(entry.track) },
 							onDownloadOffline = {
 								audioPlayer.downloadTrackOffline(entry.iosTrack)
@@ -916,6 +938,17 @@ private fun LocalOverviewContent(
 							onDeleteOffline = { audioPlayer.deleteOfflineTrack(entry.iosTrack.id) },
 							onAddToPlaylist = {
 								if (entry.track.id.isNotBlank()) onRequestAddToLocalPlaylist(listOf(entry.track.id))
+							},
+							swipeEnabled = true,
+							swipeShape = iosLibGroupedItemShape(isFirst, isLast),
+							swipeContainerColor = rowColor,
+							onSwipeAppendToQueue = {
+								audioPlayer.appendToQueue(listOf(entry.iosTrack))
+								onShowNotice("已加入待播队尾")
+							},
+							onSwipePlayNext = {
+								audioPlayer.playNext(entry.iosTrack)
+								onShowNotice("已设为下一首播放")
 							},
 						)
 						if (idx < previewSongs.lastIndex) {
@@ -1471,13 +1504,15 @@ private fun LocalTrackListView(
 					val isSelected = selected[entry.iosTrack.id] == true
 					val isFirst = idx == 0
 					val isLast = idx == items.lastIndex
+					val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+					val rowColor = when {
+						multi && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+						currentTrackId == entry.iosTrack.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+						else -> MaterialTheme.colorScheme.surfaceContainer
+					}
 					Surface(
-						shape = iosLibGroupedItemShape(isFirst, isLast),
-						color = when {
-							multi && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-							currentTrackId == entry.iosTrack.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-							else -> MaterialTheme.colorScheme.surfaceContainer
-						},
+						shape = rowShape,
+						color = rowColor,
 						modifier = Modifier.fillMaxWidth(),
 					) {
 						Column {
@@ -1501,7 +1536,10 @@ private fun LocalTrackListView(
 									multi = true
 									selected[entry.iosTrack.id] = true
 								},
-								onPlayNext = { audioPlayer.playNext(entry.iosTrack) },
+								onPlayNext = {
+									audioPlayer.playNext(entry.iosTrack)
+									onShowNotice("已设为下一首播放")
+								},
 								onToggleStar = { onToggleFavorite(entry.track) },
 								onDownloadOffline = {
 									audioPlayer.downloadTrackOffline(entry.iosTrack)
@@ -1513,6 +1551,17 @@ private fun LocalTrackListView(
 									if (entry.track.id.isNotBlank()) onRequestAddToLocalPlaylist(listOf(entry.track.id))
 								},
 								onRemoveFromPlaylist = onRemoveFromPlaylist?.let { fn -> { fn(entry.track) } },
+								swipeEnabled = !multi,
+								swipeShape = rowShape,
+								swipeContainerColor = rowColor,
+								onSwipeAppendToQueue = {
+									audioPlayer.appendToQueue(listOf(entry.iosTrack))
+									onShowNotice("已加入待播队尾")
+								},
+								onSwipePlayNext = {
+									audioPlayer.playNext(entry.iosTrack)
+									onShowNotice("已设为下一首播放")
+								},
 							)
 							if (!isLast) {
 								IosHairlineDivider(startIndent = if (multi) 104.dp else 66.dp)
@@ -1528,7 +1577,7 @@ private fun LocalTrackListView(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multi,
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -1804,13 +1853,16 @@ private fun LocalServerFilesSection(
 				}
 				val isPlayingThis = currentTrackId == iosTrack.id
 				val checked = file.path in studioState.selectedFilePaths
+				val swipeEnabled = studioState.selectedFilePaths.isEmpty()
+				val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+				val rowColor = when {
+					checked -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+					isPlayingThis -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+					else -> MaterialTheme.colorScheme.surfaceContainer
+				}
 				Surface(
-					shape = iosLibGroupedItemShape(isFirst, isLast),
-					color = when {
-						checked -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-						isPlayingThis -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-						else -> MaterialTheme.colorScheme.surfaceContainer
-					},
+					shape = rowShape,
+					color = rowColor,
 					modifier = Modifier.fillMaxWidth(),
 				) {
 					Column {
@@ -1830,6 +1882,10 @@ private fun LocalServerFilesSection(
 								}
 								audioPlayer.playQueue(queue, idx)
 							},
+							onPlayNext = {
+								audioPlayer.playNext(iosTrack)
+								onShowNotice("已设为下一首播放")
+							},
 							onDownload = {
 								audioPlayer.downloadTrackOffline(iosTrack)
 								onShowNotice(iosLibOfflineQueueNotice(1))
@@ -1837,6 +1893,17 @@ private fun LocalServerFilesSection(
 							onCancelDownload = { audioPlayer.cancelDownload(iosTrack.id) },
 							onDeleteOffline = { audioPlayer.deleteOfflineTrack(iosTrack.id) },
 							onEditTags = { onEditTags(file) },
+							swipeEnabled = swipeEnabled,
+							swipeShape = rowShape,
+							swipeContainerColor = rowColor,
+							onSwipeAppendToQueue = {
+								audioPlayer.appendToQueue(listOf(iosTrack))
+								onShowNotice("已加入待播队尾")
+							},
+							onSwipePlayNext = {
+								audioPlayer.playNext(iosTrack)
+								onShowNotice("已设为下一首播放")
+							},
 						)
 						if (!isLast) {
 							IosHairlineDivider(startIndent = 100.dp)
@@ -1961,11 +2028,19 @@ private fun LocalAudioFileRowContent(
 	downloadProgress: Float?,
 	onToggleCheck: () -> Unit,
 	onPlay: () -> Unit,
+	onPlayNext: () -> Unit,
 	onDownload: () -> Unit,
 	onCancelDownload: () -> Unit,
 	onDeleteOffline: () -> Unit,
 	onEditTags: () -> Unit,
+	swipeEnabled: Boolean = false,
+	swipeShape: Shape = RectangleShape,
+	swipeContainerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+	onSwipeAppendToQueue: (() -> Unit)? = null,
+	onSwipePlayNext: (() -> Unit)? = null,
 ) {
+	var menuExpanded by remember { mutableStateOf(false) }
+
 	val displayTitle = remember(file) {
 		file.metadata["title"]?.takeIf { it.isNotBlank() }
 			?: file.track?.title?.takeIf { it.isNotBlank() }
@@ -1986,90 +2061,163 @@ private fun LocalAudioFileRowContent(
 		listOfNotNull(artist, album, codec, size, lockHint).joinToString(" · ").ifBlank { file.name }
 	}
 
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.combinedClickable(onClick = onPlay, onLongClick = onToggleCheck)
-			.padding(start = 4.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Checkbox(
-			checked = checked,
-			onCheckedChange = { onToggleCheck() },
-		)
-
-		Box(
+	val rowBody: @Composable () -> Unit = {
+		Row(
 			modifier = Modifier
-				.size(42.dp)
-				.clip(RoundedCornerShape(9.dp))
-				.background(MaterialTheme.colorScheme.surfaceContainerHigh),
-			contentAlignment = Alignment.Center,
+				.fillMaxWidth()
+				.combinedClickable(onClick = onPlay, onLongClick = onToggleCheck)
+				.padding(start = 4.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
 		) {
-			if (coverUrl != null) {
-				CoverArtBox(coverUrl = coverUrl, size = 42.dp, cornerRadius = 9.dp)
-			} else if (!isCurrentTrack) {
-				Icon(
-					imageVector = Icons.Rounded.MusicNote,
-					contentDescription = null,
-					tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-					modifier = Modifier.size(18.dp),
-				)
-			}
-			if (isCurrentTrack) {
-				Box(
-					modifier = Modifier
-						.fillMaxSize()
-						.background(Color.Black.copy(alpha = 0.45f)),
-					contentAlignment = Alignment.Center,
-				) {
+			Checkbox(
+				checked = checked,
+				onCheckedChange = { onToggleCheck() },
+			)
+
+			Box(
+				modifier = Modifier
+					.size(42.dp)
+					.clip(RoundedCornerShape(9.dp))
+					.background(MaterialTheme.colorScheme.surfaceContainerHigh),
+				contentAlignment = Alignment.Center,
+			) {
+				if (coverUrl != null) {
+					CoverArtBox(coverUrl = coverUrl, size = 42.dp, cornerRadius = 9.dp)
+				} else if (!isCurrentTrack) {
 					Icon(
-						imageVector = if (isActivelyPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+						imageVector = Icons.Rounded.MusicNote,
 						contentDescription = null,
-						tint = Color.White,
-						modifier = Modifier.size(16.dp),
+						tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+						modifier = Modifier.size(18.dp),
+					)
+				}
+				if (isCurrentTrack) {
+					Box(
+						modifier = Modifier
+							.fillMaxSize()
+							.background(Color.Black.copy(alpha = 0.45f)),
+						contentAlignment = Alignment.Center,
+					) {
+						Icon(
+							imageVector = if (isActivelyPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+							contentDescription = null,
+							tint = Color.White,
+							modifier = Modifier.size(16.dp),
+						)
+					}
+				}
+			}
+
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				Text(
+					text = displayTitle,
+					style = MaterialTheme.typography.titleSmall.copy(
+						fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Medium,
+					),
+					color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					if (isOffline) {
+						Icon(
+							imageVector = Icons.Rounded.OfflinePin,
+							contentDescription = "已离线",
+							tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+							modifier = Modifier.size(12.dp),
+						)
+					}
+					Text(
+						text = quietMeta,
+						style = MaterialTheme.typography.bodySmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
 					)
 				}
 			}
-		}
 
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp),
-		) {
-			Text(
-				text = displayTitle,
-				style = MaterialTheme.typography.titleSmall.copy(
-					fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Medium,
-				),
-				color = if (isCurrentTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			Text(
-				text = quietMeta,
-				style = MaterialTheme.typography.bodySmall.tabularNums(),
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
+			Box {
+				IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
+					Icon(
+						imageVector = Icons.Rounded.MoreVert,
+						contentDescription = "更多操作",
+						tint = MaterialTheme.colorScheme.onSurfaceVariant,
+						modifier = Modifier.size(18.dp),
+					)
+				}
+				DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+					DropdownMenuItem(
+						text = { Text("编辑标签") },
+						leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+						onClick = {
+							menuExpanded = false
+							onEditTags()
+						},
+					)
+					DropdownMenuItem(
+						text = { Text("下一首播放") },
+						leadingIcon = { Icon(Icons.Rounded.PlaylistPlay, contentDescription = null) },
+						onClick = {
+							menuExpanded = false
+							onPlayNext()
+						},
+					)
+					when {
+						downloadProgress != null -> {
+							DropdownMenuItem(
+								text = { Text("取消离线下载") },
+								leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = null) },
+								onClick = {
+									menuExpanded = false
+									onCancelDownload()
+								},
+							)
+						}
+						!isOffline -> {
+							DropdownMenuItem(
+								text = { Text("下载到手机离线") },
+								leadingIcon = { Icon(Icons.Rounded.CloudDownload, contentDescription = null) },
+								onClick = {
+									menuExpanded = false
+									onDownload()
+								},
+							)
+						}
+						else -> {
+							DropdownMenuItem(
+								text = { Text("移除手机离线") },
+								leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+								onClick = {
+									menuExpanded = false
+									onDeleteOffline()
+								},
+							)
+						}
+					}
+				}
+			}
 		}
+	}
 
-		IosLibOfflineStatusIcon(
-			isOffline = isOffline,
-			downloadProgress = downloadProgress,
-			onDownload = onDownload,
-			onCancel = onCancelDownload,
-			onDelete = onDeleteOffline,
+	if (swipeEnabled && (onSwipeAppendToQueue != null || onSwipePlayNext != null)) {
+		IosSwipeableSongRow(
+			enabled = true,
+			shape = swipeShape,
+			containerColor = swipeContainerColor,
+			onAppendToQueue = onSwipeAppendToQueue,
+			onPlayNext = onSwipePlayNext,
+			content = rowBody,
 		)
-		IconButton(onClick = onEditTags, modifier = Modifier.size(32.dp)) {
-			Icon(
-				imageVector = Icons.Rounded.Edit,
-				contentDescription = "编辑标签",
-				tint = MaterialTheme.colorScheme.onSurfaceVariant,
-				modifier = Modifier.size(17.dp),
-			)
-		}
+	} else {
+		rowBody()
 	}
 }
 
@@ -2602,7 +2750,7 @@ internal fun IosLibFileTagEditorSheet(
 				)
 			}
 
-			AnimatedVisibility(visible = showExtended) {
+			androidx.compose.animation.AnimatedVisibility(visible = showExtended) {
 				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 					extendedFields.forEach { def ->
 						LocalTagFieldInput(

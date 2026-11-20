@@ -306,13 +306,15 @@ internal fun IosLibAlbumDetailScreen(
 								val isSelected = selectedIds[track.id] == true
 								val isFirst = idx == 0
 								val isLast = idx == tracks.lastIndex
+								val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+								val rowColor = when {
+									multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+									currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+									else -> MaterialTheme.colorScheme.surfaceContainer
+								}
 								Surface(
-									shape = iosLibGroupedItemShape(isFirst, isLast),
-									color = when {
-										multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-										currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-										else -> MaterialTheme.colorScheme.surfaceContainer
-									},
+									shape = rowShape,
+									color = rowColor,
 									modifier = Modifier
 										.fillMaxWidth()
 										.padding(horizontal = 16.dp),
@@ -340,7 +342,10 @@ internal fun IosLibAlbumDetailScreen(
 												multiSelecting = true
 												selectedIds[track.id] = true
 											},
-											onPlayNext = { audioPlayer.playNext(track) },
+											onPlayNext = {
+												audioPlayer.playNext(track)
+												onShowNotice("已设为下一首播放")
+											},
 											onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 											onDownloadOffline = {
 												audioPlayer.downloadTrackOffline(track)
@@ -350,6 +355,17 @@ internal fun IosLibAlbumDetailScreen(
 											onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 											onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 											onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+											swipeEnabled = !multiSelecting,
+											swipeShape = rowShape,
+											swipeContainerColor = rowColor,
+											onSwipeAppendToQueue = {
+												audioPlayer.appendToQueue(listOf(track))
+												onShowNotice("已加入待播队尾")
+											},
+											onSwipePlayNext = {
+												audioPlayer.playNext(track)
+												onShowNotice("已设为下一首播放")
+											},
 										)
 										if (!isLast) {
 											IosHairlineDivider(startIndent = if (multiSelecting) 56.dp else 46.dp)
@@ -363,7 +379,7 @@ internal fun IosLibAlbumDetailScreen(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelecting && tracks.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -593,13 +609,15 @@ internal fun IosLibPlaylistDetailScreen(
 							val isSelected = selectedIds[track.id] == true
 							val isFirst = idx == 0
 							val isLast = idx == tracks.lastIndex
+							val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+							val rowColor = when {
+								multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+								currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+								else -> MaterialTheme.colorScheme.surfaceContainer
+							}
 							Surface(
-								shape = iosLibGroupedItemShape(isFirst, isLast),
-								color = when {
-									multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-									currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-									else -> MaterialTheme.colorScheme.surfaceContainer
-								},
+								shape = rowShape,
+								color = rowColor,
 								modifier = Modifier
 									.fillMaxWidth()
 									.padding(horizontal = 16.dp),
@@ -624,7 +642,10 @@ internal fun IosLibPlaylistDetailScreen(
 											multiSelecting = true
 											selectedIds[track.id] = true
 										},
-										onPlayNext = { audioPlayer.playNext(track) },
+										onPlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 										onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 										onDownloadOffline = {
 											audioPlayer.downloadTrackOffline(track)
@@ -640,6 +661,17 @@ internal fun IosLibPlaylistDetailScreen(
 											}
 										},
 										onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+										swipeEnabled = !multiSelecting,
+										swipeShape = rowShape,
+										swipeContainerColor = rowColor,
+										onSwipeAppendToQueue = {
+											audioPlayer.appendToQueue(listOf(track))
+											onShowNotice("已加入待播队尾")
+										},
+										onSwipePlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 									)
 									if (!isLast) {
 										IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 66.dp)
@@ -652,7 +684,7 @@ internal fun IosLibPlaylistDetailScreen(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelecting && tracks.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -952,13 +984,15 @@ internal fun IosLibArtistDetailScreen(
 							val isSelected = selectedIds[track.id] == true
 							val isFirst = idx == 0
 							val isLast = idx == topSongs.lastIndex
+							val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+							val rowColor = when {
+								multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+								currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+								else -> MaterialTheme.colorScheme.surfaceContainer
+							}
 							Surface(
-								shape = iosLibGroupedItemShape(isFirst, isLast),
-								color = when {
-									multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-									currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-									else -> MaterialTheme.colorScheme.surfaceContainer
-								},
+								shape = rowShape,
+								color = rowColor,
 								modifier = Modifier
 									.fillMaxWidth()
 									.padding(horizontal = 16.dp),
@@ -984,7 +1018,10 @@ internal fun IosLibArtistDetailScreen(
 											multiSelecting = true
 											selectedIds[track.id] = true
 										},
-										onPlayNext = { audioPlayer.playNext(track) },
+										onPlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 										onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 										onDownloadOffline = {
 											audioPlayer.downloadTrackOffline(track)
@@ -994,6 +1031,17 @@ internal fun IosLibArtistDetailScreen(
 										onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 										onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 										onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+										swipeEnabled = !multiSelecting,
+										swipeShape = rowShape,
+										swipeContainerColor = rowColor,
+										onSwipeAppendToQueue = {
+											audioPlayer.appendToQueue(listOf(track))
+											onShowNotice("已加入待播队尾")
+										},
+										onSwipePlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 									)
 									if (!isLast) {
 										IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 94.dp)
@@ -1100,7 +1148,7 @@ internal fun IosLibArtistDetailScreen(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelecting && topSongs.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -1333,13 +1381,15 @@ internal fun IosLibNavFavoritesScreen(
 							val isSelected = selectedIds[track.id] == true
 							val isFirst = idx == 0
 							val isLast = idx == songs.lastIndex
+							val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+							val rowColor = when {
+								multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+								currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+								else -> MaterialTheme.colorScheme.surfaceContainer
+							}
 							Surface(
-								shape = iosLibGroupedItemShape(isFirst, isLast),
-								color = when {
-									multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-									currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-									else -> MaterialTheme.colorScheme.surfaceContainer
-								},
+								shape = rowShape,
+								color = rowColor,
 								modifier = Modifier.fillMaxWidth(),
 							) {
 								Column {
@@ -1362,7 +1412,10 @@ internal fun IosLibNavFavoritesScreen(
 											multiSelecting = true
 											selectedIds[track.id] = true
 										},
-										onPlayNext = { audioPlayer.playNext(track) },
+										onPlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 										onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 										onDownloadOffline = {
 											audioPlayer.downloadTrackOffline(track)
@@ -1372,6 +1425,17 @@ internal fun IosLibNavFavoritesScreen(
 										onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 										onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 										onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+										swipeEnabled = !multiSelecting,
+										swipeShape = rowShape,
+										swipeContainerColor = rowColor,
+										onSwipeAppendToQueue = {
+											audioPlayer.appendToQueue(listOf(track))
+											onShowNotice("已加入待播队尾")
+										},
+										onSwipePlayNext = {
+											audioPlayer.playNext(track)
+											onShowNotice("已设为下一首播放")
+										},
 									)
 									if (!isLast) {
 										IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 66.dp)
@@ -1511,7 +1575,7 @@ internal fun IosLibNavFavoritesScreen(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = subTab == FavSubTab.SONGS && multiSelecting && songs.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -1952,13 +2016,15 @@ fun IosDailyMixSheet(
 						val isSelected = selectedIds[track.id] == true
 						val isFirst = idx == 0
 						val isLast = idx == tracks.lastIndex
+						val rowShape = iosLibGroupedItemShape(isFirst, isLast)
+						val rowColor = when {
+							multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+							track.id == playerState.currentTrack?.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+							else -> MaterialTheme.colorScheme.surfaceContainer
+						}
 						Surface(
-							shape = iosLibGroupedItemShape(isFirst, isLast),
-							color = when {
-								multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-								track.id == playerState.currentTrack?.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-								else -> MaterialTheme.colorScheme.surfaceContainer
-							},
+							shape = rowShape,
+							color = rowColor,
 							modifier = Modifier.fillMaxWidth(),
 						) {
 							Column {
@@ -1982,7 +2048,10 @@ fun IosDailyMixSheet(
 										multiSelecting = true
 										selectedIds[track.id] = true
 									},
-									onPlayNext = { audioPlayer.playNext(track) },
+									onPlayNext = {
+										audioPlayer.playNext(track)
+										sheetNotice = "已设为下一首播放"
+									},
 									onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 									onDownloadOffline = {
 										audioPlayer.downloadTrackOffline(track)
@@ -1992,6 +2061,17 @@ fun IosDailyMixSheet(
 									onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 									onAddToPlaylist = null,
 									onRequestPhysicalDelete = null,
+									swipeEnabled = !multiSelecting,
+									swipeShape = rowShape,
+									swipeContainerColor = rowColor,
+									onSwipeAppendToQueue = {
+										audioPlayer.appendToQueue(listOf(track))
+										sheetNotice = "已加入待播队尾"
+									},
+									onSwipePlayNext = {
+										audioPlayer.playNext(track)
+										sheetNotice = "已设为下一首播放"
+									},
 								)
 								if (!isLast) {
 									IosHairlineDivider(startIndent = if (multiSelecting) 132.dp else 94.dp)

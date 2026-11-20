@@ -88,8 +88,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -107,7 +110,9 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -530,8 +535,6 @@ fun IosLibraryRoute(
 						isNavidromeConnected = isNavidromeConnected,
 						hasSavedServers = libState.servers.isNotEmpty(),
 						isMeloConnected = isMeloConnected,
-						scanningNavidrome = studioState.scanningNavidrome,
-						scanTrackCount = studioState.scanStatus?.count,
 						navSearchOpen = navSearchOpen,
 						navSearchQuery = libState.searchQuery,
 						onNavSearchQueryChange = { subsonicManager.searchLibrary(it) },
@@ -557,14 +560,6 @@ fun IosLibraryRoute(
 						onOpenServerSheet = {
 							editingServer = null
 							showServerDialog = true
-						},
-						onTriggerScan = {
-							if (isMeloConnected) {
-								studioController.triggerNavidromeScan()
-							} else {
-								inlineNotice = "请先连接 MeloKeep 服务以触发扫库"
-								onOpenSettings()
-							}
 						},
 						onOpenCreateFolder = { mkdirDialogOpen = true },
 						localSearchOpen = localSearchOpen,
@@ -799,7 +794,7 @@ fun IosLibraryRoute(
 				}
 
 				// 本地库「文件夹」多选批处理悬浮坞（去刮削 / 离线 / 加歌单 / 移动 / 删除）
-				AnimatedVisibility(
+				androidx.compose.animation.AnimatedVisibility(
 					visible = sourceMode == IosLibSourceMode.LOCAL &&
 						isMeloConnected &&
 						localSubTab == IosLibLocalSubTab.FOLDERS &&
@@ -1159,8 +1154,6 @@ private fun IosLibTopHeader(
 	isNavidromeConnected: Boolean,
 	hasSavedServers: Boolean,
 	isMeloConnected: Boolean,
-	scanningNavidrome: Boolean,
-	scanTrackCount: Long?,
 	navSearchOpen: Boolean,
 	navSearchQuery: String,
 	onNavSearchQueryChange: (String) -> Unit,
@@ -1168,7 +1161,6 @@ private fun IosLibTopHeader(
 	onNavSearchSubmit: () -> Unit,
 	onSelectNavSearchHistory: (String) -> Unit,
 	onOpenServerSheet: () -> Unit,
-	onTriggerScan: () -> Unit,
 	onOpenCreateFolder: () -> Unit,
 	localSearchOpen: Boolean,
 	localSearchInput: String,
@@ -1268,47 +1260,6 @@ private fun IosLibTopHeader(
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
 				) {
 					if (sourceMode == IosLibSourceMode.NAVIDROME) {
-						if (isNavidromeConnected) {
-							Surface(
-								shape = CircleShape,
-								color = MaterialTheme.colorScheme.surfaceContainer,
-								border = iosLibHairlineBorder(),
-								modifier = Modifier
-									.height(32.dp)
-									.clip(CircleShape)
-									.clickable(enabled = !scanningNavidrome, onClick = onTriggerScan),
-							) {
-								Row(
-									modifier = Modifier.padding(horizontal = 10.dp),
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.spacedBy(4.dp),
-								) {
-									if (scanningNavidrome) {
-										CircularProgressIndicator(
-											modifier = Modifier.size(12.dp),
-											strokeWidth = 1.6.dp,
-											color = MaterialTheme.colorScheme.primary,
-										)
-									} else {
-										Icon(
-											imageVector = Icons.Rounded.Refresh,
-											contentDescription = null,
-											tint = MaterialTheme.colorScheme.primary,
-											modifier = Modifier.size(14.dp),
-										)
-									}
-									val countSuffix = scanTrackCount?.takeIf { it > 0L }?.let { " $it" }.orEmpty()
-									Text(
-										text = if (scanningNavidrome) "扫库中" else "扫库$countSuffix",
-										style = MaterialTheme.typography.labelMedium.tabularNums(),
-										color = MaterialTheme.colorScheme.onSurface,
-										maxLines = 1,
-										softWrap = false,
-									)
-								}
-							}
-						}
-
 						IosLibHeaderCircleButton(
 							icon = if (hasSavedServers) Icons.Rounded.SwapHoriz else Icons.Rounded.Dns,
 							contentDescription = if (hasSavedServers) "切换服务器" else "配置服务器",
@@ -1344,7 +1295,7 @@ private fun IosLibTopHeader(
 			}
 
 			// 第二行：Navidrome 库子栏目
-			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.NAVIDROME && isNavidromeConnected) {
+			androidx.compose.animation.AnimatedVisibility(visible = sourceMode == IosLibSourceMode.NAVIDROME && isNavidromeConnected) {
 				IosLibHeaderSubTabRow(
 					tabs = IosLibNavSubTab.entries,
 					selected = navSubTab,
@@ -1357,7 +1308,7 @@ private fun IosLibTopHeader(
 			}
 
 			// 第二行：本地库子栏目
-			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.LOCAL && isMeloConnected) {
+			androidx.compose.animation.AnimatedVisibility(visible = sourceMode == IosLibSourceMode.LOCAL && isMeloConnected) {
 				IosLibHeaderSubTabRow(
 					tabs = IosLibLocalSubTab.entries,
 					selected = localSubTab,
@@ -1370,7 +1321,7 @@ private fun IosLibTopHeader(
 			}
 
 			// 第三行：Navidrome 搜索栏与搜索历史
-			AnimatedVisibility(visible = sourceMode == IosLibSourceMode.NAVIDROME && isNavidromeConnected && navSearchOpen) {
+			androidx.compose.animation.AnimatedVisibility(visible = sourceMode == IosLibSourceMode.NAVIDROME && isNavidromeConnected && navSearchOpen) {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					IosLibCompactSearchBar(
 						value = navSearchQuery,
@@ -1400,7 +1351,7 @@ private fun IosLibTopHeader(
 			}
 
 			// 第三行：本地库搜索栏与搜索历史
-			AnimatedVisibility(
+			androidx.compose.animation.AnimatedVisibility(
 				visible = sourceMode == IosLibSourceMode.LOCAL &&
 					isMeloConnected &&
 					localSearchOpen &&
@@ -2061,7 +2012,134 @@ internal fun IosLibOfflineStatusIcon(
 }
 
 /**
- * 极简静谧曲目行：彻底移除刺眼金色描边 FLAC 徽标，将音质自然融入次行元数据。
+ * 歌曲条目左右滑动入队容器：
+ * - 右滑 (StartToEnd)：加入待播队尾
+ * - 左滑 (EndToStart)：设为下一首播放
+ * 完成后通过 snapTo(Settled) 归位，多选状态下禁用手势。
+ */
+@Composable
+internal fun IosSwipeableSongRow(
+	enabled: Boolean = true,
+	shape: Shape = RectangleShape,
+	containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+	onAppendToQueue: (() -> Unit)?,
+	onPlayNext: (() -> Unit)?,
+	content: @Composable () -> Unit,
+) {
+	if (!enabled || (onAppendToQueue == null && onPlayNext == null)) {
+		Surface(
+			shape = shape,
+			color = containerColor,
+			modifier = Modifier.fillMaxWidth(),
+		) {
+			content()
+		}
+		return
+	}
+
+	val scope = rememberCoroutineScope()
+	val haptics = LocalHapticFeedback.current
+	val dismissState = rememberSwipeToDismissBoxState()
+	var triggeredHaptic by remember { mutableStateOf(false) }
+	val targetValue = dismissState.targetValue
+
+	LaunchedEffect(targetValue) {
+		if (targetValue != SwipeToDismissBoxValue.Settled && !triggeredHaptic) {
+			haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+			triggeredHaptic = true
+		} else if (targetValue == SwipeToDismissBoxValue.Settled) {
+			triggeredHaptic = false
+		}
+	}
+
+	Box(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(shape),
+	) {
+		SwipeToDismissBox(
+			state = dismissState,
+			enableDismissFromStartToEnd = onAppendToQueue != null,
+			enableDismissFromEndToStart = onPlayNext != null,
+			gesturesEnabled = enabled,
+			onDismiss = { value ->
+				when (value) {
+					SwipeToDismissBoxValue.StartToEnd -> onAppendToQueue?.invoke()
+					SwipeToDismissBoxValue.EndToStart -> onPlayNext?.invoke()
+					SwipeToDismissBoxValue.Settled -> Unit
+				}
+				scope.launch {
+					dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+				}
+			},
+			backgroundContent = {
+				val direction = dismissState.dismissDirection
+				val isStartToEnd = direction == SwipeToDismissBoxValue.StartToEnd
+				val isEndToStart = direction == SwipeToDismissBoxValue.EndToStart
+				val bgColor = when {
+					isStartToEnd -> MaterialTheme.colorScheme.secondaryContainer
+					isEndToStart -> MaterialTheme.colorScheme.primaryContainer
+					else -> Color.Transparent
+				}
+				val fgColor = when {
+					isStartToEnd -> MaterialTheme.colorScheme.onSecondaryContainer
+					isEndToStart -> MaterialTheme.colorScheme.onPrimaryContainer
+					else -> Color.Transparent
+				}
+				Row(
+					modifier = Modifier
+						.fillMaxSize()
+						.background(bgColor)
+						.padding(horizontal = 20.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = if (isEndToStart) Arrangement.End else Arrangement.Start,
+				) {
+					if (isStartToEnd) {
+						Icon(
+							imageVector = Icons.Rounded.PlaylistAdd,
+							contentDescription = null,
+							tint = fgColor,
+							modifier = Modifier.size(18.dp),
+						)
+						Spacer(Modifier.width(6.dp))
+						Text(
+							text = "加入队尾",
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = FontWeight.SemiBold,
+							color = fgColor,
+						)
+					} else if (isEndToStart) {
+						Text(
+							text = "下一首播放",
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = FontWeight.SemiBold,
+							color = fgColor,
+						)
+						Spacer(Modifier.width(6.dp))
+						Icon(
+							imageVector = Icons.Rounded.PlaylistPlay,
+							contentDescription = null,
+							tint = fgColor,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+				}
+			},
+		) {
+			Surface(
+				shape = shape,
+				color = containerColor,
+				modifier = Modifier.fillMaxWidth(),
+			) {
+				content()
+			}
+		}
+	}
+}
+
+/**
+ * 极简静谧曲目行：彻底移除刺眼金色描边 FLAC 徽标，将音质自然融入次行元数据；
+ * 右侧移除单独离线按钮，改为在副标题起始处展示极简 OfflinePin 微标，并通过左右滑动快捷入队。
  */
 @Composable
 internal fun IosLibTrackRowContent(
@@ -2086,6 +2164,11 @@ internal fun IosLibTrackRowContent(
 	showCover: Boolean = true,
 	showStarButton: Boolean = true,
 	showAlbumInSubtitle: Boolean = true,
+	swipeEnabled: Boolean = false,
+	swipeShape: Shape = RectangleShape,
+	swipeContainerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+	onSwipeAppendToQueue: (() -> Unit)? = null,
+	onSwipePlayNext: (() -> Unit)? = null,
 ) {
 	var menuExpanded by remember { mutableStateOf(false) }
 
@@ -2106,170 +2189,206 @@ internal fun IosLibTrackRowContent(
 		else if (track.durationMs > 0L) formatDurationMs(track.durationMs) else ""
 	}
 
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.combinedClickable(
-				onClick = onClick,
-				onLongClick = onLongClick,
-			)
-			.padding(horizontal = 12.dp, vertical = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(10.dp),
-	) {
-		if (multiSelectMode) {
-			Checkbox(
-				checked = isSelected,
-				onCheckedChange = { onClick() },
-			)
-		} else if (trackIndex != null) {
-			Text(
-				text = "$trackIndex",
-				style = MaterialTheme.typography.labelMedium.tabularNums(),
-				color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-				fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Normal,
-				textAlign = TextAlign.Center,
-				modifier = Modifier.width(24.dp),
-			)
-		}
-
-		if (showCover) {
-			CoverArtBox(
-				coverUrl = track.coverUrl,
-				size = 44.dp,
-				cornerRadius = 9.dp,
-			)
-		}
-
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp),
+	val rowBody: @Composable () -> Unit = {
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.combinedClickable(
+					onClick = onClick,
+					onLongClick = onLongClick,
+				)
+				.padding(horizontal = 12.dp, vertical = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
 		) {
-			Text(
-				text = track.title.ifBlank { "未知歌曲" },
-				style = MaterialTheme.typography.titleSmall.copy(
-					fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium,
-				),
-				color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			if (subtitleText.isNotBlank()) {
+			if (multiSelectMode) {
+				Checkbox(
+					checked = isSelected,
+					onCheckedChange = { onClick() },
+				)
+			} else if (trackIndex != null) {
 				Text(
-					text = subtitleText,
-					style = MaterialTheme.typography.bodySmall.tabularNums(),
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					text = "$trackIndex",
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+					fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Normal,
+					textAlign = TextAlign.Center,
+					modifier = Modifier.width(24.dp),
+				)
+			}
+
+			if (showCover) {
+				CoverArtBox(
+					coverUrl = track.coverUrl,
+					size = 44.dp,
+					cornerRadius = 9.dp,
+				)
+			}
+
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				Text(
+					text = track.title.ifBlank { "未知歌曲" },
+					style = MaterialTheme.typography.titleSmall.copy(
+						fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium,
+					),
+					color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
 					maxLines = 1,
 					overflow = TextOverflow.Ellipsis,
 				)
+				if (isOffline || subtitleText.isNotBlank()) {
+					Row(
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(4.dp),
+					) {
+						if (isOffline) {
+							Icon(
+								imageVector = Icons.Rounded.OfflinePin,
+								contentDescription = "已离线",
+								tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+								modifier = Modifier.size(12.dp),
+							)
+						}
+						if (subtitleText.isNotBlank()) {
+							Text(
+								text = subtitleText,
+								style = MaterialTheme.typography.bodySmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis,
+							)
+						}
+					}
+				}
 			}
-		}
 
-		if (!multiSelectMode) {
-			Row(
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(0.dp),
-			) {
-				if (showStarButton) {
-					IconButton(onClick = onToggleStar, modifier = Modifier.size(32.dp)) {
-						Icon(
-							imageVector = if (isStarred) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-							contentDescription = if (isStarred) "取消喜欢" else "加入我喜欢",
-							tint = if (isStarred) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-							modifier = Modifier.size(16.dp),
-						)
+			if (!multiSelectMode) {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(0.dp),
+				) {
+					if (showStarButton) {
+						IconButton(onClick = onToggleStar, modifier = Modifier.size(32.dp)) {
+							Icon(
+								imageVector = if (isStarred) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+								contentDescription = if (isStarred) "取消喜欢" else "加入我喜欢",
+								tint = if (isStarred) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+								modifier = Modifier.size(16.dp),
+							)
+						}
 					}
-				}
-				IosLibOfflineStatusIcon(
-					isOffline = isOffline,
-					downloadProgress = downloadProgress,
-					onDownload = onDownloadOffline,
-					onCancel = onCancelOffline,
-					onDelete = onDeleteOffline,
-				)
-				Box {
-					IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
-						Icon(
-							imageVector = Icons.Rounded.MoreVert,
-							contentDescription = "更多操作",
-							tint = MaterialTheme.colorScheme.onSurfaceVariant,
-							modifier = Modifier.size(18.dp),
-						)
-					}
-					DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-						DropdownMenuItem(
-							text = { Text("下一首播放") },
-							leadingIcon = { Icon(Icons.Rounded.PlaylistPlay, contentDescription = null) },
-							onClick = {
-								menuExpanded = false
-								onPlayNext()
-							},
-						)
-						if (onAddToPlaylist != null) {
-							DropdownMenuItem(
-								text = { Text("加入歌单") },
-								leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
-								onClick = {
-									menuExpanded = false
-									onAddToPlaylist()
-								},
+					Box {
+						IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
+							Icon(
+								imageVector = Icons.Rounded.MoreVert,
+								contentDescription = "更多操作",
+								tint = MaterialTheme.colorScheme.onSurfaceVariant,
+								modifier = Modifier.size(18.dp),
 							)
 						}
-						if (!isOffline) {
+						DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
 							DropdownMenuItem(
-								text = { Text("下载到手机离线") },
-								leadingIcon = { Icon(Icons.Rounded.CloudDownload, contentDescription = null) },
+								text = { Text("下一首播放") },
+								leadingIcon = { Icon(Icons.Rounded.PlaylistPlay, contentDescription = null) },
 								onClick = {
 									menuExpanded = false
-									onDownloadOffline()
+									onPlayNext()
 								},
 							)
-						} else {
-							DropdownMenuItem(
-								text = { Text("移除手机离线") },
-								leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-								onClick = {
-									menuExpanded = false
-									onDeleteOffline()
-								},
-							)
-						}
-						if (onRemoveFromPlaylist != null) {
-							DropdownMenuItem(
-								text = { Text("从此歌单移除") },
-								leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-								onClick = {
-									menuExpanded = false
-									onRemoveFromPlaylist()
-								},
-							)
-						}
-						if (onRequestPhysicalDelete != null) {
-							HorizontalDivider()
-							DropdownMenuItem(
-								text = {
-									Text(
-										text = "从磁盘删除源文件",
-										color = MaterialTheme.colorScheme.error,
+							if (onAddToPlaylist != null) {
+								DropdownMenuItem(
+									text = { Text("加入歌单") },
+									leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
+									onClick = {
+										menuExpanded = false
+										onAddToPlaylist()
+									},
+								)
+							}
+							when {
+								downloadProgress != null -> {
+									DropdownMenuItem(
+										text = { Text("取消离线下载") },
+										leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onCancelOffline()
+										},
 									)
-								},
-								leadingIcon = {
-									Icon(
-										imageVector = Icons.Rounded.Delete,
-										contentDescription = null,
-										tint = MaterialTheme.colorScheme.error,
+								}
+								!isOffline -> {
+									DropdownMenuItem(
+										text = { Text("下载到手机离线") },
+										leadingIcon = { Icon(Icons.Rounded.CloudDownload, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onDownloadOffline()
+										},
 									)
-								},
-								onClick = {
-									menuExpanded = false
-									onRequestPhysicalDelete()
-								},
-							)
+								}
+								else -> {
+									DropdownMenuItem(
+										text = { Text("移除手机离线") },
+										leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onDeleteOffline()
+										},
+									)
+								}
+							}
+							if (onRemoveFromPlaylist != null) {
+								DropdownMenuItem(
+									text = { Text("从此歌单移除") },
+									leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+									onClick = {
+										menuExpanded = false
+										onRemoveFromPlaylist()
+									},
+								)
+							}
+							if (onRequestPhysicalDelete != null) {
+								HorizontalDivider()
+								DropdownMenuItem(
+									text = {
+										Text(
+											text = "从磁盘删除源文件",
+											color = MaterialTheme.colorScheme.error,
+										)
+									},
+									leadingIcon = {
+										Icon(
+											imageVector = Icons.Rounded.Delete,
+											contentDescription = null,
+											tint = MaterialTheme.colorScheme.error,
+										)
+									},
+									onClick = {
+										menuExpanded = false
+										onRequestPhysicalDelete()
+									},
+								)
+							}
 						}
 					}
 				}
 			}
 		}
+	}
+
+	if (swipeEnabled && !multiSelectMode && (onSwipeAppendToQueue != null || onSwipePlayNext != null)) {
+		IosSwipeableSongRow(
+			enabled = true,
+			shape = swipeShape,
+			containerColor = swipeContainerColor,
+			onAppendToQueue = onSwipeAppendToQueue,
+			onPlayNext = onSwipePlayNext,
+			content = rowBody,
+		)
+	} else {
+		rowBody()
 	}
 }
 

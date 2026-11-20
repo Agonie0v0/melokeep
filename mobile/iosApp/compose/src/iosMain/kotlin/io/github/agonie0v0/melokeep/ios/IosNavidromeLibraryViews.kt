@@ -84,6 +84,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -185,8 +186,13 @@ internal fun IosLibNavidromeSection(
 		return
 	}
 
-	when (subTab) {
-		IosLibNavSubTab.OVERVIEW -> NavOverviewContent(
+	PullToRefreshBox(
+		isRefreshing = libState.loadingOverview || libState.loadingAllSongs,
+		onRefresh = { subsonicManager.refreshAll() },
+		modifier = Modifier.fillMaxSize(),
+	) {
+		when (subTab) {
+			IosLibNavSubTab.OVERVIEW -> NavOverviewContent(
 			libState = libState,
 			subsonicManager = subsonicManager,
 			audioPlayer = audioPlayer,
@@ -348,6 +354,7 @@ internal fun IosLibNavidromeSection(
 					onDismiss = { songSortSheetOpen = false },
 				)
 			}
+		}
 		}
 	}
 }
@@ -668,6 +675,13 @@ private fun NavOverviewContent(
 			item(key = "nav-overview-songs-card", contentType = "track-group") {
 				IosGroupedCard(modifier = Modifier.padding(horizontal = 16.dp)) {
 					previewSongs.forEachIndexed { idx, track ->
+						val isFirst = idx == 0
+						val isLast = idx == previewSongs.lastIndex
+						val rowColor = if (track.id == currentTrackId) {
+							MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainer
+						}
 						IosLibTrackRowContent(
 							track = track,
 							isPlaying = track.id == currentTrackId,
@@ -677,7 +691,10 @@ private fun NavOverviewContent(
 							multiSelectMode = false,
 							isSelected = false,
 							onClick = { audioPlayer.playQueue(previewSongs, idx) },
-							onPlayNext = { audioPlayer.playNext(track) },
+							onPlayNext = {
+								audioPlayer.playNext(track)
+								onShowNotice("已设为下一首播放")
+							},
 							onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 							onDownloadOffline = {
 								audioPlayer.downloadTrackOffline(track)
@@ -687,6 +704,17 @@ private fun NavOverviewContent(
 							onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 							onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 							onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+							swipeEnabled = true,
+							swipeShape = iosLibGroupedItemShape(isFirst, isLast),
+							swipeContainerColor = rowColor,
+							onSwipeAppendToQueue = {
+								audioPlayer.appendToQueue(listOf(track))
+								onShowNotice("已加入待播队尾")
+							},
+							onSwipePlayNext = {
+								audioPlayer.playNext(track)
+								onShowNotice("已设为下一首播放")
+							},
 						)
 						if (idx < previewSongs.lastIndex) {
 							IosHairlineDivider(startIndent = 66.dp)
@@ -1497,13 +1525,15 @@ private fun NavSongsSubContent(
 					val isSelected = selectedIds[track.id] == true
 					val isFirst = idx == 0
 					val isLast = idx == songs.lastIndex
+					val rowColor = when {
+						multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+						currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+						else -> MaterialTheme.colorScheme.surfaceContainer
+					}
+					val rowShape = iosLibGroupedItemShape(isFirst, isLast)
 					Surface(
-						shape = iosLibGroupedItemShape(isFirst, isLast),
-						color = when {
-							multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
-							currentTrackId == track.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-							else -> MaterialTheme.colorScheme.surfaceContainer
-						},
+						shape = rowShape,
+						color = rowColor,
 						modifier = Modifier.fillMaxWidth(),
 					) {
 						Column {
@@ -1526,7 +1556,10 @@ private fun NavSongsSubContent(
 									multiSelecting = true
 									selectedIds[track.id] = true
 								},
-								onPlayNext = { audioPlayer.playNext(track) },
+								onPlayNext = {
+									audioPlayer.playNext(track)
+									onShowNotice("已设为下一首播放")
+								},
 								onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 								onDownloadOffline = {
 									audioPlayer.downloadTrackOffline(track)
@@ -1536,6 +1569,17 @@ private fun NavSongsSubContent(
 								onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 								onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 								onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+								swipeEnabled = !multiSelecting,
+								swipeShape = rowShape,
+								swipeContainerColor = rowColor,
+								onSwipeAppendToQueue = {
+									audioPlayer.appendToQueue(listOf(track))
+									onShowNotice("已加入待播队尾")
+								},
+								onSwipePlayNext = {
+									audioPlayer.playNext(track)
+									onShowNotice("已设为下一首播放")
+								},
 							)
 							if (!isLast) {
 								IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 66.dp)
@@ -1547,7 +1591,7 @@ private fun NavSongsSubContent(
 		}
 
 		// 全库真实无截断多选悬浮条
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelecting,
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -2064,6 +2108,13 @@ private fun NavSearchResultsContent(
 				IosGroupedCard {
 					libState.searchSongs.forEachIndexed { idx, track ->
 						val isSelected = selectedIds[track.id] == true
+						val isFirst = idx == 0
+						val isLast = idx == libState.searchSongs.lastIndex
+						val rowColor = when {
+							multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+							track.id == currentTrackId -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+							else -> MaterialTheme.colorScheme.surfaceContainer
+						}
 						IosLibTrackRowContent(
 							track = track,
 							isPlaying = track.id == currentTrackId,
@@ -2084,7 +2135,10 @@ private fun NavSearchResultsContent(
 								multiSelecting = true
 								selectedIds[track.id] = true
 							},
-							onPlayNext = { audioPlayer.playNext(track) },
+							onPlayNext = {
+								audioPlayer.playNext(track)
+								onShowNotice("已设为下一首播放")
+							},
 							onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 							onDownloadOffline = {
 								audioPlayer.downloadTrackOffline(track)
@@ -2094,6 +2148,17 @@ private fun NavSearchResultsContent(
 							onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
 							onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
 							onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+							swipeEnabled = !multiSelecting,
+							swipeShape = iosLibGroupedItemShape(isFirst, isLast),
+							swipeContainerColor = rowColor,
+							onSwipeAppendToQueue = {
+								audioPlayer.appendToQueue(listOf(track))
+								onShowNotice("已加入待播队尾")
+							},
+							onSwipePlayNext = {
+								audioPlayer.playNext(track)
+								onShowNotice("已设为下一首播放")
+							},
 						)
 						if (idx < libState.searchSongs.lastIndex) {
 							IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 66.dp)
@@ -2104,7 +2169,7 @@ private fun NavSearchResultsContent(
 		}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelecting && libState.searchSongs.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),

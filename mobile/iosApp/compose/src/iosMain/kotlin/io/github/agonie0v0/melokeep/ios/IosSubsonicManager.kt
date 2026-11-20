@@ -487,6 +487,10 @@ class IosSubsonicManager(
 		}
 	}
 
+	fun refreshAll() {
+		refreshOverview()
+	}
+
 	fun refreshOverview() {
 		val activeClient = client ?: return
 		val activeServerId = _state.value.activeServer?.id
@@ -914,6 +918,33 @@ class IosSubsonicManager(
 			throw e
 		} catch (e: Throwable) {
 			_state.update { it.copy(errorMessage = e.message ?: "收藏操作失败") }
+			Result.failure(e)
+		}
+	}
+
+	suspend fun startScan(): Result<Pair<Boolean, Int>> {
+		val activeClient = client ?: return Result.failure<Pair<Boolean, Int>>(
+			IllegalStateException("未连接 Navidrome")
+		).also {
+			_state.update { it.copy(errorMessage = "未连接 Navidrome") }
+		}
+		return try {
+			val status = activeClient.startScan()
+			_state.update {
+				it.copy(
+					errorMessage = null,
+					noticeMessage = if (status.count > 0) {
+						"已触发 Navidrome 扫库（当前 ${status.count} 首）"
+					} else {
+						"已触发 Navidrome 扫库"
+					},
+				)
+			}
+			Result.success(status.scanning to status.count)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			_state.update { it.copy(errorMessage = e.message ?: "触发 Navidrome 扫库失败") }
 			Result.failure(e)
 		}
 	}

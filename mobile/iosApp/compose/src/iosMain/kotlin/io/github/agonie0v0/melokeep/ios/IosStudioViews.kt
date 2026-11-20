@@ -118,7 +118,6 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun IosStudioTopHeader(
-	isAuthenticated: Boolean,
 	workspaceTab: IosStudioWorkspaceTab,
 	activeDownloadCount: Int,
 	phoneDownloadingCount: Int,
@@ -138,55 +137,53 @@ internal fun IosStudioTopHeader(
 		IosCleanTopBar(
 			title = "工坊",
 			trailing = {
-				if (isAuthenticated) {
-					Surface(
-						modifier = Modifier
-							.clip(CircleShape)
-							.clickable(enabled = !scanningNavidrome, onClick = onTriggerScan),
-						shape = CircleShape,
-						color = MaterialTheme.colorScheme.surfaceContainer,
-						border = BorderStroke(
-							width = IosHairlineWidth,
-							color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-						),
+				Surface(
+					modifier = Modifier
+						.clip(CircleShape)
+						.clickable(enabled = !scanningNavidrome, onClick = onTriggerScan),
+					shape = CircleShape,
+					color = MaterialTheme.colorScheme.surfaceContainer,
+					border = BorderStroke(
+						width = IosHairlineWidth,
+						color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+					),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(5.dp),
 					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(5.dp),
-						) {
-							if (scanningNavidrome) {
-								CircularProgressIndicator(
-									modifier = Modifier.size(13.dp),
-									strokeWidth = 1.8.dp,
-								)
-								Text(
-									text = "扫库中",
-									style = MaterialTheme.typography.labelSmall,
-									color = MaterialTheme.colorScheme.primary,
-									maxLines = 1,
-									softWrap = false,
-								)
+						if (scanningNavidrome) {
+							CircularProgressIndicator(
+								modifier = Modifier.size(13.dp),
+								strokeWidth = 1.8.dp,
+							)
+							Text(
+								text = "扫库中",
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.primary,
+								maxLines = 1,
+								softWrap = false,
+							)
+						} else {
+							Icon(
+								imageVector = Icons.Outlined.Refresh,
+								contentDescription = "扫库",
+								tint = MaterialTheme.colorScheme.primary,
+								modifier = Modifier.size(14.dp),
+							)
+							val scanLabel = if (scanCount != null && scanCount > 0L) {
+								"扫库 · $scanCount"
 							} else {
-								Icon(
-									imageVector = Icons.Outlined.Refresh,
-									contentDescription = "扫库",
-									tint = MaterialTheme.colorScheme.primary,
-									modifier = Modifier.size(14.dp),
-								)
-								val scanLabel = if (scanCount != null && scanCount > 0L) {
-									"扫库 · $scanCount"
-								} else {
-									"扫库"
-								}
-								Text(
-									text = scanLabel,
-									style = MaterialTheme.typography.labelSmall.tabularNums(),
-									color = MaterialTheme.colorScheme.onSurface,
-									maxLines = 1,
-									softWrap = false,
-								)
+								"扫库"
 							}
+							Text(
+								text = scanLabel,
+								style = MaterialTheme.typography.labelSmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurface,
+								maxLines = 1,
+								softWrap = false,
+							)
 						}
 					}
 				}
@@ -1316,7 +1313,7 @@ internal fun IosStudioScrapeContent(
 			}
 		}
 
-		AnimatedVisibility(
+		androidx.compose.animation.AnimatedVisibility(
 			visible = multiSelectMode,
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
@@ -2836,7 +2833,7 @@ private fun IosStudioScrapeDiffItemCard(
 						}
 					}
 				}
-				AnimatedVisibility(visible = reSearchExpanded && item.id.isNotBlank()) {
+				androidx.compose.animation.AnimatedVisibility(visible = reSearchExpanded && item.id.isNotBlank()) {
 					Row(
 						modifier = Modifier.fillMaxWidth(),
 						verticalAlignment = Alignment.CenterVertically,
@@ -2904,7 +2901,7 @@ private fun IosStudioScrapeDiffItemCard(
 					}
 				}
 
-				AnimatedVisibility(visible = versionsExpanded) {
+				androidx.compose.animation.AnimatedVisibility(visible = versionsExpanded) {
 					Column(
 						modifier = Modifier.fillMaxWidth(),
 						verticalArrangement = Arrangement.spacedBy(6.dp),

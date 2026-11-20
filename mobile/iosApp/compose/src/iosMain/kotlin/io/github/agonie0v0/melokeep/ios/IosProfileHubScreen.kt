@@ -30,19 +30,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.HighQuality
-import androidx.compose.material.icons.rounded.OfflinePin
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,9 +63,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.SingletonImageLoader
+import coil3.compose.LocalPlatformContext
+import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
+import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
+import kotlinx.coroutines.CancellationException
 
 // =============================================================================
 // 第四 Tab「我的」：极简 Apple Notes / Linear 分组工作台
@@ -74,39 +87,56 @@ fun IosHubProfileRoute(
 	onOpenOnboarding: () -> Unit,
 	onOpenSleepTimer: () -> Unit = {},
 	bottomPadding: PaddingValues = PaddingValues(0.dp),
-	onOpenPhoneDownloads: (() -> Unit)? = null,
+	@Suppress("UNUSED_PARAMETER") onOpenPhoneDownloads: (() -> Unit)? = null,
 ) {
 	val settingsState by settingsController.state.collectAsState()
-	val studioState by studioController.state.collectAsState()
 	val studioPreset by settingsStore.studioThemePreset.collectAsState()
 	val libState by subsonicManager.state.collectAsState()
 	val prefs by subsonicManager.prefs.collectAsState()
 	val playerState by audioPlayer.state.collectAsState()
-	val offlineState by audioPlayer.offlineState.collectAsState()
 
+	val platformContext = LocalPlatformContext.current
+	val imageLoader = remember(platformContext) { SingletonImageLoader.get(platformContext) }
 	val hostNavBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 	val engCfg = settingsState.engineConfig
 	val meloCfg = settingsState.serverConfig
 	val activeServer = libState.activeServer
 	val appVersion = remember { IosSettingsResolveAppVersion() }
 
-	var showSettingsHomeSheet by rememberSaveable { mutableStateOf(false) }
 	var showMeloSheet by rememberSaveable { mutableStateOf(false) }
 	var showNavidromeSheet by rememberSaveable { mutableStateOf(false) }
-	var showPhoneDownloadsSheet by rememberSaveable { mutableStateOf(false) }
 	var showAudioEngineSheet by rememberSaveable { mutableStateOf(false) }
+	var showLyricsSheet by rememberSaveable { mutableStateOf(false) }
 	var showSourcesSheet by rememberSaveable { mutableStateOf(false) }
+	var confirmClearCacheOpen by rememberSaveable { mutableStateOf(false) }
+	var cacheRefreshTick by remember { mutableIntStateOf(0) }
+	var cacheClearHint by remember { mutableStateOf<String?>(null) }
 
-	val offlineCount = playerState.offlineTracks.size
-	val totalOfflineBytes = remember(playerState.offlineTracks) {
-		audioPlayer.totalOfflineBytes()
+	var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+	var latestRelease by remember { mutableStateOf<MeloGitHubRelease?>(null) }
+
+	val tempCacheBytes = remember(cacheRefreshTick, imageLoader) {
+		val coilDisk = runCatching { imageLoader.diskCache?.size ?: 0L }.getOrDefault(0L)
+		val playerTemp = audioPlayer.estimateTempCacheBytes()
+		(coilDisk + playerTemp).coerceAtLeast(0L)
 	}
-	val activePhoneDownloadCount = offlineState.activeDownloads.size
-	val downloadingActive = activePhoneDownloadCount > 0 || playerState.downloadingProgress.isNotEmpty()
+	val hasNewVersion = latestRelease != null && MeloSemVer.isNewer(latestRelease!!.tagName, appVersion)
 
 	LaunchedEffect(meloCfg.isConfigured) {
 		if (meloCfg.isConfigured && engCfg == null) {
 			settingsController.loadConfig()
+		}
+	}
+
+	LaunchedEffect(appVersion) {
+		if (latestRelease == null) {
+			try {
+				latestRelease = MeloAppUpdateChecker.fetchLatestRelease()
+			} catch (e: CancellationException) {
+				throw e
+			} catch (_: Throwable) {
+				// 后台静默检查失败时不打扰用户
+			}
 		}
 	}
 
@@ -115,39 +145,7 @@ fun IosHubProfileRoute(
 			.fillMaxSize()
 			.background(MaterialTheme.colorScheme.background),
 	) {
-		IosCleanTopBar(
-			title = "我的",
-			trailing = {
-				Surface(
-					onClick = { showSettingsHomeSheet = true },
-					shape = CircleShape,
-					color = MaterialTheme.colorScheme.surfaceContainer,
-					border = BorderStroke(
-						width = IosHairlineWidth,
-						color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-					),
-				) {
-					Row(
-						modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(5.dp),
-					) {
-						Icon(
-							imageVector = Icons.Rounded.Settings,
-							contentDescription = "打开设置",
-							modifier = Modifier.size(15.dp),
-							tint = MaterialTheme.colorScheme.primary,
-						)
-						Text(
-							text = "设置",
-							style = MaterialTheme.typography.labelMedium,
-							fontWeight = FontWeight.Medium,
-							color = MaterialTheme.colorScheme.onSurface,
-						)
-					}
-				}
-			},
-		)
+		IosCleanTopBar(title = "我的")
 
 		LazyColumn(
 			modifier = Modifier
@@ -161,11 +159,16 @@ fun IosHubProfileRoute(
 			),
 			verticalArrangement = Arrangement.spacedBy(20.dp),
 		) {
-			// 1. 服务
+			// 1. 服务与连接（只展示名称与连接状态，不在主列表暴露域名/端口/用户名）
 			item(key = "ios-hub-services", contentType = "hub-services") {
+				val sourcesValue = when {
+					!meloCfg.isConfigured -> "未连接"
+					engCfg != null -> "${engCfg.sources.size}/${engCfg.availableSources.size}"
+					else -> ""
+				}
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					IosSectionLabel(
-						title = "服务",
+						title = "服务与连接",
 						trailing = {
 							Text(
 								text = "连接向导",
@@ -181,125 +184,23 @@ fun IosHubProfileRoute(
 					)
 
 					IosGroupedCard {
-						val meloDetail = when {
-							meloCfg.isAuthenticated && meloCfg.authEnabled && meloCfg.username.isNotBlank() ->
-								"${formatCompactHostUrl(meloCfg.baseUrl)} · ${meloCfg.username}"
-							meloCfg.isAuthenticated ->
-								formatCompactHostUrl(meloCfg.baseUrl)
-							else -> "未连接"
-						}
 						IosHubServiceRow(
-							title = "MeloKeep",
-							detail = meloDetail,
+							title = meloCfg.effectiveName,
+							detail = if (meloCfg.isAuthenticated) "已连接" else "未连接",
 							connected = meloCfg.isAuthenticated,
 							onClick = { showMeloSheet = true },
 						)
 
 						IosHairlineDivider(startIndent = 34.dp)
 
-						val navidromeDetail = if (activeServer != null) {
-							val host = activeServer.name.ifBlank { formatCompactHostUrl(activeServer.url) }
-							if (activeServer.username.isNotBlank()) "$host · ${activeServer.username}" else host
-						} else {
-							"未连接"
-						}
 						IosHubServiceRow(
-							title = "Navidrome",
-							detail = navidromeDetail,
+							title = activeServer?.name?.trim()?.ifBlank { "Navidrome" } ?: "Navidrome",
+							detail = if (activeServer != null) "已连接" else "未连接",
 							connected = activeServer != null,
 							onClick = { showNavidromeSheet = true },
 						)
 
-						if (meloCfg.isAuthenticated) {
-							IosHairlineDivider(startIndent = 34.dp)
-							val scanValue = when {
-								studioState.scanningNavidrome -> "扫描中…"
-								studioState.scanStatus != null && studioState.scanStatus?.scanning == true -> "扫描中…"
-								studioState.scanStatus != null && (studioState.scanStatus?.count ?: 0) > 0 ->
-									"${studioState.scanStatus?.count} 首"
-								else -> ""
-							}
-							IosHubActionRow(
-								icon = Icons.Rounded.Refresh,
-								title = "扫描 Navidrome 曲库",
-								value = scanValue,
-								enabled = !studioState.scanningNavidrome,
-								onClick = { studioController.triggerNavidromeScan() },
-							)
-						}
-					}
-				}
-			}
-
-			// 2. 工具与存储
-			item(key = "ios-hub-tools", contentType = "hub-tools") {
-				val offlineValue = when {
-					downloadingActive && activePhoneDownloadCount > 0 ->
-						"缓存中 $activePhoneDownloadCount · $offlineCount 首"
-					downloadingActive -> "缓存中…"
-					offlineCount > 0 ->
-						"$offlineCount 首 · ${formatBytesHuman(totalOfflineBytes)}"
-					else -> "0 首"
-				}
-
-				val sleepTimer = playerState.sleepTimer
-				val timerValue = when {
-					!sleepTimer.active -> "关闭"
-					sleepTimer.stopAfterCurrent -> "播完当前曲目"
-					else -> formatDurationMs(sleepTimer.remainingSeconds * 1000L)
-				}
-
-				val brTag = if (prefs.maxBitRate <= 0) "无损" else "${prefs.maxBitRate}k"
-				val rgTag = when (prefs.replayGainMode) {
-					ReplayGainMode.TRACK -> "单曲增益"
-					ReplayGainMode.ALBUM -> "专辑增益"
-					ReplayGainMode.OFF -> null
-				}
-				val audioValue = listOfNotNull(brTag, rgTag).joinToString(" · ")
-				val sourcesValue = when {
-					!meloCfg.isConfigured -> "未连接"
-					engCfg != null -> "${engCfg.sources.size}/${engCfg.availableSources.size}"
-					else -> ""
-				}
-
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "工具与存储")
-
-					IosGroupedCard {
-						IosHubActionRow(
-							icon = Icons.Rounded.OfflinePin,
-							title = "本机离线缓存",
-							value = offlineValue,
-							valueHighlight = downloadingActive,
-							onClick = {
-								if (onOpenPhoneDownloads != null) {
-									onOpenPhoneDownloads()
-								} else {
-									showPhoneDownloadsSheet = true
-								}
-							},
-						)
-
-						IosHairlineDivider(startIndent = 46.dp)
-
-						IosHubActionRow(
-							icon = Icons.Rounded.Bedtime,
-							title = "睡眠定时",
-							value = timerValue,
-							valueHighlight = sleepTimer.active,
-							onClick = onOpenSleepTimer,
-						)
-
-						IosHairlineDivider(startIndent = 46.dp)
-
-						IosHubActionRow(
-							icon = Icons.Rounded.HighQuality,
-							title = "音质与播放",
-							value = audioValue,
-							onClick = { showAudioEngineSheet = true },
-						)
-
-						IosHairlineDivider(startIndent = 46.dp)
+						IosHairlineDivider(startIndent = 34.dp)
 
 						IosHubActionRow(
 							icon = Icons.Rounded.Settings,
@@ -318,10 +219,61 @@ fun IosHubProfileRoute(
 				}
 			}
 
-			// 3. 外观
+			// 2. 播放与音频
+			item(key = "ios-hub-audio", contentType = "hub-audio") {
+				val sleepTimer = playerState.sleepTimer
+				val timerValue = when {
+					!sleepTimer.active -> "关闭"
+					sleepTimer.stopAfterCurrent -> "播完当前曲目"
+					else -> formatDurationMs(sleepTimer.remainingSeconds * 1000L)
+				}
+				val brTag = if (prefs.maxBitRate <= 0) "无损" else "${prefs.maxBitRate}k"
+				val rgTag = when (prefs.replayGainMode) {
+					ReplayGainMode.TRACK -> "单曲增益"
+					ReplayGainMode.ALBUM -> "专辑增益"
+					ReplayGainMode.OFF -> null
+				}
+				val audioValue = listOfNotNull(brTag, rgTag).joinToString(" · ")
+				val lyricsSummary = "${prefs.lyricsFontSizeSp.toInt()}sp · " +
+					if (prefs.lyricsAlign == "start") "左对齐" else "居中"
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "播放与音频")
+
+					IosGroupedCard {
+						IosHubActionRow(
+							icon = Icons.Rounded.HighQuality,
+							title = "音质与 ReplayGain",
+							value = audioValue,
+							onClick = { showAudioEngineSheet = true },
+						)
+
+						IosHairlineDivider(startIndent = 46.dp)
+
+						IosHubActionRow(
+							icon = Icons.Rounded.MusicNote,
+							title = "歌词设置",
+							value = lyricsSummary,
+							onClick = { showLyricsSheet = true },
+						)
+
+						IosHairlineDivider(startIndent = 46.dp)
+
+						IosHubActionRow(
+							icon = Icons.Rounded.Bedtime,
+							title = "睡眠定时",
+							value = timerValue,
+							valueHighlight = sleepTimer.active,
+							onClick = onOpenSleepTimer,
+						)
+					}
+				}
+			}
+
+			// 3. 外观与交互
 			item(key = "ios-hub-appearance", contentType = "hub-appearance") {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "外观")
+					IosSectionLabel(title = "外观与交互")
 
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
@@ -389,11 +341,91 @@ fun IosHubProfileRoute(
 								}
 							}
 						}
+
+						IosGroupedCard {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.clickable {
+										subsonicManager.updatePrefs { it.copy(amoledBlack = !it.amoledBlack) }
+									}
+									.padding(horizontal = 14.dp, vertical = 10.dp),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp),
+								) {
+									Text(
+										text = "AMOLED 纯黑",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium,
+										color = MaterialTheme.colorScheme.onSurface,
+									)
+									Text(
+										text = "深色模式下使用纯黑背景",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+								}
+								Switch(
+									checked = prefs.amoledBlack,
+									onCheckedChange = { checked ->
+										subsonicManager.updatePrefs { it.copy(amoledBlack = checked) }
+									},
+									colors = SwitchDefaults.colors(
+										checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+										checkedTrackColor = MaterialTheme.colorScheme.primary,
+									),
+								)
+							}
+						}
 					}
 				}
 			}
 
-			// 4. 极简版本尾注
+			// 4. 存储与离线
+			item(key = "ios-hub-storage", contentType = "hub-storage") {
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "存储与离线")
+
+					IosGroupedCard {
+						IosHubActionRow(
+							icon = Icons.Rounded.Delete,
+							title = "临时缓存",
+							value = cacheClearHint ?: formatBytesHuman(tempCacheBytes),
+							valueHighlight = cacheClearHint != null,
+							onClick = {
+								cacheClearHint = null
+								confirmClearCacheOpen = true
+							},
+						)
+					}
+				}
+			}
+
+			// 5. 更新与关于
+			item(key = "ios-hub-about", contentType = "hub-about") {
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "更新与关于")
+
+					IosGroupedCard {
+						IosHubActionRow(
+							icon = Icons.Rounded.Refresh,
+							title = "检查更新",
+							value = if (hasNewVersion) {
+								"发现 ${latestRelease?.tagName.orEmpty()}"
+							} else {
+								"当前 v$appVersion"
+							},
+							valueHighlight = hasNewVersion,
+							onClick = { showUpdateDialog = true },
+						)
+					}
+				}
+			}
+
 			item(key = "ios-hub-version", contentType = "hub-version") {
 				Text(
 					text = "MeloKeep v$appVersion",
@@ -408,27 +440,47 @@ fun IosHubProfileRoute(
 		}
 	}
 
-	// 呼出弹层体系
-	IosSettingsHomeSheet(
-		settingsState = settingsState,
-		audioPlayer = audioPlayer,
-		subsonicManager = subsonicManager,
-		presented = showSettingsHomeSheet,
-		onOpenMeloConnection = { showMeloSheet = true },
-		onOpenNavidromeServers = { showNavidromeSheet = true },
-		onOpenOnboarding = onOpenOnboarding,
-		onOpenAudioEngine = { showAudioEngineSheet = true },
-		onOpenSources = {
-			if (meloCfg.isConfigured) {
-				if (engCfg == null) settingsController.loadConfig()
-				showSourcesSheet = true
-			} else {
-				showMeloSheet = true
-			}
-		},
-		onDismissRequest = { showSettingsHomeSheet = false },
-	)
+	if (confirmClearCacheOpen) {
+		AlertDialog(
+			onDismissRequest = { confirmClearCacheOpen = false },
+			containerColor = MaterialTheme.colorScheme.surfaceContainer,
+			title = { Text("清理临时缓存") },
+			text = {
+				Text("当前临时缓存约 ${formatBytesHuman(tempCacheBytes)}（封面图片与网络临时文件），清理不会删除已离线缓存的歌曲。")
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						confirmClearCacheOpen = false
+						runCatching { imageLoader.memoryCache?.clear() }
+						runCatching { imageLoader.diskCache?.clear() }
+						audioPlayer.clearTempCache()
+						cacheRefreshTick += 1
+						cacheClearHint = "已清理"
+					},
+				) {
+					Text("确认清理")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmClearCacheOpen = false }) {
+					Text("取消")
+				}
+			},
+		)
+	}
 
+	if (showUpdateDialog) {
+		IosAppUpdateDialog(
+			currentVersion = appVersion,
+			initialRelease = latestRelease,
+			onReleaseLoaded = { fetched -> latestRelease = fetched },
+			onShowNotice = { msg -> cacheClearHint = null; subsonicManager.clearMessages() },
+			onDismiss = { showUpdateDialog = false },
+		)
+	}
+
+	// 呼出弹层体系
 	if (showMeloSheet) {
 		IosSettingsMeloConnectionSheet(
 			settingsState = settingsState,
@@ -455,20 +507,18 @@ fun IosHubProfileRoute(
 		)
 	}
 
-	if (showPhoneDownloadsSheet) {
-		IosPhoneDownloadCenterSheet(
-			audioPlayer = audioPlayer,
-			subsonicManager = subsonicManager,
-			hostNavBottom = hostNavBottom,
-			onDismiss = { showPhoneDownloadsSheet = false },
-		)
-	}
-
 	IosAudioEngineSheet(
 		audioPlayer = audioPlayer,
 		subsonicManager = subsonicManager,
 		presented = showAudioEngineSheet,
 		onDismissRequest = { showAudioEngineSheet = false },
+	)
+
+	IosLyricsAndStageSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = showLyricsSheet,
+		onDismissRequest = { showLyricsSheet = false },
 	)
 
 	IosSourcesAndProxySheet(
@@ -648,12 +698,4 @@ private fun compactIosPresetLabel(descriptor: MeloStudioPresets.Descriptor): Str
 	MeloStudioPresets.PURE_LIGHT -> "纯净白"
 	MeloStudioPresets.DYNAMIC -> "跟随封面"
 	else -> descriptor.title
-}
-
-private fun formatCompactHostUrl(rawUrl: String): String {
-	return rawUrl.trim()
-		.removePrefix("https://")
-		.removePrefix("http://")
-		.trimEnd('/')
-		.ifBlank { "未配置" }
 }

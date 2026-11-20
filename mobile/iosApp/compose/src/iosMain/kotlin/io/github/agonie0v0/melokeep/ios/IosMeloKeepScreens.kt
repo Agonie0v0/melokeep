@@ -310,6 +310,16 @@ fun IosDiscoverRoute(
 		if (it > 0.dp) it else MeloBottomChromeClearance
 	}
 	val isConnected = serverConfig.isAuthenticated && settingsState.errorMessage == null
+	val activeNavServerFlow = remember(subsonicManager) {
+		subsonicManager?.state
+			?.map { it.activeServer }
+			?.distinctUntilChanged()
+			?: flowOf(null)
+	}
+	val activeNavServer = activeNavServerFlow.collectAsState(initial = null).value
+	var directNavScanning by remember { mutableStateOf(false) }
+	var directScanCount by remember { mutableStateOf<Long?>(null) }
+	var directScanWarning by remember { mutableStateOf<String?>(null) }
 
 	LaunchedEffect(serverConfig.isAuthenticated) {
 		if (serverConfig.isAuthenticated) {
@@ -477,6 +487,16 @@ fun IosStudioRoute(
 		if (it > 0.dp) it else MeloBottomChromeClearance
 	}
 	val isConnected = serverConfig.isAuthenticated && settingsState.errorMessage == null
+	val activeNavServerFlow = remember(subsonicManager) {
+		subsonicManager?.state
+			?.map { it.activeServer }
+			?.distinctUntilChanged()
+			?: flowOf(null)
+	}
+	val activeNavServer = activeNavServerFlow.collectAsState(initial = null).value
+	var directNavScanning by remember { mutableStateOf(false) }
+	var directScanCount by remember { mutableStateOf<Long?>(null) }
+	var directScanWarning by remember { mutableStateOf<String?>(null) }
 
 	val selectWorkspaceTab: (IosStudioWorkspaceTab) -> Unit = { target ->
 		workspaceTabName = target.name
@@ -545,17 +565,59 @@ fun IosStudioRoute(
 
 	Column(modifier = Modifier.fillMaxSize()) {
 		IosStudioTopHeader(
-			isAuthenticated = isConnected,
 			workspaceTab = workspaceTab,
 			activeDownloadCount = state.activeDownloadCount,
 			phoneDownloadingCount = phoneDownloadingCount,
 			phoneDownloadedCount = phoneDownloadedCount,
 			activeScrapeCount = state.activeScrapeCount,
-			scanningNavidrome = state.scanningNavidrome,
-			scanCount = state.scanStatus?.count,
+			scanningNavidrome = state.scanningNavidrome || directNavScanning,
+			scanCount = directScanCount ?: state.scanStatus?.count,
 			onSelectTab = selectWorkspaceTab,
-			onTriggerScan = { studioController.triggerNavidromeScan() },
+			onTriggerScan = {
+				directScanWarning = null
+				when {
+					subsonicManager != null && activeNavServer != null -> {
+						if (!directNavScanning) {
+							scope.launch {
+								directNavScanning = true
+								try {
+									val result = subsonicManager.startScan()
+									result.getOrNull()?.let { (_, count) ->
+										if (count > 0) directScanCount = count.toLong()
+									}
+								} finally {
+									directNavScanning = false
+								}
+							}
+						}
+					}
+					serverConfig.isAuthenticated -> {
+						studioController.triggerNavidromeScan()
+					}
+					else -> {
+						directScanWarning = "请先连接 Navidrome 服务"
+					}
+				}
+			},
 		)
+
+		directScanWarning?.let { warn ->
+			Surface(
+				shape = RoundedCornerShape(12.dp),
+				color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp, vertical = 4.dp)
+					.clickable { directScanWarning = null },
+			) {
+				Text(
+					text = warn,
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onErrorContainer,
+					modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+				)
+			}
+		}
 
 		Box(
 			modifier = Modifier
