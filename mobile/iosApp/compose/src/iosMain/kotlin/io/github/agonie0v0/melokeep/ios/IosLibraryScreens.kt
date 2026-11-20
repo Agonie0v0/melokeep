@@ -304,11 +304,12 @@ fun IosLibraryRoute(
 
 	val folderArg = if (localSubTab == IosLibLocalSubTab.FOLDERS) studioState.currentFolder else null
 	val reloadLocalFiles: () -> Unit = {
-		studioController.loadLibraryFiles(
+		studioController.refreshLibraryAndReload(
 			query = studioState.fileQuery,
 			folder = folderArg,
-			reset = true,
-		)
+		) {
+			activeLocalController.refreshAll()
+		}
 	}
 
 	LaunchedEffect(libState.activeServer?.id, isMeloConnected) {

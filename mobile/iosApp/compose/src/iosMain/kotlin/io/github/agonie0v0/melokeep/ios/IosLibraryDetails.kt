@@ -15,6 +15,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -1272,7 +1274,7 @@ internal fun IosLibNavFavoritesScreen(
 							modifier = Modifier
 								.fillMaxWidth()
 								.padding(bottom = 10.dp),
-							horizontalArrangement = Arrangement.SpaceBetween,
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
 							verticalAlignment = Alignment.CenterVertically,
 						) {
 							Text(
@@ -1283,10 +1285,25 @@ internal fun IosLibNavFavoritesScreen(
 								softWrap = false,
 							)
 							if (songs.isNotEmpty()) {
-								Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+								Row(
+									modifier = Modifier
+										.weight(1f)
+										.horizontalScroll(rememberScrollState()),
+									horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									IosLibDockPill(
+										label = "全部离线",
+										icon = Icons.Rounded.CloudDownload,
+										onClick = {
+											audioPlayer.downloadTracksOffline(songs)
+											onShowNotice(iosLibOfflineQueueNotice(songs.size))
+										},
+									)
 									IosLibDockPill(
 										label = if (multiSelecting) "退出" else "多选",
 										icon = if (multiSelecting) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+										emphasized = multiSelecting,
 										onClick = {
 											multiSelecting = !multiSelecting
 											if (!multiSelecting) selectedIds.clear()
@@ -1668,10 +1685,31 @@ fun IosDailyMixSheet(
 	val playerState by audioPlayer.state.collectAsState()
 	val scope = rememberCoroutineScope()
 	var sheetNotice by remember { mutableStateOf<String?>(null) }
+	var multiSelecting by remember { mutableStateOf(false) }
+	val selectedIds = remember { mutableStateMapOf<String, Boolean>() }
+
+	val offlineIds = playerState.offlineTracks.keys
+	val downloadingProgress = playerState.downloadingProgress
+	val selectedTracks by remember(tracks) {
+		derivedStateOf { tracks.filter { selectedIds[it.id] == true } }
+	}
+	val hasOfflineRemovable by remember(selectedTracks, offlineIds, downloadingProgress) {
+		derivedStateOf { selectedTracks.any { it.id in offlineIds || it.id in downloadingProgress } }
+	}
 
 	LaunchedEffect(Unit) {
 		if (tracks.isEmpty()) {
 			subsonicManager.loadOrGenerateDailyMix(forceRegenerate = false)
+		}
+	}
+
+	LaunchedEffect(tracks) {
+		if (tracks.isEmpty()) {
+			multiSelecting = false
+			selectedIds.clear()
+		} else {
+			val validIds = tracks.map { it.id }.toSet()
+			selectedIds.keys.filter { it !in validIds }.forEach { selectedIds.remove(it) }
 		}
 	}
 
@@ -1680,13 +1718,17 @@ fun IosDailyMixSheet(
 		shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
 		containerColor = MaterialTheme.colorScheme.surface,
 	) {
-		Column(
+		Box(
 			modifier = Modifier
 				.fillMaxWidth()
-				.padding(horizontal = 16.dp)
 				.navigationBarsPadding(),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
 		) {
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp),
+				verticalArrangement = Arrangement.spacedBy(12.dp),
+			) {
 			// 极简顶栏（无冗长副文案、无颜文字/emoji）
 			Row(
 				modifier = Modifier.fillMaxWidth(),
@@ -1765,9 +1807,11 @@ fun IosDailyMixSheet(
 				}
 			}
 
-			// 快捷动作条：播放全部 + 换一批 + 整单离线
+			// 快捷动作条：播放全部 + 换一批 + 整单离线 + 多选
 			Row(
-				modifier = Modifier.fillMaxWidth(),
+				modifier = Modifier
+					.fillMaxWidth()
+					.horizontalScroll(rememberScrollState()),
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
@@ -1775,10 +1819,8 @@ fun IosDailyMixSheet(
 					onClick = { if (tracks.isNotEmpty()) audioPlayer.playQueue(tracks, 0) },
 					enabled = tracks.isNotEmpty(),
 					shape = CircleShape,
-					contentPadding = PaddingValues(horizontal = 12.dp),
-					modifier = Modifier
-						.weight(1.1f)
-						.height(42.dp),
+					contentPadding = PaddingValues(horizontal = 14.dp),
+					modifier = Modifier.height(40.dp),
 				) {
 					Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(17.dp))
 					Spacer(Modifier.width(4.dp))
@@ -1789,10 +1831,8 @@ fun IosDailyMixSheet(
 					onClick = { subsonicManager.loadOrGenerateDailyMix(forceRegenerate = true) },
 					enabled = !isLoading,
 					shape = CircleShape,
-					contentPadding = PaddingValues(horizontal = 10.dp),
-					modifier = Modifier
-						.weight(0.9f)
-						.height(42.dp),
+					contentPadding = PaddingValues(horizontal = 12.dp),
+					modifier = Modifier.height(40.dp),
 				) {
 					if (isLoading) {
 						CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.8.dp)
@@ -1808,7 +1848,7 @@ fun IosDailyMixSheet(
 					color = MaterialTheme.colorScheme.surfaceContainer,
 					border = iosLibHairlineBorder(),
 					modifier = Modifier
-						.height(42.dp)
+						.height(40.dp)
 						.clip(CircleShape)
 						.clickable(enabled = tracks.isNotEmpty()) {
 							audioPlayer.downloadTracksOffline(tracks)
@@ -1829,6 +1869,51 @@ fun IosDailyMixSheet(
 						Text(
 							text = "整单离线",
 							style = MaterialTheme.typography.labelMedium,
+							maxLines = 1,
+							softWrap = false,
+						)
+					}
+				}
+
+				Surface(
+					shape = CircleShape,
+					color = if (multiSelecting) {
+						MaterialTheme.colorScheme.primaryContainer
+					} else {
+						MaterialTheme.colorScheme.surfaceContainer
+					},
+					border = iosLibHairlineBorder(),
+					modifier = Modifier
+						.height(40.dp)
+						.clip(CircleShape)
+						.clickable(enabled = tracks.isNotEmpty()) {
+							multiSelecting = !multiSelecting
+							if (!multiSelecting) selectedIds.clear()
+						},
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(4.dp),
+					) {
+						Icon(
+							imageVector = if (multiSelecting) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+							contentDescription = null,
+							tint = if (multiSelecting) {
+								MaterialTheme.colorScheme.onPrimaryContainer
+							} else {
+								MaterialTheme.colorScheme.primary
+							},
+							modifier = Modifier.size(16.dp),
+						)
+						Text(
+							text = if (multiSelecting) "退出" else "多选",
+							style = MaterialTheme.typography.labelMedium,
+							color = if (multiSelecting) {
+								MaterialTheme.colorScheme.onPrimaryContainer
+							} else {
+								MaterialTheme.colorScheme.onSurface
+							},
 							maxLines = 1,
 							softWrap = false,
 						)
@@ -1856,6 +1941,7 @@ fun IosDailyMixSheet(
 					modifier = Modifier
 						.fillMaxWidth()
 						.heightIn(max = 420.dp),
+					contentPadding = PaddingValues(bottom = if (multiSelecting) 112.dp else 10.dp),
 					verticalArrangement = Arrangement.spacedBy(0.dp),
 				) {
 					itemsIndexed(
@@ -1863,14 +1949,15 @@ fun IosDailyMixSheet(
 						key = { idx, t -> "daily-${t.id}-$idx" },
 						contentType = { _, _ -> "track" },
 					) { idx, track ->
+						val isSelected = selectedIds[track.id] == true
 						val isFirst = idx == 0
 						val isLast = idx == tracks.lastIndex
 						Surface(
 							shape = iosLibGroupedItemShape(isFirst, isLast),
-							color = if (track.id == playerState.currentTrack?.id) {
-								MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
-							} else {
-								MaterialTheme.colorScheme.surfaceContainer
+							color = when {
+								multiSelecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+								track.id == playerState.currentTrack?.id -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+								else -> MaterialTheme.colorScheme.surfaceContainer
 							},
 							modifier = Modifier.fillMaxWidth(),
 						) {
@@ -1879,12 +1966,22 @@ fun IosDailyMixSheet(
 									track = track,
 									isPlaying = track.id == playerState.currentTrack?.id,
 									isStarred = subsonicManager.isStarred(track),
-									isOffline = track.id in playerState.offlineTracks.keys,
-									downloadProgress = playerState.downloadingProgress[track.id],
-									multiSelectMode = false,
-									isSelected = false,
+									isOffline = track.id in offlineIds,
+									downloadProgress = downloadingProgress[track.id],
+									multiSelectMode = multiSelecting,
+									isSelected = isSelected,
 									trackIndex = idx + 1,
-									onClick = { audioPlayer.playQueue(tracks, idx) },
+									onClick = {
+										if (multiSelecting) {
+											selectedIds[track.id] = !isSelected
+										} else {
+											audioPlayer.playQueue(tracks, idx)
+										}
+									},
+									onLongClick = {
+										multiSelecting = true
+										selectedIds[track.id] = true
+									},
 									onPlayNext = { audioPlayer.playNext(track) },
 									onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
 									onDownloadOffline = {
@@ -1897,7 +1994,7 @@ fun IosDailyMixSheet(
 									onRequestPhysicalDelete = null,
 								)
 								if (!isLast) {
-									IosHairlineDivider(startIndent = 94.dp)
+									IosHairlineDivider(startIndent = if (multiSelecting) 132.dp else 94.dp)
 								}
 							}
 						}
@@ -1906,6 +2003,55 @@ fun IosDailyMixSheet(
 			}
 
 			Spacer(Modifier.height(10.dp))
+			}
+
+			AnimatedVisibility(
+				visible = multiSelecting && tracks.isNotEmpty(),
+				enter = slideInVertically { it } + fadeIn(),
+				exit = slideOutVertically { it } + fadeOut(),
+				modifier = Modifier
+					.align(Alignment.BottomCenter)
+					.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+			) {
+				IosLibBatchSelectionDock(
+					selectedCount = selectedTracks.size,
+					totalCount = tracks.size,
+					hasOfflineRemovable = hasOfflineRemovable,
+					onSelectAll = {
+						if (selectedTracks.size >= tracks.size) selectedIds.clear()
+						else tracks.forEach { selectedIds[it.id] = true }
+					},
+					onExit = {
+						multiSelecting = false
+						selectedIds.clear()
+					},
+					onPlaySelected = {
+						if (selectedTracks.isNotEmpty()) {
+							audioPlayer.playQueue(selectedTracks, 0)
+							multiSelecting = false
+							selectedIds.clear()
+						}
+					},
+					onDownloadSelected = {
+						if (selectedTracks.isNotEmpty()) {
+							audioPlayer.downloadTracksOffline(selectedTracks)
+							sheetNotice = iosLibOfflineQueueNotice(selectedTracks.size)
+							multiSelecting = false
+							selectedIds.clear()
+						}
+					},
+					onAddToPlaylist = null,
+					onDeleteOfflineSelected = {
+						selectedTracks.forEach { t ->
+							if (t.id in downloadingProgress) audioPlayer.cancelDownload(t.id)
+							if (t.id in offlineIds) audioPlayer.deleteOfflineTrack(t.id)
+						}
+						sheetNotice = "已移除所选曲目的手机离线缓存"
+						multiSelecting = false
+						selectedIds.clear()
+					},
+				)
+			}
 		}
 	}
 }

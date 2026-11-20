@@ -87,7 +87,9 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TravelExplore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -485,6 +487,7 @@ fun MeloKeepIosApp(
 							subsonicManager = subsonicManager,
 							audioPlayer = audioPlayer,
 							onEnqueueIngest = enqueueOnlineTrack,
+							onShowNotice = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
 							onDismiss = { nowPlayingExpanded = false },
 						)
 					}
@@ -910,6 +913,7 @@ private fun NowPlayingFullScreenSheet(
 	subsonicManager: IosSubsonicManager,
 	audioPlayer: IosAudioPlayer,
 	onEnqueueIngest: (IosTrackItem) -> Unit,
+	onShowNotice: (String) -> Unit,
 	onDismiss: () -> Unit,
 ) {
 	val scope = rememberCoroutineScope()
@@ -920,6 +924,7 @@ private fun NowPlayingFullScreenSheet(
 	var showSleepSheet by remember { mutableStateOf(false) }
 	var showSpeedSheet by remember { mutableStateOf(false) }
 	var showLyricsSettingsSheet by remember { mutableStateOf(false) }
+	var confirmDeleteOfflineTrack by remember { mutableStateOf<IosTrackItem?>(null) }
 	var moreMenuOpen by remember { mutableStateOf(false) }
 	var verticalSwipeOffset by remember { mutableFloatStateOf(0f) }
 
@@ -1212,13 +1217,47 @@ private fun NowPlayingFullScreenSheet(
 									}
 								}
 							}
-							if (isOffline) {
-								Icon(
-									Icons.Rounded.OfflinePin,
-									contentDescription = "离线播放中",
-									tint = MaterialTheme.colorScheme.primary,
-									modifier = Modifier.size(20.dp),
-								)
+							val downloadProgress = playerState.downloadingProgress[track.id]
+							when {
+								downloadProgress != null -> {
+									IconButton(
+										onClick = {
+											audioPlayer.cancelDownload(track.id)
+											onShowNotice("已取消离线缓存：${track.title}")
+										},
+									) {
+										CircularProgressIndicator(
+											progress = { downloadProgress.coerceIn(0.05f, 1f) },
+											modifier = Modifier.size(18.dp),
+											strokeWidth = 2.dp,
+										)
+									}
+								}
+
+								isOffline -> {
+									IconButton(onClick = { confirmDeleteOfflineTrack = track }) {
+										Icon(
+											imageVector = Icons.Rounded.OfflinePin,
+											contentDescription = "已离线，点击删除缓存",
+											tint = MaterialTheme.colorScheme.primary,
+										)
+									}
+								}
+
+								else -> {
+									IconButton(
+										onClick = {
+											audioPlayer.downloadTrackOffline(track)
+											onShowNotice(iosLibOfflineQueueNotice(1))
+										},
+									) {
+										Icon(
+											imageVector = Icons.Rounded.CloudDownload,
+											contentDescription = "离线到手机",
+											tint = MaterialTheme.colorScheme.onSurfaceVariant,
+										)
+									}
+								}
 							}
 							if (track.sourceType == IosTrackSource.NAVIDROME) {
 								IconButton(onClick = { scope.launch { subsonicManager.toggleStar(track) } }) {
@@ -1383,6 +1422,32 @@ private fun NowPlayingFullScreenSheet(
 		presented = showLyricsSettingsSheet,
 		onDismissRequest = { showLyricsSettingsSheet = false },
 	)
+
+	confirmDeleteOfflineTrack?.let { target ->
+		AlertDialog(
+			onDismissRequest = { confirmDeleteOfflineTrack = null },
+			title = { Text("移除离线缓存") },
+			text = { Text("确定删除「${target.title}」的手机离线缓存文件吗？") },
+			confirmButton = {
+				TextButton(
+					onClick = {
+						audioPlayer.deleteOfflineTrack(target.id)
+						confirmDeleteOfflineTrack = null
+					},
+					colors = ButtonDefaults.textButtonColors(
+						contentColor = MaterialTheme.colorScheme.error,
+					),
+				) {
+					Text("移除")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmDeleteOfflineTrack = null }) {
+					Text("取消")
+				}
+			},
+		)
+	}
 }
 
 @Composable

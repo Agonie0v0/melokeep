@@ -46,15 +46,22 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.ViewAgenda
@@ -63,7 +70,10 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -1436,45 +1446,43 @@ private fun NavSongsSubContent(
 							.padding(bottom = 12.dp),
 						horizontalArrangement = Arrangement.spacedBy(12.dp),
 					) {
-						NavSongCardTile(
-							track = left,
-							isPlaying = left.id == currentTrackId,
-							isOffline = left.id in offlineIds,
-							isSelecting = multiSelecting,
-							isSelected = selectedIds[left.id] == true,
-							onClick = {
-								if (multiSelecting) {
-									selectedIds[left.id] = selectedIds[left.id] != true
-								} else {
-									audioPlayer.playQueue(songs, leftIdx)
-								}
-							},
-							onLongClick = {
-								multiSelecting = true
-								selectedIds[left.id] = true
-							},
-							modifier = Modifier.weight(1f),
-						)
-						if (right != null) {
+						@Composable
+						fun SongCardCell(track: IosTrackItem, idx: Int, cellModifier: Modifier) {
 							NavSongCardTile(
-								track = right,
-								isPlaying = right.id == currentTrackId,
-								isOffline = right.id in offlineIds,
+								track = track,
+								isPlaying = track.id == currentTrackId,
+								isStarred = (track.rawId in starredIds) || (track.isStarred && track.rawId !in unstarredIds),
+								isOffline = track.id in offlineIds,
+								downloadProgress = downloadingProgress[track.id],
 								isSelecting = multiSelecting,
-								isSelected = selectedIds[right.id] == true,
+								isSelected = selectedIds[track.id] == true,
 								onClick = {
 									if (multiSelecting) {
-										selectedIds[right.id] = selectedIds[right.id] != true
+										selectedIds[track.id] = selectedIds[track.id] != true
 									} else {
-										audioPlayer.playQueue(songs, rightIdx)
+										audioPlayer.playQueue(songs, idx)
 									}
 								},
 								onLongClick = {
 									multiSelecting = true
-									selectedIds[right.id] = true
+									selectedIds[track.id] = true
 								},
-								modifier = Modifier.weight(1f),
+								onPlayNext = { audioPlayer.playNext(track) },
+								onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
+								onDownloadOffline = {
+									audioPlayer.downloadTrackOffline(track)
+									onShowNotice(iosLibOfflineQueueNotice(1))
+								},
+								onCancelOffline = { audioPlayer.cancelDownload(track.id) },
+								onDeleteOffline = { audioPlayer.deleteOfflineTrack(track.id) },
+								onAddToPlaylist = { onOpenAddToPlaylist(listOf(track)) },
+								onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
+								modifier = cellModifier,
 							)
+						}
+						SongCardCell(left, leftIdx, Modifier.weight(1f))
+						if (right != null) {
+							SongCardCell(right, rightIdx, Modifier.weight(1f))
 						} else {
 							Spacer(Modifier.weight(1f))
 						}
@@ -1620,13 +1628,23 @@ private fun NavSongsSubContent(
 private fun NavSongCardTile(
 	track: IosTrackItem,
 	isPlaying: Boolean,
+	isStarred: Boolean,
 	isOffline: Boolean,
+	downloadProgress: Float?,
 	isSelecting: Boolean,
 	isSelected: Boolean,
 	onClick: () -> Unit,
 	onLongClick: () -> Unit,
+	onPlayNext: () -> Unit,
+	onToggleStar: () -> Unit,
+	onDownloadOffline: () -> Unit,
+	onCancelOffline: () -> Unit,
+	onDeleteOffline: () -> Unit,
+	onAddToPlaylist: () -> Unit,
+	onRequestPhysicalDelete: (() -> Unit)? = null,
 	modifier: Modifier = Modifier,
 ) {
+	var menuExpanded by remember { mutableStateOf(false) }
 	val qualityTag = remember(track.id, track.bitDepth, track.fileExtension, track.bitRate, track.lossless) {
 		iosLibFormatQuietQuality(track.bitDepth, track.fileExtension, track.bitRate, track.lossless)
 	}
@@ -1687,8 +1705,134 @@ private fun NavSongCardTile(
 							}
 						}
 					}
+				} else {
+					Box(
+						modifier = Modifier
+							.align(Alignment.TopEnd)
+							.padding(6.dp),
+					) {
+						Surface(
+							shape = CircleShape,
+							color = Color.Black.copy(alpha = 0.52f),
+							modifier = Modifier
+								.size(26.dp)
+								.clip(CircleShape)
+								.clickable { menuExpanded = true },
+						) {
+							Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+								Icon(
+									imageVector = Icons.Rounded.MoreVert,
+									contentDescription = "更多操作",
+									tint = Color.White,
+									modifier = Modifier.size(15.dp),
+								)
+							}
+						}
+						DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+							DropdownMenuItem(
+								text = { Text("下一首播放") },
+								leadingIcon = { Icon(Icons.Rounded.PlaylistPlay, contentDescription = null) },
+								onClick = {
+									menuExpanded = false
+									onPlayNext()
+								},
+							)
+							DropdownMenuItem(
+								text = { Text(if (isStarred) "取消喜欢" else "加入我喜欢") },
+								leadingIcon = {
+									Icon(
+										imageVector = if (isStarred) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+										contentDescription = null,
+									)
+								},
+								onClick = {
+									menuExpanded = false
+									onToggleStar()
+								},
+							)
+							DropdownMenuItem(
+								text = { Text("加入歌单") },
+								leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, contentDescription = null) },
+								onClick = {
+									menuExpanded = false
+									onAddToPlaylist()
+								},
+							)
+							when {
+								downloadProgress != null -> {
+									DropdownMenuItem(
+										text = { Text("取消离线下载") },
+										leadingIcon = { Icon(Icons.Rounded.Close, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onCancelOffline()
+										},
+									)
+								}
+								!isOffline -> {
+									DropdownMenuItem(
+										text = { Text("下载到手机离线") },
+										leadingIcon = { Icon(Icons.Rounded.CloudDownload, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onDownloadOffline()
+										},
+									)
+								}
+								else -> {
+									DropdownMenuItem(
+										text = { Text("移除手机离线") },
+										leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+										onClick = {
+											menuExpanded = false
+											onDeleteOffline()
+										},
+									)
+								}
+							}
+							if (onRequestPhysicalDelete != null) {
+								HorizontalDivider()
+								DropdownMenuItem(
+									text = {
+										Text(
+											text = "从磁盘删除源文件",
+											color = MaterialTheme.colorScheme.error,
+										)
+									},
+									leadingIcon = {
+										Icon(
+											imageVector = Icons.Rounded.Delete,
+											contentDescription = null,
+											tint = MaterialTheme.colorScheme.error,
+										)
+									},
+									onClick = {
+										menuExpanded = false
+										onRequestPhysicalDelete()
+									},
+								)
+							}
+						}
+					}
 				}
-				if (isOffline) {
+				if (downloadProgress != null) {
+					Surface(
+						shape = CircleShape,
+						color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+						modifier = Modifier
+							.align(Alignment.BottomStart)
+							.padding(6.dp)
+							.size(22.dp),
+					) {
+						Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+							CircularProgressIndicator(
+								progress = { downloadProgress.coerceIn(0.05f, 1f) },
+								modifier = Modifier.size(13.dp),
+								strokeWidth = 1.8.dp,
+							)
+						}
+					}
+				} else if (isOffline) {
 					Surface(
 						shape = CircleShape,
 						color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
@@ -1806,20 +1950,34 @@ private fun NavSearchResultsContent(
 	onRecordSearchResult: () -> Unit = {},
 ) {
 	val scope = rememberCoroutineScope()
+	var multiSelecting by remember { mutableStateOf(false) }
+	val selectedIds = remember { mutableStateMapOf<String, Boolean>() }
+	LaunchedEffect(libState.searchQuery) {
+		multiSelecting = false
+		selectedIds.clear()
+	}
+	val selectedSongs by remember(libState.searchSongs) {
+		derivedStateOf { libState.searchSongs.filter { selectedIds[it.id] == true } }
+	}
+	val hasOfflineRemovable by remember(selectedSongs, offlineIds, downloadingProgress) {
+		derivedStateOf { selectedSongs.any { it.id in offlineIds || it.id in downloadingProgress } }
+	}
 	val hasAny = libState.searchArtists.isNotEmpty() ||
 		libState.searchAlbums.isNotEmpty() ||
 		libState.searchSongs.isNotEmpty()
 
-	LazyColumn(
-		modifier = Modifier.fillMaxSize(),
-		contentPadding = PaddingValues(
-			start = 16.dp,
-			end = 16.dp,
-			top = 8.dp,
-			bottom = bottomPadding.calculateBottomPadding() + 20.dp,
-		),
-		verticalArrangement = Arrangement.spacedBy(10.dp),
-	) {
+	Box(modifier = Modifier.fillMaxSize()) {
+		LazyColumn(
+			modifier = Modifier.fillMaxSize(),
+			contentPadding = PaddingValues(
+				start = 16.dp,
+				end = 16.dp,
+				top = 8.dp,
+				bottom = bottomPadding.calculateBottomPadding() +
+					if (multiSelecting && libState.searchSongs.isNotEmpty()) 120.dp else 20.dp,
+			),
+			verticalArrangement = Arrangement.spacedBy(10.dp),
+		) {
 		if (libState.searching) {
 			item(key = "nav-search-loading", contentType = "loading") {
 				LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1887,22 +2045,44 @@ private fun NavSearchResultsContent(
 
 		if (libState.searchSongs.isNotEmpty()) {
 			item(key = "nav-search-songs-header", contentType = "section-header") {
-				IosSectionLabel(title = "歌曲 · ${libState.searchSongs.size}")
+				IosSectionLabel(
+					title = "歌曲 · ${libState.searchSongs.size}",
+					trailing = {
+						IosLibDockPill(
+							label = if (multiSelecting) "退出" else "多选",
+							icon = if (multiSelecting) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+							emphasized = multiSelecting,
+							onClick = {
+								multiSelecting = !multiSelecting
+								if (!multiSelecting) selectedIds.clear()
+							},
+						)
+					},
+				)
 			}
 			item(key = "nav-search-songs-group", contentType = "track-group") {
 				IosGroupedCard {
 					libState.searchSongs.forEachIndexed { idx, track ->
+						val isSelected = selectedIds[track.id] == true
 						IosLibTrackRowContent(
 							track = track,
 							isPlaying = track.id == currentTrackId,
 							isStarred = subsonicManager.isStarred(track),
 							isOffline = track.id in offlineIds,
 							downloadProgress = downloadingProgress[track.id],
-							multiSelectMode = false,
-							isSelected = false,
+							multiSelectMode = multiSelecting,
+							isSelected = isSelected,
 							onClick = {
-								onRecordSearchResult()
-								audioPlayer.playQueue(libState.searchSongs, idx)
+								if (multiSelecting) {
+									selectedIds[track.id] = !isSelected
+								} else {
+									onRecordSearchResult()
+									audioPlayer.playQueue(libState.searchSongs, idx)
+								}
+							},
+							onLongClick = {
+								multiSelecting = true
+								selectedIds[track.id] = true
 							},
 							onPlayNext = { audioPlayer.playNext(track) },
 							onToggleStar = { scope.launch { subsonicManager.toggleStar(track) } },
@@ -1916,11 +2096,71 @@ private fun NavSearchResultsContent(
 							onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
 						)
 						if (idx < libState.searchSongs.lastIndex) {
-							IosHairlineDivider(startIndent = 66.dp)
+							IosHairlineDivider(startIndent = if (multiSelecting) 104.dp else 66.dp)
 						}
 					}
 				}
 			}
+		}
+		}
+
+		AnimatedVisibility(
+			visible = multiSelecting && libState.searchSongs.isNotEmpty(),
+			enter = slideInVertically { it } + fadeIn(),
+			exit = slideOutVertically { it } + fadeOut(),
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.padding(
+					start = 16.dp,
+					end = 16.dp,
+					bottom = bottomPadding.calculateBottomPadding() + 8.dp,
+				),
+		) {
+			IosLibBatchSelectionDock(
+				selectedCount = selectedSongs.size,
+				totalCount = libState.searchSongs.size,
+				hasOfflineRemovable = hasOfflineRemovable,
+				onSelectAll = {
+					if (selectedSongs.size >= libState.searchSongs.size) selectedIds.clear()
+					else libState.searchSongs.forEach { selectedIds[it.id] = true }
+				},
+				onExit = {
+					multiSelecting = false
+					selectedIds.clear()
+				},
+				onPlaySelected = {
+					if (selectedSongs.isNotEmpty()) {
+						onRecordSearchResult()
+						audioPlayer.playQueue(selectedSongs, 0)
+						multiSelecting = false
+						selectedIds.clear()
+					}
+				},
+				onDownloadSelected = {
+					if (selectedSongs.isNotEmpty()) {
+						audioPlayer.downloadTracksOffline(selectedSongs)
+						onShowNotice(iosLibOfflineQueueNotice(selectedSongs.size))
+						multiSelecting = false
+						selectedIds.clear()
+					}
+				},
+				onAddToPlaylist = {
+					if (selectedSongs.isNotEmpty()) {
+						onOpenAddToPlaylist(selectedSongs)
+						multiSelecting = false
+						selectedIds.clear()
+					}
+				},
+				onDeleteOfflineSelected = {
+					selectedSongs.forEach { t ->
+						if (t.id in downloadingProgress) audioPlayer.cancelDownload(t.id)
+						if (t.id in offlineIds) audioPlayer.deleteOfflineTrack(t.id)
+					}
+					onShowNotice("已移除所选曲目的手机离线缓存")
+					multiSelecting = false
+					selectedIds.clear()
+				},
+			)
 		}
 	}
 }

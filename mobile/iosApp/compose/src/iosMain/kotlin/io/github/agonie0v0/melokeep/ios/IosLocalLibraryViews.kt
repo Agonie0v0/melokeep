@@ -266,10 +266,7 @@ internal fun IosLibLocalSection(
 				onToggleFavorite = toggleFavorite,
 				onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist,
 				onShowNotice = onShowNotice,
-				onRefresh = {
-					localController.refreshAll()
-					onRefreshFiles()
-				},
+				onRefresh = onRefreshFiles,
 				bottomPadding = bottomPadding,
 			)
 
@@ -780,8 +777,8 @@ private fun LocalOverviewContent(
 				verticalAlignment = Alignment.CenterVertically,
 			) {
 				Text(
-					text = if (filesLoading && allItems.isEmpty()) {
-						"正在同步曲库…"
+					text = if (filesLoading) {
+						"正在扫描刷新曲库…"
 					} else {
 						"${allItems.size} 首 · ${albums.size} 专辑 · ${artists.size} 歌手"
 					},
@@ -793,14 +790,23 @@ private fun LocalOverviewContent(
 				)
 				IconButton(
 					onClick = onRefresh,
+					enabled = !filesLoading,
 					modifier = Modifier.size(32.dp),
 				) {
-					Icon(
-						imageVector = Icons.Rounded.Refresh,
-						contentDescription = "刷新本地库",
-						tint = MaterialTheme.colorScheme.primary,
-						modifier = Modifier.size(17.dp),
-					)
+					if (filesLoading) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(15.dp),
+							strokeWidth = 1.8.dp,
+							color = MaterialTheme.colorScheme.primary,
+						)
+					} else {
+						Icon(
+							imageVector = Icons.Rounded.Refresh,
+							contentDescription = "刷新本地库",
+							tint = MaterialTheme.colorScheme.primary,
+							modifier = Modifier.size(17.dp),
+						)
+					}
 				}
 			}
 		}
