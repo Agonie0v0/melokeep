@@ -112,7 +112,7 @@ jobs:
       - name: 运行共享模块单测并编译 Android Release APK
         working-directory: mobile
         env:
-          MELOKEEP_VERSION_NAME: ${{ steps.ver.outputs.ver_tag }}
+          MELOKEEP_VERSION_NAME: ${{ steps.ver.outputs.clean_ver }}
           MELOKEEP_VERSION_CODE: ${{ steps.ver.outputs.ver_code }}
         run: |
           chmod +x gradlew
