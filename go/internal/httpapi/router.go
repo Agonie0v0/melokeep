@@ -414,6 +414,7 @@ func (s *Server) registerRoutes() {
 
 	s.addRoute(http.MethodGet, "/api/files", "engine_api.files", s.handleFiles)
 	s.addRoute(http.MethodGet, "/api/library/files", "engine_api.library_files", s.handleLibraryFiles)
+	s.addRoute(http.MethodPost, "/api/library/refresh", "engine_api.library_refresh", s.handleLibraryRefresh)
 	s.addRoute(http.MethodGet, "/api/files/audio", "engine_api.local_audio", s.handleLocalAudio)
 	s.addRoute(http.MethodGet, "/api/files/cover", "engine_api.local_cover", s.handleLocalCover)
 	s.addRoute(http.MethodPatch, "/api/files/tags", "engine_api.edit_file_tags", s.handleEditFileTags)
@@ -468,6 +469,8 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodGet, "/api/navidrome/search", "navidrome.search", s.handleNavidromeSearch)
 	s.addRoute(http.MethodGet, "/api/navidrome/cover/{ident}", "navidrome.cover", s.handleNavidromeCover)
 	s.addRoute(http.MethodGet, "/api/navidrome/stream/{ident}", "navidrome.stream", s.handleNavidromeStream)
+	s.addRoute(http.MethodGet, "/api/navidrome/download/{ident}", "navidrome.download", s.handleNavidromeDownload)
+	s.addRoute(http.MethodPost, "/api/navidrome/downloads/archive", "navidrome.download_archive", s.handleNavidromeDownloadArchive)
 	s.addRoute(http.MethodPost, "/api/navidrome/test", "navidrome.test", s.handleNavidromeTest)
 	s.addRoute(http.MethodGet, "/api/navidrome/scan", "navidrome.scan_status", s.handleNavidromeScanStatus)
 	s.addRoute(http.MethodPost, "/api/navidrome/scan", "navidrome.scan", s.handleNavidromeScan)

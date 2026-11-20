@@ -369,3 +369,102 @@ func TestNormalizeAndMergeSettingsPreservesAndClearsSecrets(t *testing.T) {
 		t.Fatalf("expected password cleared and omitted api_key preserved, got pass=%q key=%q", merged.Password, merged.APIKey)
 	}
 }
+
+func TestOpenMediaDownloadFallbackAndJSONRejection(t *testing.T) {
+	var sawDownloadFormatRaw atomic.Bool
+	var sawStreamFormatRaw atomic.Bool
+	var downloadCalls atomic.Int32
+	var streamCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		switch r.URL.Path {
+		case "/rest/download.view":
+			downloadCalls.Add(1)
+			if r.URL.Query().Get("format") != "" {
+				sawDownloadFormatRaw.Store(true)
+			}
+			if id == "orig-1" {
+				w.Header().Set("Content-Type", "audio/flac")
+				w.Header().Set("Content-Disposition", `attachment; filename="Morning.flac"`)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("fLaC-ORIGINAL"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"subsonic-response":{"status":"failed","error":{"code":70,"message":"download disabled"}}}`))
+		case "/rest/stream.view":
+			streamCalls.Add(1)
+			if r.URL.Query().Get("format") == "raw" {
+				sawStreamFormatRaw.Store(true)
+			}
+			if id == "fallback-1" {
+				w.Header().Set("Content-Type", "audio/mpeg")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("ID3-FALLBACK"))
+				return
+			}
+			w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<subsonic-response status="failed"/>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+	client, err := NewClient(pool, nil, Settings{
+		Enabled:  true,
+		URL:      srv.URL,
+		Username: "alice",
+		APIKey:   "k-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	ctx := context.Background()
+
+	// 1. Direct download.view succeeds without forcing format=raw and sets nosniff + Content-Disposition.
+	ms, err := client.OpenMedia(ctx, "download", "orig-1", "")
+	if err != nil {
+		t.Fatalf("OpenMedia download failed: %v", err)
+	}
+	raw, _ := io.ReadAll(ms.Body)
+	_ = ms.Body.Close()
+	if string(raw) != "fLaC-ORIGINAL" {
+		t.Fatalf("unexpected download body: %q", string(raw))
+	}
+	if sawDownloadFormatRaw.Load() {
+		t.Fatalf("download endpoint should not force format=raw")
+	}
+	if got := ms.Headers.Get("Content-Disposition"); !strings.Contains(got, "Morning.flac") {
+		t.Fatalf("expected Content-Disposition preserved, got %q", got)
+	}
+	if ms.Headers.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected nosniff header, got %q", ms.Headers.Get("X-Content-Type-Options"))
+	}
+
+	// 2. download.view JSON error is intercepted and falls back to stream?format=raw.
+	msFB, err := client.OpenMedia(ctx, "download", "fallback-1", "")
+	if err != nil {
+		t.Fatalf("OpenMedia fallback failed: %v", err)
+	}
+	rawFB, _ := io.ReadAll(msFB.Body)
+	_ = msFB.Body.Close()
+	if string(rawFB) != "ID3-FALLBACK" || !sawStreamFormatRaw.Load() || streamCalls.Load() != 1 {
+		t.Fatalf("expected stream?format=raw fallback, got body=%q sawRaw=%v calls=%d", string(rawFB), sawStreamFormatRaw.Load(), streamCalls.Load())
+	}
+
+	// 3. When both download and stream return JSON/XML, ErrInvalidResponse is returned.
+	if _, err := client.OpenMedia(ctx, "download", "both-bad", ""); err == nil {
+		t.Fatalf("expected error when both download and stream return XML/JSON")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidResponse {
+		t.Fatalf("expected ErrInvalidResponse, got %v", err)
+	}
+	if downloadCalls.Load() < 3 {
+		t.Fatalf("expected download endpoint called for each test case")
+	}
+}

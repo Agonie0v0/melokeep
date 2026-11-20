@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/agonie0v0/melokeep/internal/files"
+	"github.com/agonie0v0/melokeep/internal/library/index"
+	"github.com/agonie0v0/melokeep/internal/media"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/store"
 )
@@ -156,5 +159,133 @@ func TestFolderManagementMkdirRenameMoveAndBatchDelete(t *testing.T) {
 	gotA2, ok, _ := st.GetAsset(ctx, a2.ID)
 	if !ok || gotA2.Status != "deleted" {
 		t.Fatalf("expected a2 soft deleted, got %+v", gotA2)
+	}
+}
+
+func TestLibraryRefreshRescanAndGhostFolderDelete(t *testing.T) {
+	srv, st, musicRoot := newTestServer(t, func(d *Dependencies, _ string) {
+		locks := files.NewAssetLockManager(2 * time.Second)
+		d.Indexer = index.NewIndexer(d.Store, locks, media.NewTagService(nil, nil))
+	})
+	ctx := context.Background()
+
+	// 1. Manually place an audio file into disk and call POST /api/library/refresh.
+	manualDir := filepath.Join(musicRoot, "ManualArtist")
+	if err := os.MkdirAll(manualDir, 0o755); err != nil {
+		t.Fatalf("mkdir ManualArtist: %v", err)
+	}
+	manualSong := filepath.Join(manualDir, "manual.wav")
+	if err := os.WriteFile(manualSong, []byte("RIFF\x00\x00\x00\x00WAVEfmt "), 0o644); err != nil {
+		t.Fatalf("write manual.wav: %v", err)
+	}
+
+	recRefresh := httptest.NewRecorder()
+	reqRefresh := httptest.NewRequest(http.MethodPost, "/api/library/refresh", nil)
+	reqRefresh.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recRefresh, reqRefresh)
+	if recRefresh.Code != http.StatusOK {
+		t.Fatalf("POST /api/library/refresh failed: %d %s", recRefresh.Code, recRefresh.Body.String())
+	}
+	var refreshOut map[string]any
+	if err := json.Unmarshal(recRefresh.Body.Bytes(), &refreshOut); err != nil {
+		t.Fatalf("decode refresh: %v", err)
+	}
+	if refreshOut["roots_scanned"] != float64(1) || refreshOut["updated_or_new"] != float64(1) {
+		t.Fatalf("unexpected refresh stats: %+v", refreshOut)
+	}
+
+	// Verify GET /api/library/files lists the newly indexed file.
+	recFiles := httptest.NewRecorder()
+	srv.ServeHTTP(recFiles, httptest.NewRequest(http.MethodGet, "/api/library/files", nil))
+	if recFiles.Code != http.StatusOK {
+		t.Fatalf("GET /api/library/files failed: %d", recFiles.Code)
+	}
+	var page model.LibraryFilesPageDTO
+	if err := json.Unmarshal(recFiles.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode files: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Name != "manual.wav" {
+		t.Fatalf("expected manual.wav in library files, got %+v", page.Items)
+	}
+
+	// 2. Delete manual.wav externally and create GhostBox/ghost.wav, then call GET /api/library/files?rescan=1.
+	if err := os.Remove(manualSong); err != nil {
+		t.Fatalf("remove manualSong: %v", err)
+	}
+	ghostDir := filepath.Join(musicRoot, "GhostBox")
+	if err := os.MkdirAll(ghostDir, 0o755); err != nil {
+		t.Fatalf("mkdir GhostBox: %v", err)
+	}
+	ghostSong := filepath.Join(ghostDir, "ghost.wav")
+	if err := os.WriteFile(ghostSong, []byte("RIFF\x00\x00\x00\x00WAVEfmt "), 0o644); err != nil {
+		t.Fatalf("write ghost.wav: %v", err)
+	}
+
+	recRescan := httptest.NewRecorder()
+	srv.ServeHTTP(recRescan, httptest.NewRequest(http.MethodGet, "/api/library/files?rescan=1", nil))
+	if recRescan.Code != http.StatusOK {
+		t.Fatalf("GET /api/library/files?rescan=1 failed: %d %s", recRescan.Code, recRescan.Body.String())
+	}
+	var page2 model.LibraryFilesPageDTO
+	if err := json.Unmarshal(recRescan.Body.Bytes(), &page2); err != nil {
+		t.Fatalf("decode rescan page: %v", err)
+	}
+	if len(page2.Items) != 1 || page2.Items[0].Name != "ghost.wav" {
+		t.Fatalf("expected only ghost.wav after rescan=1, got %+v", page2.Items)
+	}
+
+	// 3. Externally delete GhostBox folder on disk, leaving a stale ghost asset in SQLite.
+	// POST /api/files/batch-delete must still succeed and soft-delete stale SQLite records.
+	rootRec, _, _ := st.GetRoot(ctx, "root-1")
+	ghostAssetBefore, ok, _ := st.GetAssetByRootAndPathKey(ctx, "root-1", files.ComputePathKey(rootRec.PathCaseMode, "GhostBox/ghost.wav"))
+	if !ok || ghostAssetBefore.ID == "" {
+		t.Fatalf("expected GhostBox/ghost.wav indexed before external delete")
+	}
+	if err := os.RemoveAll(ghostDir); err != nil {
+		t.Fatalf("remove GhostBox externally: %v", err)
+	}
+	bodyGhost, _ := json.Marshal(map[string]any{
+		"folders": []map[string]string{{"root": musicRoot, "folder": "GhostBox"}},
+	})
+	recGhostDel := httptest.NewRecorder()
+	reqGhostDel := httptest.NewRequest(http.MethodPost, "/api/files/batch-delete", bytes.NewReader(bodyGhost))
+	reqGhostDel.Header.Set("Content-Type", "application/json")
+	reqGhostDel.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recGhostDel, reqGhostDel)
+	if recGhostDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 deleting ghost folder, got %d %s", recGhostDel.Code, recGhostDel.Body.String())
+	}
+	var delOut map[string]any
+	if err := json.Unmarshal(recGhostDel.Body.Bytes(), &delOut); err != nil {
+		t.Fatalf("decode ghost delete response: %v", err)
+	}
+	if delOut["deleted_folders"] != float64(1) {
+		t.Fatalf("expected deleted_folders=1, got %+v", delOut)
+	}
+
+	// Ghost folder's assets must be soft deleted and invisible in GET /api/library/files.
+	ghostAsset, ok, _ := st.GetAsset(ctx, ghostAssetBefore.ID)
+	if !ok || ghostAsset.Status != "deleted" {
+		t.Fatalf("expected ghost asset soft-deleted, got ok=%v status=%s", ok, ghostAsset.Status)
+	}
+	recFilesAfter := httptest.NewRecorder()
+	srv.ServeHTTP(recFilesAfter, httptest.NewRequest(http.MethodGet, "/api/library/files", nil))
+	var pageAfter model.LibraryFilesPageDTO
+	_ = json.Unmarshal(recFilesAfter.Body.Bytes(), &pageAfter)
+	if len(pageAfter.Items) != 0 {
+		t.Fatalf("expected 0 active files after ghost folder delete, got %+v", pageAfter.Items)
+	}
+
+	// 4. Deleting a folder that exists neither on disk nor in SQLite must return 404.
+	bodyMissing, _ := json.Marshal(map[string]any{
+		"folders": []map[string]string{{"root": musicRoot, "folder": "NeverExisted"}},
+	})
+	recMissing := httptest.NewRecorder()
+	reqMissing := httptest.NewRequest(http.MethodPost, "/api/files/batch-delete", bytes.NewReader(bodyMissing))
+	reqMissing.Header.Set("Content-Type", "application/json")
+	reqMissing.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recMissing, reqMissing)
+	if recMissing.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for completely absent folder, got %d %s", recMissing.Code, recMissing.Body.String())
 	}
 }

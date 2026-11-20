@@ -289,8 +289,10 @@ type persistedItemMeta struct {
 	InlineCover  string                      `json:"inline_cover,omitempty"`
 	ClearCover   bool                        `json:"clear_cover,omitempty"`
 	ClearAll     bool                        `json:"clear_all,omitempty"`
-	DerivedPlans []DerivedOutputPlan         `json:"derived_plans,omitempty"`
-	SourceMeta   helper.AudioTagData         `json:"source_meta,omitempty"`
+	DerivedPlans  []DerivedOutputPlan `json:"derived_plans,omitempty"`
+	SourceMeta    helper.AudioTagData `json:"source_meta,omitempty"`
+	SourceSize    int64               `json:"source_size,omitempty"`
+	SourceMTimeNS int64               `json:"source_mtime_ns,omitempty"`
 }
 
 type persistedJobMeta struct {
@@ -1054,6 +1056,7 @@ func (s *Service) runAsyncScan(
 		reserved[vp.AbsPath] = struct{}{}
 	}
 	for idx := range jobMeta.Items {
+		s.reconcileItemRevisionIfDiskUnchanged(scanCtx, &jobMeta.Items[idx])
 		s.assignPreviewItemTarget(libRoot, settings, req, roots, &jobMeta.Items[idx], idx+1, reserved)
 	}
 
@@ -1404,6 +1407,13 @@ func (s *Service) Review(ctx context.Context, actor auth.Actor, jobID string, ch
 		}
 		it.Error = ""
 		it.Status = model.LibraryItemPreviewReady
+	}
+	for idx := range jobMeta.Items {
+		it := &jobMeta.Items[idx]
+		if it.Status == model.LibraryItemComplete || it.Status == model.LibraryItemSkipped {
+			continue
+		}
+		s.reconcileItemRevisionIfDiskUnchanged(ctx, it)
 	}
 
 	nextStatus := deriveInitialJobStatus(jobMeta.Action, jobMeta.Items)
@@ -1769,27 +1779,40 @@ func (s *Service) stopJob(ctx context.Context, actor auth.Actor, jobID, targetSt
 	return s.ToDTO(ctx, jobID)
 }
 
-func (s *Service) Retry(ctx context.Context, actor auth.Actor, jobID string) (model.LibraryJobDTO, error) {
+func (s *Service) prepareRetry(ctx context.Context, actor auth.Actor, jobID string) (int, error) {
 	if !actor.Authenticated {
-		return model.LibraryJobDTO{}, model.NewError(model.ErrUnauthorized, http.StatusUnauthorized, "登录已失效，请重新登录")
+		return 0, model.NewError(model.ErrUnauthorized, http.StatusUnauthorized, "登录已失效，请重新登录")
 	}
 	if actor.ReadOnlyAI || !actor.Has(auth.PermLocalWrite) {
-		return model.LibraryJobDTO{}, model.NewError(model.ErrForbidden, http.StatusForbidden, "缺少重试曲库任务权限")
+		return 0, model.NewError(model.ErrForbidden, http.StatusForbidden, "缺少重试曲库任务权限")
 	}
 	ctrl := s.getControl(jobID)
 	ctrl.mu.Lock()
 	if ctrl.scanning || ctrl.applying {
 		ctrl.mu.Unlock()
-		return model.LibraryJobDTO{}, model.NewError(model.ErrConflict, http.StatusConflict, "任务正在运行中")
+		return 0, model.NewError(model.ErrConflict, http.StatusConflict, "任务正在运行中")
 	}
 	ctrl.mu.Unlock()
 
 	jobMeta, err := s.loadJobMeta(ctx, jobID)
 	if err != nil {
-		return model.LibraryJobDTO{}, err
+		return 0, err
 	}
 	if err := s.ensureActorAccess(actor, jobMeta.OwnerKey); err != nil {
-		return model.LibraryJobDTO{}, err
+		return 0, err
+	}
+
+	roots := s.coordinator.Roots()
+	libRoot := ""
+	if jobMeta.Action == "organize" || jobMeta.Action == "both" {
+		libRoot = resolveDirAgainstRoots(jobMeta.Settings.LibraryDir, roots)
+	}
+	reserved := make(map[string]struct{}, len(jobMeta.Items)*2)
+	for _, it := range jobMeta.Items {
+		reserved[it.OriginalPath] = struct{}{}
+		if (it.Status == model.LibraryItemComplete || it.Status == model.LibraryItemPreviewReady) && it.Target != "" {
+			reserved[it.Target] = struct{}{}
+		}
 	}
 
 	requeued := 0
@@ -1798,23 +1821,91 @@ func (s *Service) Retry(ctx context.Context, actor auth.Actor, jobID string) (mo
 		if it.Status == model.LibraryItemComplete || it.Status == model.LibraryItemSkipped {
 			continue
 		}
-		if it.Status == model.LibraryItemFailed || it.Status == model.LibraryItemQueued {
-			it.Status = model.LibraryItemPreviewReady
-			it.Error = ""
-			requeued++
-		} else if it.Status == model.LibraryItemNeedsReview && it.Chosen != nil {
-			it.Status = model.LibraryItemPreviewReady
-			it.Error = ""
+		eligible := it.Status == model.LibraryItemFailed ||
+			it.Status == model.LibraryItemQueued ||
+			it.Status == model.LibraryItemApplying ||
+			(it.Status == model.LibraryItemNeedsReview && it.Chosen != nil)
+		if !eligible {
+			continue
+		}
+		vp, vErr := files.ValidatePath(roots, it.OriginalPath, files.ValidateOptions{MustExist: true, AudioOnly: true})
+		if vErr != nil {
+			it.Status = model.LibraryItemFailed
+			it.Error = vErr.Error()
+			continue
+		}
+		var asset store.AssetRecord
+		var aOK bool
+		var aErr error
+		if s.store != nil {
+			asset, aOK, aErr = s.store.GetAssetByRootAndPathKey(ctx, vp.Root.ID, vp.PathKey)
+		}
+		if aErr == nil && !aOK {
+			asset, aErr = s.ensureAssetForPath(ctx, vp, it.SourceMeta)
+		}
+		if aErr != nil {
+			it.Status = model.LibraryItemFailed
+			it.Error = aErr.Error()
+			continue
+		}
+		it.AssetID = asset.ID
+		it.ExpectedRev = asset.Revision
+		locks := nonNilSlice(asset.LockedFields)
+		if jobMeta.Action == "edit" && len(jobMeta.Request.Changes) > 0 {
+			seenLock := make(map[string]bool, len(locks)+len(jobMeta.Request.Changes))
+			mergedLocks := make([]string, 0, len(locks)+len(jobMeta.Request.Changes))
+			for _, f := range locks {
+				if f != "" && !seenLock[f] {
+					seenLock[f] = true
+					mergedLocks = append(mergedLocks, f)
+				}
+			}
+			for f := range jobMeta.Request.Changes {
+				if f != "" && !seenLock[f] {
+					seenLock[f] = true
+					mergedLocks = append(mergedLocks, f)
+				}
+			}
+			locks = mergedLocks
+		}
+		it.Locks = locks
+		if st, stErr := os.Lstat(vp.AbsPath); stErr == nil {
+			it.SourceSize = st.Size()
+			it.SourceMTimeNS = st.ModTime().UnixNano()
+		}
+		it.Error = ""
+		it.Status = model.LibraryItemPreviewReady
+		s.assignPreviewItemTarget(libRoot, jobMeta.Settings, jobMeta.Request, roots, it, idx+1, reserved)
+		if it.Status == model.LibraryItemPreviewReady {
 			requeued++
 		}
+	}
+	if err := s.saveJobMeta(ctx, jobMeta); err != nil {
+		return 0, err
+	}
+	return requeued, nil
+}
+
+func (s *Service) Retry(ctx context.Context, actor auth.Actor, jobID string) (model.LibraryJobDTO, error) {
+	requeued, err := s.prepareRetry(ctx, actor, jobID)
+	if err != nil {
+		return model.LibraryJobDTO{}, err
 	}
 	if requeued == 0 {
 		return s.ToDTO(ctx, jobID)
 	}
-	if err := s.saveJobMeta(ctx, jobMeta); err != nil {
+	return s.Apply(ctx, actor, jobID)
+}
+
+func (s *Service) RetryAsync(ctx context.Context, actor auth.Actor, jobID string) (model.LibraryJobDTO, error) {
+	requeued, err := s.prepareRetry(ctx, actor, jobID)
+	if err != nil {
 		return model.LibraryJobDTO{}, err
 	}
-	return s.Apply(ctx, actor, jobID)
+	if requeued == 0 {
+		return s.ToDTO(ctx, jobID)
+	}
+	return s.ApplyAsync(ctx, actor, jobID)
 }
 
 func (s *Service) Restore(ctx context.Context, actor auth.Actor, jobID, itemID string) (files.OperationResult, error) {
@@ -2653,22 +2744,33 @@ func (s *Service) buildPreviewItemCore(
 		lockedSet[l] = true
 	}
 
+	var sourceSize, sourceMTimeNS int64
+	if st, stErr := os.Lstat(vp.AbsPath); stErr == nil {
+		sourceSize = st.Size()
+		sourceMTimeNS = st.ModTime().UnixNano()
+	} else {
+		sourceSize = asset.Size
+		sourceMTimeNS = asset.MTimeNS
+	}
+
 	item := persistedItemMeta{
-		ID:           model.NewUUID(),
-		Ordinal:      counter - 1,
-		AssetID:      asset.ID,
-		RootID:       vp.Root.ID,
-		RelPath:      vp.RelPath,
-		Name:         vp.Name,
-		OriginalPath: vp.AbsPath,
-		Target:       vp.AbsPath,
-		Status:       model.LibraryItemPreviewReady,
-		ExpectedRev:  asset.Revision,
-		Before:       before,
-		After:        after,
-		Locks:        locks,
-		Warnings:     []string{},
-		SourceMeta:   tagData,
+		ID:            model.NewUUID(),
+		Ordinal:       counter - 1,
+		AssetID:       asset.ID,
+		RootID:        vp.Root.ID,
+		RelPath:       vp.RelPath,
+		Name:          vp.Name,
+		OriginalPath:  vp.AbsPath,
+		Target:        vp.AbsPath,
+		Status:        model.LibraryItemPreviewReady,
+		ExpectedRev:   asset.Revision,
+		Before:        before,
+		After:         after,
+		Locks:         locks,
+		Warnings:      []string{},
+		SourceMeta:    tagData,
+		SourceSize:    sourceSize,
+		SourceMTimeNS: sourceMTimeNS,
 	}
 
 	switch req.Action {
@@ -3023,28 +3125,40 @@ func (s *Service) ensureAssetForPath(ctx context.Context, vp files.ValidatedPath
 	if stErr != nil {
 		return store.AssetRecord{}, model.WrapError(model.ErrNotFound, http.StatusNotFound, "文件不存在", stErr)
 	}
-	if err := s.store.UpsertRoot(ctx, store.RootRecord{
-		ID:            vp.Root.ID,
-		CanonicalPath: vp.Root.CanonicalPath,
-		PathCaseMode:  vp.Root.CaseMode,
-		Enabled:       true,
-	}); err != nil {
-		return store.AssetRecord{}, err
+	var indexedGen int64
+	if rootRec, rOK, rErr := s.store.GetRoot(ctx, vp.Root.ID); rErr == nil && rOK {
+		indexedGen = rootRec.ScanGeneration
+	} else {
+		if err := s.store.UpsertRoot(ctx, store.RootRecord{
+			ID:            vp.Root.ID,
+			CanonicalPath: vp.Root.CanonicalPath,
+			PathCaseMode:  vp.Root.CaseMode,
+			Enabled:       true,
+			Healthy:       true,
+		}); err != nil {
+			return store.AssetRecord{}, err
+		}
+		if rootRec, rOK, rErr := s.store.GetRoot(ctx, vp.Root.ID); rErr == nil && rOK {
+			indexedGen = rootRec.ScanGeneration
+		} else if rootRec, rOK, rErr := s.store.GetRootByPath(ctx, vp.Root.CanonicalPath); rErr == nil && rOK {
+			indexedGen = rootRec.ScanGeneration
+		}
 	}
 	created, uErr := s.store.UpsertAsset(ctx, store.AssetRecord{
-		ID:         model.NewUUID(),
-		RootID:     vp.Root.ID,
-		RelPath:    vp.RelPath,
-		PathKey:    vp.PathKey,
-		Status:     "active",
-		Editable:   media.EditableExtensions[strings.ToLower(filepath.Ext(vp.Name))] && (tagData.Editable || tagData.Path == ""),
-		Size:       st.Size(),
-		MTimeNS:    st.ModTime().UnixNano(),
-		Title:      tagData.Tags["title"],
-		Artist:     tagData.Tags["artist"],
-		Album:      tagData.Tags["album"],
-		DurationMS: int64(tagData.Duration * 1000),
-		Metadata:   nonNilStringMap(tagData.Tags),
+		ID:                model.NewUUID(),
+		RootID:            vp.Root.ID,
+		RelPath:           vp.RelPath,
+		PathKey:           vp.PathKey,
+		Status:            "active",
+		Editable:          media.EditableExtensions[strings.ToLower(filepath.Ext(vp.Name))] && (tagData.Editable || tagData.Path == ""),
+		Size:              st.Size(),
+		MTimeNS:           st.ModTime().UnixNano(),
+		Title:             tagData.Tags["title"],
+		Artist:            tagData.Tags["artist"],
+		Album:             tagData.Tags["album"],
+		DurationMS:        int64(tagData.Duration * 1000),
+		Metadata:          nonNilStringMap(tagData.Tags),
+		IndexedGeneration: indexedGen,
 	}, 0, false)
 	if uErr == nil && created.ID != "" {
 		_ = s.store.PutPublicRef(ctx, model.PublicRef{
@@ -3056,6 +3170,44 @@ func (s *Service) ensureAssetForPath(ctx context.Context, vp files.ValidatedPath
 		}, "")
 	}
 	return created, uErr
+}
+
+func stringSlicesEqualSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	ca := append([]string(nil), a...)
+	cb := append([]string(nil), b...)
+	slices.Sort(ca)
+	slices.Sort(cb)
+	return slices.Equal(ca, cb)
+}
+
+func (s *Service) reconcileItemRevisionIfDiskUnchanged(ctx context.Context, it *persistedItemMeta) {
+	if s.store == nil || it == nil || it.AssetID == "" || it.OriginalPath == "" || it.SourceMTimeNS <= 0 {
+		return
+	}
+	st, stErr := os.Lstat(it.OriginalPath)
+	if stErr != nil {
+		return
+	}
+	if st.Size() != it.SourceSize || st.ModTime().UnixNano() != it.SourceMTimeNS {
+		return
+	}
+	asset, ok, err := s.store.GetAsset(ctx, it.AssetID)
+	if err != nil || !ok || asset.Status == "deleted" {
+		return
+	}
+	if asset.Revision == it.ExpectedRev {
+		return
+	}
+	if !stringSlicesEqualSet(it.Locks, asset.LockedFields) {
+		return
+	}
+	it.ExpectedRev = asset.Revision
 }
 
 func (s *Service) PurgeBackups(ctx context.Context, actor auth.Actor) (int, int64, error) {

@@ -989,6 +989,14 @@ func (n *navidromeGatewayAdapter) ProxyStream(w http.ResponseWriter, r *http.Req
 	return n.proxyMedia(w, r, "stream", ident)
 }
 
+func (n *navidromeGatewayAdapter) OpenDownload(ctx context.Context, ident, rangeHeader string) (int, http.Header, io.ReadCloser, error) {
+	ms, err := n.client.OpenMedia(ctx, "download", ident, rangeHeader)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return ms.StatusCode, ms.Headers, ms.Body, nil
+}
+
 func (n *navidromeGatewayAdapter) proxyMedia(w http.ResponseWriter, r *http.Request, endpoint, ident string) error {
 	ms, err := n.client.OpenMedia(r.Context(), endpoint, ident, r.Header.Get("Range"))
 	if err != nil {

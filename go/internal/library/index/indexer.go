@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agonie0v0/melokeep/internal/files"
@@ -45,9 +46,10 @@ type existingAssetSnap struct {
 }
 
 type Indexer struct {
-	store *store.Store
-	locks *files.AssetLockManager
-	tags  *media.TagService
+	store  *store.Store
+	locks  *files.AssetLockManager
+	tags   *media.TagService
+	scanMu sync.Mutex
 }
 
 func NewIndexer(st *store.Store, locks *files.AssetLockManager, tags *media.TagService) *Indexer {
@@ -78,6 +80,13 @@ func (idx *Indexer) ScanRoot(ctx context.Context, rootRec store.RootRecord) (Sca
 
 // ScanRootWithOptions incrementally indexes a single music root with optional metadata backfill.
 func (idx *Indexer) ScanRootWithOptions(ctx context.Context, rootRec store.RootRecord, opts ScanOptions) (ScanStats, error) {
+	idx.scanMu.Lock()
+	defer idx.scanMu.Unlock()
+	if latestRoot, ok, rErr := idx.store.GetRoot(ctx, rootRec.ID); rErr == nil && ok {
+		if latestRoot.ScanGeneration > rootRec.ScanGeneration {
+			rootRec.ScanGeneration = latestRoot.ScanGeneration
+		}
+	}
 	stats := ScanStats{
 		RootID:     rootRec.ID,
 		Generation: rootRec.ScanGeneration + 1,

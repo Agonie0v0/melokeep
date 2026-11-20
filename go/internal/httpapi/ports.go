@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"net/http"
 	"sync"
@@ -79,6 +80,7 @@ type NavidromeGateway interface {
 	Search(ctx context.Context, query string, offset int) (any, error)
 	ProxyCover(w http.ResponseWriter, r *http.Request, ident string) error
 	ProxyStream(w http.ResponseWriter, r *http.Request, ident string) error
+	OpenDownload(ctx context.Context, ident, rangeHeader string) (int, http.Header, io.ReadCloser, error)
 	TestConnection(ctx context.Context) (any, error)
 	ScanStatus(ctx context.Context) (any, error)
 	StartScan(ctx context.Context, actor auth.Actor) (any, error)

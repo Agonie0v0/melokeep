@@ -1031,17 +1031,41 @@ func (c *Client) GetLyrics(ctx context.Context, id, artist, title string) string
 // OpenMedia opens a controlled proxy stream for "stream" or "getCoverArt", passing safe Range headers
 // and rejecting JSON/XML error payloads instead of leaking raw Subsonic responses.
 func (c *Client) OpenMedia(ctx context.Context, endpoint, id, rangeHeader string) (*MediaStream, error) {
-	if endpoint != "stream" && endpoint != "getCoverArt" {
+	if endpoint != "stream" && endpoint != "download" && endpoint != "getCoverArt" {
 		return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "不支持的媒体端点")
 	}
 	if strings.TrimSpace(id) == "" {
 		return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "媒体 ID 不能为空")
 	}
+	if endpoint != "download" {
+		return c.openMediaAttempt(ctx, endpoint, id, rangeHeader)
+	}
+	ms, err := c.openMediaAttempt(ctx, "download", id, rangeHeader)
+	if err == nil {
+		return ms, nil
+	}
+	if ctx.Err() != nil {
+		return nil, err
+	}
+	var de *model.DomainError
+	if errors.As(err, &de) {
+		switch de.Code {
+		case model.ErrCancelled, model.ErrForbidden, model.ErrInvalidInput:
+			return nil, err
+		}
+	}
+	return c.openMediaAttempt(ctx, "stream", id, rangeHeader)
+}
+
+func (c *Client) openMediaAttempt(ctx context.Context, endpoint, id, rangeHeader string) (*MediaStream, error) {
 	params := url.Values{"id": {id}}
-	if endpoint == "stream" {
+	switch endpoint {
+	case "stream":
 		params.Set("format", "raw")
-	} else {
+	case "getCoverArt":
 		params.Set("size", "600")
+	case "download":
+		// download.view returns the original file without transcoding; do not force format=raw.
 	}
 	hdr := http.Header{}
 	if strings.TrimSpace(rangeHeader) != "" {
@@ -1061,6 +1085,12 @@ func (c *Client) OpenMedia(ctx context.Context, endpoint, id, rangeHeader string
 		if v := resp.Header.Get(k); v != "" {
 			safe.Set(k, v)
 		}
+	}
+	if endpoint == "download" {
+		if v := resp.Header.Get("Content-Disposition"); v != "" {
+			safe.Set("Content-Disposition", v)
+		}
+		safe.Set("X-Content-Type-Options", "nosniff")
 	}
 	if endpoint == "getCoverArt" {
 		mimeOnly := strings.TrimSpace(strings.Split(ct, ";")[0])

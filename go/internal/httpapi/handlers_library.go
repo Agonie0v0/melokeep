@@ -633,7 +633,36 @@ func (s *Server) handleLibraryRetry(w http.ResponseWriter, r *http.Request) {
 	}
 	ident := r.PathValue("ident")
 	actor := actorFromRequest(r)
-	job, err := s.deps.Library.Retry(r.Context(), actor, ident)
+
+	useAsync := false
+	if !isSyncQueryParam(r) {
+		if currentJob, found, gErr := s.deps.Library.GetJob(r.Context(), ident); gErr == nil && found {
+			retryableCnt := 0
+			for _, it := range currentJob.Items {
+				switch it.Status {
+				case string(model.LibraryItemFailed), string(model.LibraryItemQueued), string(model.LibraryItemApplying):
+					retryableCnt++
+				case string(model.LibraryItemNeedsReview):
+					if it.Chosen != nil {
+						retryableCnt++
+					}
+				}
+			}
+			if retryableCnt > 5 {
+				useAsync = true
+			}
+		}
+	}
+
+	var (
+		job model.LibraryJobDTO
+		err error
+	)
+	if useAsync {
+		job, err = s.deps.Library.RetryAsync(r.Context(), actor, ident)
+	} else {
+		job, err = s.deps.Library.Retry(r.Context(), actor, ident)
+	}
 	if err != nil {
 		writeDomainError(w, err)
 		return

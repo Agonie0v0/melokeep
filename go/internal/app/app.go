@@ -557,6 +557,7 @@ func (a *App) Run(ctx context.Context) error {
 		go func() {
 			defer bgWG.Done()
 			a.scanIndexedRoots(runCtx)
+			a.runLibraryRescanLoop(runCtx)
 		}()
 	}
 
@@ -617,6 +618,24 @@ func (a *App) scanIndexedRoots(ctx context.Context) {
 		}
 		if _, err := a.Indexer.ScanRoot(ctx, r); err != nil && a.Logs != nil {
 			a.Logs.Push("warning", "曲库目录初始索引失败: "+err.Error(), "library", r.ID)
+		}
+	}
+}
+
+const libraryRescanInterval = 60 * time.Second
+
+func (a *App) runLibraryRescanLoop(ctx context.Context) {
+	if a.Cfg.ReadOnly || a.Indexer == nil || a.Store == nil {
+		return
+	}
+	ticker := time.NewTicker(libraryRescanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.scanIndexedRoots(ctx)
 		}
 	}
 }

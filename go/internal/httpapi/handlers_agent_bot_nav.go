@@ -1,11 +1,17 @@
 package httpapi
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/agonie0v0/melokeep/internal/agent"
 	"github.com/agonie0v0/melokeep/internal/download"
@@ -737,6 +743,407 @@ func (s *Server) handleNavidromeStream(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Navidrome.ProxyStream(w, r, r.PathValue("ident")); err != nil {
 		writeDomainError(w, err)
 	}
+}
+
+const maxNavidromeArchiveTracks = 500
+
+func (s *Server) handleNavidromeDownload(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNavidrome(w) {
+		return
+	}
+	ident := strings.TrimSpace(r.PathValue("ident"))
+	if ident == "" {
+		writeError(w, http.StatusBadRequest, "曲目 ID 不能为空")
+		return
+	}
+	statusCode, hdr, body, err := s.deps.Navidrome.OpenDownload(r.Context(), ident, r.Header.Get("Range"))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	defer body.Close()
+
+	track, _ := s.deps.Navidrome.GetSong(r.Context(), ident)
+	filename := navidromeDownloadFilename(track, ident, hdr)
+	for _, k := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "Content-Type"} {
+		if v := hdr.Get(k); v != "" {
+			w.Header().Set(k, v)
+		}
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Content-Disposition", formatAttachmentContentDisposition(filename))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(statusCode)
+	if r.Method != http.MethodHead {
+		_, _ = io.Copy(w, body)
+	}
+}
+
+func (s *Server) handleNavidromeDownloadArchive(w http.ResponseWriter, r *http.Request) {
+	if !s.requireNavidrome(w) {
+		return
+	}
+	var req struct {
+		SongIDs []string `json:"song_ids"`
+		All     bool     `json:"all"`
+		Query   string   `json:"query"`
+		AlbumID string   `json:"album_id"`
+	}
+	if !decodeJSON(w, r, s.defaultJSONLimit(), &req) {
+		return
+	}
+	tracks, err := s.resolveArchiveTracks(r, req.SongIDs, req.All, req.Query, req.AlbumID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if len(tracks) == 0 {
+		writeError(w, http.StatusBadRequest, "请选择至少一首待下载的曲目")
+		return
+	}
+	if len(tracks) > maxNavidromeArchiveTracks {
+		writeError(w, http.StatusBadRequest, "单次打包下载最多支持 500 首，请分批或按专辑下载")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", formatAttachmentContentDisposition("navidrome-tracks.zip"))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+
+	zw := zip.NewWriter(w)
+	usedNames := make(map[string]int, len(tracks)+1)
+	var errLines []string
+	for _, track := range tracks {
+		if r.Context().Err() != nil {
+			break
+		}
+		if errLine := s.streamTrackIntoZip(r, zw, track, usedNames); errLine != "" {
+			errLines = append(errLines, errLine)
+		}
+	}
+	if len(errLines) > 0 && r.Context().Err() == nil {
+		errName := uniqueZipEntryName("_download_errors.txt", usedNames)
+		if ew, err := zw.CreateHeader(&zip.FileHeader{
+			Name:     errName,
+			Method:   zip.Store,
+			Modified: time.Now(),
+		}); err == nil {
+			_, _ = io.WriteString(ew, strings.Join(errLines, "\n")+"\n")
+		}
+	}
+	_ = zw.Close()
+}
+
+func (s *Server) resolveArchiveTracks(r *http.Request, songIDs []string, all bool, query, albumID string) ([]model.TrackDTO, error) {
+	ctx := r.Context()
+	cleanAlbum := strings.TrimSpace(albumID)
+	cleanQuery := strings.TrimSpace(query)
+	var tracks []model.TrackDTO
+
+	switch {
+	case cleanAlbum != "":
+		raw, err := s.deps.Navidrome.GetAlbum(ctx, cleanAlbum)
+		if err != nil {
+			return nil, err
+		}
+		tracks, _ = decodeTracksEnvelope(raw)
+	case all && cleanQuery != "":
+		offset := 0
+		for page := 0; page < 100; page++ {
+			raw, err := s.deps.Navidrome.Search(ctx, cleanQuery, offset)
+			if err != nil {
+				return nil, err
+			}
+			pageTracks, hasMore := decodeTracksEnvelope(raw)
+			if len(pageTracks) == 0 {
+				break
+			}
+			tracks = append(tracks, pageTracks...)
+			if len(tracks) > maxNavidromeArchiveTracks {
+				return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "单次打包下载最多支持 500 首，请分批或按专辑下载")
+			}
+			if !hasMore {
+				break
+			}
+			offset += len(pageTracks)
+		}
+	case all:
+		offset := 0
+		for page := 0; page < 100; page++ {
+			raw, err := s.deps.Navidrome.ListSongs(ctx, offset, 100)
+			if err != nil {
+				return nil, err
+			}
+			pageTracks, hasMore := decodeTracksEnvelope(raw)
+			if len(pageTracks) == 0 {
+				break
+			}
+			tracks = append(tracks, pageTracks...)
+			if len(tracks) > maxNavidromeArchiveTracks {
+				return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "单次打包下载最多支持 500 首，请分批或按专辑下载")
+			}
+			if !hasMore {
+				break
+			}
+			offset += len(pageTracks)
+		}
+	default:
+		seen := make(map[string]struct{}, len(songIDs))
+		for _, rawID := range songIDs {
+			id := strings.TrimPrefix(strings.TrimSpace(rawID), "navidrome-")
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			if len(seen) > maxNavidromeArchiveTracks {
+				return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "单次打包下载最多支持 500 首，请分批或按专辑下载")
+			}
+			track, err := s.deps.Navidrome.GetSong(ctx, id)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, err
+				}
+				track = model.TrackDTO{ID: "navidrome-" + id, SourceID: id}
+			}
+			tracks = append(tracks, track)
+		}
+		return tracks, nil
+	}
+
+	seen := make(map[string]struct{}, len(tracks))
+	deduped := make([]model.TrackDTO, 0, len(tracks))
+	for _, t := range tracks {
+		id := trackNavidromeID(t)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		deduped = append(deduped, t)
+	}
+	return deduped, nil
+}
+
+func (s *Server) streamTrackIntoZip(r *http.Request, zw *zip.Writer, track model.TrackDTO, usedNames map[string]int) string {
+	id := trackNavidromeID(track)
+	_, hdr, body, err := s.deps.Navidrome.OpenDownload(r.Context(), id, "")
+	if err != nil {
+		label := strings.TrimSpace(track.Title)
+		if label == "" {
+			label = id
+		}
+		return fmt.Sprintf("%s (%s): %v", label, id, err)
+	}
+	defer body.Close()
+
+	entryName := uniqueZipEntryName(navidromeDownloadFilename(track, id, hdr), usedNames)
+	ew, err := zw.CreateHeader(&zip.FileHeader{
+		Name:     entryName,
+		Method:   zip.Store,
+		Modified: time.Now(),
+	})
+	if err != nil {
+		return fmt.Sprintf("%s (%s): 创建 ZIP 条目失败: %v", entryName, id, err)
+	}
+	if _, err := io.Copy(ew, body); err != nil {
+		return fmt.Sprintf("%s (%s): 写入音频流失败: %v", entryName, id, err)
+	}
+	return ""
+}
+
+func decodeTracksEnvelope(raw any) ([]model.TrackDTO, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	var env struct {
+		Tracks  []model.TrackDTO `json:"tracks"`
+		HasMore bool             `json:"has_more"`
+	}
+	if err := json.Unmarshal(encoded, &env); err != nil {
+		return nil, false
+	}
+	return env.Tracks, env.HasMore
+}
+
+func trackNavidromeID(track model.TrackDTO) string {
+	if id := strings.TrimSpace(track.SourceID); id != "" {
+		return id
+	}
+	return strings.TrimPrefix(strings.TrimSpace(track.ID), "navidrome-")
+}
+
+func navidromeDownloadFilename(track model.TrackDTO, ident string, hdr http.Header) string {
+	var upstreamName string
+	if disp := strings.TrimSpace(hdr.Get("Content-Disposition")); disp != "" {
+		if _, params, err := mime.ParseMediaType(disp); err == nil {
+			upstreamName = strings.TrimSpace(params["filename"])
+		}
+	}
+
+	ext := sanitizeAudioExt(filepath.Ext(upstreamName))
+	if ext == "" {
+		ext = extFromContentType(hdr.Get("Content-Type"))
+	}
+	if ext == "" && track.Playback.Codec != nil {
+		ext = extFromCodec(*track.Playback.Codec)
+	}
+	if ext == "" && len(track.Qualities) > 0 {
+		ext = extFromCodec(track.Qualities[0].Codec)
+	}
+	if ext == "" {
+		ext = ".bin"
+	}
+
+	title := strings.TrimSpace(track.Title)
+	artist := strings.TrimSpace(track.Artist)
+	var base string
+	switch {
+	case artist != "" && title != "":
+		base = artist + " - " + title
+	case title != "":
+		base = title
+	case upstreamName != "":
+		base = strings.TrimSuffix(filepath.Base(upstreamName), filepath.Ext(upstreamName))
+	default:
+		base = "track-" + strings.TrimPrefix(strings.TrimSpace(ident), "navidrome-")
+	}
+	base = sanitizeArchiveFilenameStem(base)
+	if base == "" {
+		base = "track"
+	}
+	return base + ext
+}
+
+func sanitizeAudioExt(raw string) string {
+	ext := strings.ToLower(strings.TrimSpace(raw))
+	if ext == "" || !strings.HasPrefix(ext, ".") || len(ext) > 10 {
+		return ""
+	}
+	for _, r := range ext[1:] {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return ""
+		}
+	}
+	return ext
+}
+
+func extFromContentType(raw string) string {
+	mimeOnly := strings.ToLower(strings.TrimSpace(strings.Split(raw, ";")[0]))
+	switch mimeOnly {
+	case "audio/flac", "audio/x-flac":
+		return ".flac"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/mp4", "audio/x-m4a", "audio/m4a":
+		return ".m4a"
+	case "audio/aac":
+		return ".aac"
+	case "audio/ogg", "application/ogg":
+		return ".ogg"
+	case "audio/opus":
+		return ".opus"
+	case "audio/wav", "audio/x-wav", "audio/wave":
+		return ".wav"
+	case "audio/aiff", "audio/x-aiff":
+		return ".aiff"
+	case "audio/ape", "audio/x-ape":
+		return ".ape"
+	case "audio/wavpack":
+		return ".wv"
+	default:
+		return ""
+	}
+}
+
+func extFromCodec(raw string) string {
+	c := strings.ToLower(strings.TrimSpace(raw))
+	c = strings.TrimPrefix(c, ".")
+	switch c {
+	case "flac", "mp3", "m4a", "aac", "ogg", "opus", "wav", "aiff", "ape", "wv":
+		return "." + c
+	case "alac":
+		return ".m4a"
+	case "vorbis":
+		return ".ogg"
+	default:
+		return ""
+	}
+}
+
+func sanitizeArchiveFilenameStem(raw string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(raw) {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', ';':
+			b.WriteByte('_')
+		default:
+			if r < 0x20 || r == 0x7f {
+				b.WriteByte('_')
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	cleaned := strings.Trim(b.String(), " .")
+	runes := []rune(cleaned)
+	if len(runes) > 160 {
+		cleaned = strings.Trim(string(runes[:160]), " .")
+	}
+	return cleaned
+}
+
+func uniqueZipEntryName(candidate string, used map[string]int) string {
+	key := strings.ToLower(candidate)
+	if used[key] == 0 {
+		used[key] = 1
+		return candidate
+	}
+	ext := filepath.Ext(candidate)
+	stem := strings.TrimSuffix(candidate, ext)
+	n := used[key] + 1
+	for {
+		next := fmt.Sprintf("%s (%d)%s", stem, n, ext)
+		nextKey := strings.ToLower(next)
+		if used[nextKey] == 0 {
+			used[key] = n
+			used[nextKey] = 1
+			return next
+		}
+		n++
+	}
+}
+
+func formatAttachmentContentDisposition(filename string) string {
+	ext := filepath.Ext(filename)
+	var ascii strings.Builder
+	hasAlnum := false
+	for _, r := range strings.TrimSuffix(filename, ext) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			ascii.WriteRune(r)
+			hasAlnum = true
+		} else if r == '.' || r == '-' || r == '_' || r == ' ' {
+			ascii.WriteRune(r)
+		} else {
+			ascii.WriteByte('_')
+		}
+	}
+	asciiStem := strings.Trim(ascii.String(), " .")
+	if !hasAlnum || asciiStem == "" {
+		asciiStem = "download"
+	}
+	return fmt.Sprintf(`attachment; filename="%s%s"; filename*=UTF-8''%s`, asciiStem, ext, url.PathEscape(filename))
 }
 
 func (s *Server) handleNavidromeTest(w http.ResponseWriter, r *http.Request) {

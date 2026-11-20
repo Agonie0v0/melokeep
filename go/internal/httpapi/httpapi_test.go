@@ -2557,3 +2557,320 @@ func TestLibraryProcessAndApplyAsyncAndSyncEndpoints(t *testing.T) {
 		t.Fatalf("expected scope_dir scan preview_ready with >=7 items, got status=%s len=%d", scopeDone.Status, len(scopeDone.Items))
 	}
 }
+
+func TestLibraryRetryAsyncAndSyncHTTP(t *testing.T) {
+	var libSvc *library.Service
+	srv, st, root := newTestServer(t, func(d *Dependencies, _ string) {
+		scraper := library.NewScraper(d.Transport, d.Providers, d.Media, library.ScraperOptions{})
+		libSvc = library.NewService(d.Store, d.Files, d.Tags, d.Media, scraper, library.ServiceOptions{})
+		d.Library = libSvc
+	})
+	t.Cleanup(func() { _ = libSvc.Close() })
+
+	ctx := context.Background()
+	_, caseMode, _ := files.ProbeCapabilities(root)
+
+	makeBatch := func(prefix string) []string {
+		var paths []string
+		for i := 0; i < 6; i++ {
+			p := filepath.Join(root, "retry_http", fmt.Sprintf("%s_%02d.wav", prefix, i))
+			_ = os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.WriteFile(p, []byte("RIFF\x00\x00\x00\x00WAVEfmt "), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			paths = append(paths, p)
+		}
+		return paths
+	}
+
+	bumpAllRevisions := func(prefix string) {
+		for i := 0; i < 6; i++ {
+			rel := fmt.Sprintf("retry_http/%s_%02d.wav", prefix, i)
+			pk := files.ComputePathKey(caseMode, rel)
+			cur, ok, err := st.GetAssetByRootAndPathKey(ctx, "root-1", pk)
+			if err != nil || !ok {
+				t.Fatalf("GetAssetByRootAndPathKey %s: ok=%v err=%v", rel, ok, err)
+			}
+			if _, err := st.UpsertAsset(ctx, cur, cur.Revision, false); err != nil {
+				t.Fatalf("bump rev %s: %v", rel, err)
+			}
+		}
+	}
+
+	// 1. Create a failed 6-item job, then POST /api/library/jobs/{id}/retry -> returns applying (async).
+	pathsAsync := makeBatch("async")
+	code, out := jsonCall(t, srv, http.MethodPost, "/api/library/jobs?sync=true", map[string]any{
+		"action":  "edit",
+		"paths":   pathsAsync,
+		"changes": map[string]string{"album": "RetryAsyncAlbum"},
+	})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("submit async batch: %d %v", code, out)
+	}
+	asyncJobID, _ := out["id"].(string)
+	bumpAllRevisions("async")
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+asyncJobID+"/apply?sync=true", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobFailed) {
+		t.Fatalf("expected failed job after rev bump, got %d %v", code, out)
+	}
+
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+asyncJobID+"/retry", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobApplying) {
+		t.Fatalf("expected 200 applying from async retry (>5 items), got %d %v", code, out)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var finalStatus string
+	for time.Now().Before(deadline) {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/library/jobs/"+asyncJobID, nil))
+		var dto model.LibraryJobDTO
+		_ = json.Unmarshal(rec.Body.Bytes(), &dto)
+		finalStatus = dto.Status
+		if finalStatus == string(model.LibraryJobComplete) || finalStatus == string(model.LibraryJobFailed) || finalStatus == string(model.LibraryJobPartial) {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if finalStatus != string(model.LibraryJobComplete) {
+		t.Fatalf("expected async retry complete, got %s", finalStatus)
+	}
+
+	// 2. Create a failed 6-item job, then POST /api/library/jobs/{id}/retry?sync=true -> returns complete immediately.
+	pathsSync := makeBatch("sync")
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs?sync=true", map[string]any{
+		"action":  "edit",
+		"paths":   pathsSync,
+		"changes": map[string]string{"album": "RetrySyncAlbum"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("submit sync batch: %d %v", code, out)
+	}
+	syncJobID, _ := out["id"].(string)
+	bumpAllRevisions("sync")
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+syncJobID+"/apply?sync=true", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobFailed) {
+		t.Fatalf("expected failed sync job after rev bump, got %d %v", code, out)
+	}
+	code, out = jsonCall(t, srv, http.MethodPost, "/api/library/jobs/"+syncJobID+"/retry?sync=true", map[string]any{})
+	if code != http.StatusOK || out["status"] != string(model.LibraryJobComplete) {
+		t.Fatalf("expected immediate complete with retry?sync=true, got %d %v", code, out)
+	}
+}
+
+type stubNavidromeDownloadGateway struct {
+	NavidromeGateway
+	songs       map[string]model.TrackDTO
+	albumTracks map[string][]model.TrackDTO
+	allTracks   []model.TrackDTO
+	mediaBytes  map[string][]byte
+	mediaCT     map[string]string
+}
+
+func (g *stubNavidromeDownloadGateway) GetSong(_ context.Context, ident string) (model.TrackDTO, error) {
+	id := strings.TrimPrefix(strings.TrimSpace(ident), "navidrome-")
+	if tr, ok := g.songs[id]; ok {
+		return tr, nil
+	}
+	return model.TrackDTO{}, model.NewError(model.ErrNotFound, http.StatusNotFound, "歌曲不存在")
+}
+
+func (g *stubNavidromeDownloadGateway) GetAlbum(_ context.Context, ident string) (any, error) {
+	tracks, ok := g.albumTracks[ident]
+	if !ok {
+		return nil, model.NewError(model.ErrNotFound, http.StatusNotFound, "专辑不存在")
+	}
+	return map[string]any{"tracks": tracks}, nil
+}
+
+func (g *stubNavidromeDownloadGateway) ListSongs(_ context.Context, offset, size int) (any, error) {
+	if offset >= len(g.allTracks) {
+		return map[string]any{"tracks": []model.TrackDTO{}, "has_more": false}, nil
+	}
+	end := offset + size
+	hasMore := true
+	if end >= len(g.allTracks) {
+		end = len(g.allTracks)
+		hasMore = false
+	}
+	return map[string]any{"tracks": g.allTracks[offset:end], "has_more": hasMore}, nil
+}
+
+func (g *stubNavidromeDownloadGateway) Search(_ context.Context, query string, offset int) (any, error) {
+	var matched []model.TrackDTO
+	for _, tr := range g.allTracks {
+		if strings.Contains(strings.ToLower(tr.Title+" "+tr.Artist), strings.ToLower(query)) {
+			matched = append(matched, tr)
+		}
+	}
+	const pageSize = 2
+	if offset >= len(matched) {
+		return map[string]any{"tracks": []model.TrackDTO{}, "has_more": false}, nil
+	}
+	end := offset + pageSize
+	hasMore := true
+	if end >= len(matched) {
+		end = len(matched)
+		hasMore = false
+	}
+	return map[string]any{"tracks": matched[offset:end], "has_more": hasMore}, nil
+}
+
+func (g *stubNavidromeDownloadGateway) OpenDownload(_ context.Context, ident, _ string) (int, http.Header, io.ReadCloser, error) {
+	id := strings.TrimPrefix(strings.TrimSpace(ident), "navidrome-")
+	data, ok := g.mediaBytes[id]
+	if !ok {
+		return 0, nil, nil, model.NewError(model.ErrNotFound, http.StatusNotFound, "媒体文件不可用")
+	}
+	ct := g.mediaCT[id]
+	if ct == "" {
+		ct = "audio/flac"
+	}
+	hdr := http.Header{
+		"Content-Type":   {ct},
+		"Content-Length": {fmt.Sprintf("%d", len(data))},
+	}
+	return http.StatusOK, hdr, io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func TestNavidromeDownloadAndArchiveHTTP(t *testing.T) {
+	codecFlac := "flac"
+	codecMP3 := "mp3"
+	gw := &stubNavidromeDownloadGateway{
+		songs: map[string]model.TrackDTO{
+			"s1": {ID: "navidrome-s1", Source: "navidrome", SourceID: "s1", Title: "晨风序曲", Artist: "林澈", Playback: model.PlaybackDTO{Codec: &codecFlac}},
+			"s2": {ID: "navidrome-s2", Source: "navidrome", SourceID: "s2", Title: "晨风序曲", Artist: "林澈", Playback: model.PlaybackDTO{Codec: &codecFlac}},
+			"s3": {ID: "navidrome-s3", Source: "navidrome", SourceID: "s3", Title: "Night Drive", Artist: "Neon", Playback: model.PlaybackDTO{Codec: &codecMP3}},
+			"s4": {ID: "navidrome-s4", Source: "navidrome", SourceID: "s4", Title: "Night Horizon", Artist: "Neon", Playback: model.PlaybackDTO{Codec: &codecMP3}},
+		},
+		albumTracks: map[string][]model.TrackDTO{
+			"al-1": {
+				{ID: "navidrome-s3", Source: "navidrome", SourceID: "s3", Title: "Night Drive", Artist: "Neon", Playback: model.PlaybackDTO{Codec: &codecMP3}},
+			},
+		},
+		allTracks: []model.TrackDTO{
+			{ID: "navidrome-s1", Source: "navidrome", SourceID: "s1", Title: "晨风序曲", Artist: "林澈", Playback: model.PlaybackDTO{Codec: &codecFlac}},
+			{ID: "navidrome-s3", Source: "navidrome", SourceID: "s3", Title: "Night Drive", Artist: "Neon", Playback: model.PlaybackDTO{Codec: &codecMP3}},
+			{ID: "navidrome-s4", Source: "navidrome", SourceID: "s4", Title: "Night Horizon", Artist: "Neon", Playback: model.PlaybackDTO{Codec: &codecMP3}},
+		},
+		mediaBytes: map[string][]byte{
+			"s1": []byte("FLAC-ONE"),
+			"s2": []byte("FLAC-TWO"),
+			"s3": []byte("MP3-THREE"),
+			"s4": []byte("MP3-FOUR"),
+		},
+		mediaCT: map[string]string{
+			"s1": "audio/flac",
+			"s2": "audio/flac",
+			"s3": "audio/mpeg",
+			"s4": "audio/mpeg",
+		},
+	}
+
+	srv, _, _ := newTestServer(t, func(d *Dependencies, _ string) {
+		d.Navidrome = gw
+	})
+
+	// 1. Single download sets safe attachment headers + nosniff + body.
+	recOne := httptest.NewRecorder()
+	srv.ServeHTTP(recOne, httptest.NewRequest(http.MethodGet, "/api/navidrome/download/s1", nil))
+	if recOne.Code != http.StatusOK {
+		t.Fatalf("GET /api/navidrome/download/s1 failed: %d %s", recOne.Code, recOne.Body.String())
+	}
+	if recOne.Body.String() != "FLAC-ONE" {
+		t.Fatalf("unexpected download body: %q", recOne.Body.String())
+	}
+	disp := recOne.Header().Get("Content-Disposition")
+	if !strings.HasPrefix(disp, "attachment;") || !strings.Contains(disp, "UTF-8''") || !strings.Contains(disp, ".flac") {
+		t.Fatalf("unexpected Content-Disposition: %q", disp)
+	}
+	if recOne.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected X-Content-Type-Options: nosniff, got %q", recOne.Header().Get("X-Content-Type-Options"))
+	}
+
+	// 2. Empty archive request -> 400.
+	code, _ := jsonCall(t, srv, http.MethodPost, "/api/navidrome/downloads/archive", map[string]any{})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on empty archive request, got %d", code)
+	}
+
+	// 3. > 500 tracks archive request -> 400 with exact cap message.
+	tooMany := make([]string, 501)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("song-%d", i)
+	}
+	code, out := jsonCall(t, srv, http.MethodPost, "/api/navidrome/downloads/archive", map[string]any{
+		"song_ids": tooMany,
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on >500 tracks, got %d %v", code, out)
+	}
+
+	// 4. song_ids archive: duplicate filename deduplication (" (2)") + failing song logged in _download_errors.txt.
+	reqBody, _ := json.Marshal(map[string]any{
+		"song_ids": []string{"s1", "s2", "missing-99"},
+	})
+	recZip := httptest.NewRecorder()
+	reqZip := httptest.NewRequest(http.MethodPost, "/api/navidrome/downloads/archive", bytes.NewReader(reqBody))
+	reqZip.Header.Set("Content-Type", "application/json")
+	reqZip.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recZip, reqZip)
+	if recZip.Code != http.StatusOK {
+		t.Fatalf("POST /api/navidrome/downloads/archive failed: %d %s", recZip.Code, recZip.Body.String())
+	}
+	if recZip.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("expected application/zip, got %q", recZip.Header().Get("Content-Type"))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(recZip.Body.Bytes()), int64(recZip.Body.Len()))
+	if err != nil {
+		t.Fatalf("open response zip: %v", err)
+	}
+	entries := make(map[string]string, len(zr.File))
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open zip entry %s: %v", f.Name, err)
+		}
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		entries[f.Name] = string(b)
+	}
+	if entries["林澈 - 晨风序曲.flac"] != "FLAC-ONE" {
+		t.Fatalf("expected first dup entry FLAC-ONE, got %+v", entries)
+	}
+	if entries["林澈 - 晨风序曲 (2).flac"] != "FLAC-TWO" {
+		t.Fatalf("expected second dup entry FLAC-TWO, got %+v", entries)
+	}
+	if !strings.Contains(entries["_download_errors.txt"], "missing-99") {
+		t.Fatalf("expected missing-99 in _download_errors.txt, got %q", entries["_download_errors.txt"])
+	}
+
+	// 5. album_id archive.
+	albumBody, _ := json.Marshal(map[string]any{"album_id": "al-1"})
+	recAlb := httptest.NewRecorder()
+	reqAlb := httptest.NewRequest(http.MethodPost, "/api/navidrome/downloads/archive", bytes.NewReader(albumBody))
+	reqAlb.Header.Set("Content-Type", "application/json")
+	reqAlb.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recAlb, reqAlb)
+	if recAlb.Code != http.StatusOK {
+		t.Fatalf("album archive failed: %d %s", recAlb.Code, recAlb.Body.String())
+	}
+	zAlb, err := zip.NewReader(bytes.NewReader(recAlb.Body.Bytes()), int64(recAlb.Body.Len()))
+	if err != nil || len(zAlb.File) != 1 || zAlb.File[0].Name != "Neon - Night Drive.mp3" {
+		t.Fatalf("unexpected album archive entries: err=%v files=%+v", err, zAlb)
+	}
+
+	// 6. all=true + query across paginated Search (note Search paginates 2 items per page? No, s3+s4 match query "Night", verify pagination works).
+	searchBody, _ := json.Marshal(map[string]any{"all": true, "query": "Night"})
+	recSearch := httptest.NewRecorder()
+	reqSearch := httptest.NewRequest(http.MethodPost, "/api/navidrome/downloads/archive", bytes.NewReader(searchBody))
+	reqSearch.Header.Set("Content-Type", "application/json")
+	reqSearch.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(recSearch, reqSearch)
+	if recSearch.Code != http.StatusOK {
+		t.Fatalf("search archive failed: %d %s", recSearch.Code, recSearch.Body.String())
+	}
+	zSearch, err := zip.NewReader(bytes.NewReader(recSearch.Body.Bytes()), int64(recSearch.Body.Len()))
+	if err != nil || len(zSearch.File) != 2 {
+		t.Fatalf("expected 2 tracks in search archive, got err=%v count=%d", err, len(zSearch.File))
+	}
+}

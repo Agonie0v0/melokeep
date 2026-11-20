@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,13 @@ func (g *stubNavidromeMediaGateway) ProxyCover(w http.ResponseWriter, r *http.Re
 func (g *stubNavidromeMediaGateway) ProxyStream(w http.ResponseWriter, r *http.Request, _ string) error {
 	http.ServeContent(w, r, "nav.wav", time.Unix(1700000000, 0), bytes.NewReader(g.streamBytes))
 	return nil
+}
+func (g *stubNavidromeMediaGateway) OpenDownload(_ context.Context, _ string, _ string) (int, http.Header, io.ReadCloser, error) {
+	hdr := http.Header{
+		"Content-Type":   {"audio/wav"},
+		"Content-Length": {strconv.Itoa(len(g.streamBytes))},
+	}
+	return http.StatusOK, hdr, io.NopCloser(bytes.NewReader(g.streamBytes)), nil
 }
 func (g *stubNavidromeMediaGateway) TestConnection(context.Context) (any, error) { return nil, nil }
 func (g *stubNavidromeMediaGateway) ScanStatus(context.Context) (any, error)     { return nil, nil }

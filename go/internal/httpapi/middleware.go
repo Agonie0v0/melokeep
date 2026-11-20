@@ -297,6 +297,7 @@ func isMediaStreamPath(rawPath string) bool {
 	}
 	if strings.HasPrefix(cleanPath, "/api/stream/") ||
 		strings.HasPrefix(cleanPath, "/api/navidrome/stream/") ||
+		strings.HasPrefix(cleanPath, "/api/navidrome/download/") ||
 		strings.HasPrefix(cleanPath, "/api/navidrome/cover/") {
 		return true
 	}

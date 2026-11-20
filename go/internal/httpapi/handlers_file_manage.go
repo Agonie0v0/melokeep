@@ -482,7 +482,7 @@ func (s *Server) handleBatchDeleteLibraryItems(w http.ResponseWriter, r *http.Re
 	}
 	var folderTargets []resolvedFolder
 	for _, item := range body.Folders {
-		vp, err := files.ValidateFolderPath(roots, item.Root, item.Folder, true)
+		vp, err := files.ValidateFolderPath(roots, item.Root, item.Folder, false)
 		if err != nil {
 			failures = append(failures, err.Error())
 			continue
@@ -508,32 +508,65 @@ func (s *Server) handleBatchDeleteLibraryItems(w http.ResponseWriter, r *http.Re
 
 	for _, item := range prunedFolders {
 		vp := item.vp
-		if err := files.VerifySubtreeNoSymlinks(vp.AbsPath); err != nil {
-			failures = append(failures, vp.RelPath+"："+err.Error())
-			continue
-		}
-		release, err := s.acquireFolderAssetLocks(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
-		if err != nil {
-			failures = append(failures, vp.RelPath+"："+err.Error())
-			continue
-		}
-		rmErr := removeDirRegularFilesOnly(vp.AbsPath)
-		if rmErr != nil {
-			release()
-			failures = append(failures, vp.RelPath+"："+rmErr.Error())
-			continue
-		}
-		if s.deps.Store != nil {
-			ids, dErr := s.deps.Store.SoftDeleteAssetsByFolder(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
-			if dErr != nil {
+		info, statErr := os.Lstat(vp.AbsPath)
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				failures = append(failures, vp.RelPath+"：目标不是合法的真实目录")
+				continue
+			}
+			if err := files.VerifySubtreeNoSymlinks(vp.AbsPath); err != nil {
+				failures = append(failures, vp.RelPath+"："+err.Error())
+				continue
+			}
+			release, err := s.acquireFolderAssetLocks(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
+			if err != nil {
+				failures = append(failures, vp.RelPath+"："+err.Error())
+				continue
+			}
+			rmErr := removeDirRegularFilesOnly(vp.AbsPath)
+			if rmErr != nil {
 				release()
+				failures = append(failures, vp.RelPath+"："+rmErr.Error())
+				continue
+			}
+			if s.deps.Store != nil {
+				ids, dErr := s.deps.Store.SoftDeleteAssetsByFolder(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
+				if dErr != nil {
+					release()
+					failures = append(failures, vp.RelPath+"："+dErr.Error())
+					continue
+				}
+				deletedAssetIDs = append(deletedAssetIDs, ids...)
+			}
+			release()
+			deletedFolders++
+			continue
+		}
+		if !errors.Is(statErr, fs.ErrNotExist) {
+			failures = append(failures, vp.RelPath+"：读取目录失败")
+			continue
+		}
+		var ids []string
+		if s.deps.Store != nil {
+			release, err := s.acquireFolderAssetLocks(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
+			if err != nil {
+				failures = append(failures, vp.RelPath+"："+err.Error())
+				continue
+			}
+			var dErr error
+			ids, dErr = s.deps.Store.SoftDeleteAssetsByFolder(r.Context(), vp.Root.ID, vp.Root.CaseMode, vp.RelPath)
+			release()
+			if dErr != nil {
 				failures = append(failures, vp.RelPath+"："+dErr.Error())
 				continue
 			}
 			deletedAssetIDs = append(deletedAssetIDs, ids...)
 		}
-		release()
-		deletedFolders++
+		if len(ids) > 0 {
+			deletedFolders++
+			continue
+		}
+		failures = append(failures, vp.RelPath+"：not_found: 文件夹不存在")
 	}
 
 	for _, rawPath := range body.Files {
@@ -581,7 +614,18 @@ func (s *Server) handleBatchDeleteLibraryItems(w http.ResponseWriter, r *http.Re
 
 	trackIDs := s.cleanupDeletedAssetRefs(r.Context(), deletedAssetIDs)
 	if deletedFiles == 0 && deletedFolders == 0 && len(failures) > 0 {
-		writeError(w, http.StatusConflict, strings.Join(failures, "；"))
+		status := http.StatusConflict
+		allNotFound := true
+		for _, f := range failures {
+			if !strings.Contains(f, "not_found:") {
+				allNotFound = false
+				break
+			}
+		}
+		if allNotFound {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, strings.Join(failures, "；"))
 		return
 	}
 	s.pushLog("info", "批量删除完成：文件 "+itoa(deletedFiles)+" 个，文件夹 "+itoa(deletedFolders)+" 个", "library", "")

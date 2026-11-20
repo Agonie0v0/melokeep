@@ -2486,3 +2486,247 @@ func TestLibraryApplyAsyncBackgroundCompletionAndCancel(t *testing.T) {
 		}
 	})
 }
+
+func TestLibraryF2ScanRevisionSyncAndRetryRecovery(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	t.Run("ensureAssetForPath records non-zero IndexedGeneration", func(t *testing.T) {
+		tagger := newMemTagger()
+		st, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, nil, nil)
+		if _, err := st.AdvanceScanGeneration(ctx, root.ID, 7, true, ""); err != nil {
+			t.Fatalf("AdvanceScanGeneration: %v", err)
+		}
+		p := filepath.Join(root.CanonicalPath, "gen_song.flac")
+		_, _ = files.WriteFileDurable(p, []byte("GEN7"))
+		tagger.tags[p] = helper.AudioTagData{Path: p, Tags: map[string]string{"title": "Gen 7"}, Editable: true}
+
+		if _, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:   []string{p},
+			Action:  "edit",
+			Changes: map[string]string{"artist": "G7"},
+		}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		pathKey := files.ComputePathKey(root.CaseMode, "gen_song.flac")
+		asset, ok, err := st.GetAssetByRootAndPathKey(ctx, root.ID, pathKey)
+		if err != nil || !ok {
+			t.Fatalf("GetAssetByRootAndPathKey: ok=%v err=%v", ok, err)
+		}
+		if asset.IndexedGeneration != 7 {
+			t.Fatalf("expected IndexedGeneration=7, got %d", asset.IndexedGeneration)
+		}
+	})
+
+	t.Run("SubmitAsync and Review reconcile ExpectedRev when disk unchanged", func(t *testing.T) {
+		tagger := newMemTagger()
+		var stRef *store.Store
+		var rootRef files.Root
+		var seededPaths []string
+		var bumpOnce sync.Once
+
+		mbSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ws/2/recording" {
+				bumpOnce.Do(func() {
+					// Simulate concurrent indexer/scan touching DB revision while files on disk remain unchanged.
+					for _, sp := range seededPaths {
+						rel, _ := filepath.Rel(rootRef.CanonicalPath, sp)
+						rel = filepath.ToSlash(rel)
+						pk := files.ComputePathKey(rootRef.CaseMode, rel)
+						cur, ok, err := stRef.GetAssetByRootAndPathKey(ctx, rootRef.ID, pk)
+						if err == nil && ok {
+							_, _ = stRef.UpsertAsset(ctx, cur, cur.Revision, false)
+						}
+					}
+				})
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"recordings": []map[string]any{
+						{
+							"id":     "rec-f2-1",
+							"title":  "Sync Track (Live Version)",
+							"length": 200000,
+							"artist-credit": []map[string]any{
+								{"name": "Sync Artist", "joinphrase": ""},
+							},
+							"releases": []map[string]any{
+								{"id": "rel-f2-1", "title": "Sync Album", "date": "2025-01-01"},
+							},
+						},
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer mbSrv.Close()
+
+		st, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{
+			MusicBrainzBaseURL: mbSrv.URL + "/ws/2",
+			CoverArtBaseURL:    mbSrv.URL + "/caa",
+			ITunesBaseURL:      mbSrv.URL + "/itunes",
+			MBLimitInterval:    time.Millisecond,
+		}, nil, nil)
+		stRef = st
+		rootRef = root
+		if _, err := st.AdvanceScanGeneration(ctx, root.ID, 1, true, ""); err != nil {
+			t.Fatalf("AdvanceScanGeneration: %v", err)
+		}
+
+		for i := 0; i < 4; i++ {
+			p := filepath.Join(root.CanonicalPath, fmt.Sprintf("f2_%02d.flac", i))
+			_, _ = files.WriteFileDurable(p, []byte(fmt.Sprintf("AUDIO-%d", i)))
+			stInfo, err := os.Lstat(p)
+			if err != nil {
+				t.Fatalf("lstat: %v", err)
+			}
+			rel := fmt.Sprintf("f2_%02d.flac", i)
+			pk := files.ComputePathKey(root.CaseMode, rel)
+			if _, err := st.UpsertAsset(ctx, store.AssetRecord{
+				RootID: root.ID, RelPath: rel, PathKey: pk, Folder: ".", Name: rel,
+				Status: "active", Editable: true, Size: stInfo.Size(), MTimeNS: stInfo.ModTime().UnixNano(),
+				Title: fmt.Sprintf("Sync Track %d", i), Artist: "Sync Artist",
+			}, 0, true); err != nil {
+				t.Fatalf("seed asset %d: %v", i, err)
+			}
+			tagger.tags[p] = helper.AudioTagData{
+				Path:     p,
+				Tags:     map[string]string{"title": fmt.Sprintf("Sync Track %d", i), "artist": "Sync Artist"},
+				Duration: 200,
+				Editable: true,
+			}
+			seededPaths = append(seededPaths, p)
+		}
+
+		job, err := svc.SubmitAsync(ctx, admin, SubmitRequest{
+			Paths:   seededPaths,
+			Action:  "scrape",
+			Sources: []string{"musicbrainz"},
+		})
+		if err != nil {
+			t.Fatalf("SubmitAsync: %v", err)
+		}
+		scanned := pollLibraryJobUntil(t, svc, ctx, job.ID, 8*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status != string(model.LibraryJobScanning)
+		})
+
+		// Also bump DB revision again after SubmitAsync finished before Review+Apply.
+		choices := make(map[string]string, len(scanned.Items))
+		for _, it := range scanned.Items {
+			rel, _ := filepath.Rel(root.CanonicalPath, it.OriginalPath)
+			pk := files.ComputePathKey(root.CaseMode, filepath.ToSlash(rel))
+			cur, ok, err := st.GetAssetByRootAndPathKey(ctx, root.ID, pk)
+			if err != nil || !ok {
+				t.Fatalf("lookup seeded asset: ok=%v err=%v", ok, err)
+			}
+			if _, err := st.UpsertAsset(ctx, cur, cur.Revision, false); err != nil {
+				t.Fatalf("bump revision before review: %v", err)
+			}
+			if it.Status == string(model.LibraryItemNeedsReview) {
+				choices[it.ID] = "existing"
+			}
+		}
+		if len(choices) > 0 {
+			if _, err := svc.Review(ctx, admin, job.ID, choices); err != nil {
+				t.Fatalf("Review: %v", err)
+			}
+		}
+		applied, err := svc.Apply(ctx, admin, job.ID)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if applied.Status != string(model.LibraryJobComplete) {
+			t.Fatalf("expected all items complete without false revision conflict, got status=%s detail=%q items=%+v", applied.Status, applied.Detail, applied.Items)
+		}
+	})
+
+	t.Run("Retry and RetryAsync refresh stale revisions and preserve locks", func(t *testing.T) {
+		tagger := newMemTagger()
+		st, _, svc, root := setupLibraryTestEnv(t, tagger, ScraperOptions{}, nil, nil)
+
+		var paths []string
+		for i := 0; i < 6; i++ {
+			p := filepath.Join(root.CanonicalPath, fmt.Sprintf("retry_%02d.flac", i))
+			_, _ = files.WriteFileDurable(p, []byte(fmt.Sprintf("RETRY-%d", i)))
+			tagger.tags[p] = helper.AudioTagData{Path: p, Tags: map[string]string{"title": fmt.Sprintf("Retry %d", i)}, Editable: true}
+			paths = append(paths, p)
+		}
+
+		// Sync Retry on 1-item partial failure.
+		job1, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:   paths[:2],
+			Action:  "edit",
+			Changes: map[string]string{"album": "RecoveredAlbum"},
+		})
+		if err != nil {
+			t.Fatalf("submit job1: %v", err)
+		}
+		// Force conflict on item 0 only by advancing DB revision before Apply.
+		pk0 := files.ComputePathKey(root.CaseMode, "retry_00.flac")
+		a0, ok, err := st.GetAssetByRootAndPathKey(ctx, root.ID, pk0)
+		if err != nil || !ok {
+			t.Fatalf("get a0: ok=%v err=%v", ok, err)
+		}
+		if _, err := st.UpsertAsset(ctx, a0, a0.Revision, false); err != nil {
+			t.Fatalf("bump a0 rev: %v", err)
+		}
+
+		partial, err := svc.Apply(ctx, admin, job1.ID)
+		if err != nil {
+			t.Fatalf("Apply job1: %v", err)
+		}
+		if partial.Status != string(model.LibraryJobPartial) || partial.Items[0].Status != string(model.LibraryItemFailed) {
+			t.Fatalf("expected item 0 failed and job partial, got status=%s item0=%+v", partial.Status, partial.Items[0])
+		}
+		retried, err := svc.Retry(ctx, admin, job1.ID)
+		if err != nil {
+			t.Fatalf("Retry job1: %v", err)
+		}
+		if retried.Status != string(model.LibraryJobComplete) {
+			t.Fatalf("expected job1 complete after Retry, got %s (%s)", retried.Status, retried.Detail)
+		}
+		afterA0, _, _ := st.GetAssetByRootAndPathKey(ctx, root.ID, pk0)
+		if !slices.Contains(afterA0.LockedFields, "album") {
+			t.Fatalf("expected album lock preserved after Retry, got %v", afterA0.LockedFields)
+		}
+
+		// Async RetryAsync on 6 failed items.
+		job2, err := svc.Submit(ctx, admin, SubmitRequest{
+			Paths:   paths,
+			Action:  "edit",
+			Changes: map[string]string{"genre": "Ambient"},
+		})
+		if err != nil {
+			t.Fatalf("submit job2: %v", err)
+		}
+		for i := range paths {
+			pk := files.ComputePathKey(root.CaseMode, fmt.Sprintf("retry_%02d.flac", i))
+			cur, ok, err := st.GetAssetByRootAndPathKey(ctx, root.ID, pk)
+			if err != nil || !ok {
+				t.Fatalf("get retry asset %d: ok=%v err=%v", i, ok, err)
+			}
+			if _, err := st.UpsertAsset(ctx, cur, cur.Revision, false); err != nil {
+				t.Fatalf("bump retry asset %d rev: %v", i, err)
+			}
+		}
+		failed2, err := svc.Apply(ctx, admin, job2.ID)
+		if err != nil {
+			t.Fatalf("Apply job2: %v", err)
+		}
+		if failed2.Status != string(model.LibraryJobFailed) {
+			t.Fatalf("expected job2 failed before RetryAsync, got %s", failed2.Status)
+		}
+		asyncRes, err := svc.RetryAsync(ctx, admin, job2.ID)
+		if err != nil {
+			t.Fatalf("RetryAsync: %v", err)
+		}
+		if asyncRes.Status != string(model.LibraryJobApplying) {
+			t.Fatalf("expected RetryAsync immediate applying status, got %s", asyncRes.Status)
+		}
+		recovered := pollLibraryJobUntil(t, svc, ctx, job2.ID, 8*time.Second, func(j model.LibraryJobDTO) bool {
+			return j.Status == string(model.LibraryJobComplete) || j.Status == string(model.LibraryJobFailed) || j.Status == string(model.LibraryJobPartial)
+		})
+		if recovered.Status != string(model.LibraryJobComplete) {
+			t.Fatalf("expected RetryAsync complete, got %s (%s)", recovered.Status, recovered.Detail)
+		}
+	})
+}

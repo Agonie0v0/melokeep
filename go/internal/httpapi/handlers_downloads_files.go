@@ -186,7 +186,75 @@ func (s *Server) queryLibraryFilesPage(ctx context.Context, q store.LibraryFiles
 	}, nil
 }
 
+type libraryRefreshResult struct {
+	RootsScanned   int      `json:"roots_scanned"`
+	ScannedFiles   int      `json:"scanned_files"`
+	UnchangedFiles int      `json:"unchanged_files"`
+	UpdatedOrNew   int      `json:"updated_or_new"`
+	MarkedMissing  int64    `json:"marked_missing"`
+	UnhealthyRoots []string `json:"unhealthy_roots"`
+}
+
+func (s *Server) rescanLibraryRoots(ctx context.Context) (libraryRefreshResult, error) {
+	res := libraryRefreshResult{
+		UnhealthyRoots: []string{},
+	}
+	if s.deps.Indexer == nil || s.deps.Store == nil {
+		return res, model.NewError(model.ErrConflict, http.StatusServiceUnavailable, "曲库索引服务未初始化")
+	}
+	roots, err := s.deps.Store.ListRoots(ctx)
+	if err != nil {
+		return res, err
+	}
+	for _, rt := range roots {
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		if !rt.Enabled {
+			continue
+		}
+		res.RootsScanned++
+		stats, scanErr := s.deps.Indexer.ScanRoot(ctx, rt)
+		if scanErr != nil {
+			res.UnhealthyRoots = append(res.UnhealthyRoots, rt.ID)
+			s.pushLog("warning", fmt.Sprintf("手动刷新曲库目录失败 (%s): %v", rt.ID, scanErr), "library", rt.ID)
+			continue
+		}
+		if !stats.Healthy {
+			res.UnhealthyRoots = append(res.UnhealthyRoots, rt.ID)
+		}
+		res.ScannedFiles += stats.ScannedFiles
+		res.UnchangedFiles += stats.UnchangedFiles
+		res.UpdatedOrNew += stats.UpdatedOrNew
+		res.MarkedMissing += stats.MarkedMissing
+	}
+	return res, nil
+}
+
+func (s *Server) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
+	res, err := s.rescanLibraryRoots(r.Context())
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	s.pushLog(
+		"info",
+		fmt.Sprintf("曲库手动刷新完成：扫描 %d 个目录，共 %d 首（新增/更新 %d，未变化 %d，标记缺失 %d）",
+			res.RootsScanned, res.ScannedFiles, res.UpdatedOrNew, res.UnchangedFiles, res.MarkedMissing),
+		"library",
+		"",
+	)
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) handleLibraryFiles(w http.ResponseWriter, r *http.Request) {
+	if rawRescan := strings.TrimSpace(r.URL.Query().Get("rescan")); rawRescan == "1" || strings.EqualFold(rawRescan, "true") {
+		if s.deps.Indexer != nil && s.deps.Store != nil {
+			if _, err := s.rescanLibraryRoots(r.Context()); err != nil {
+				s.pushLog("warning", "列表刷新前重扫曲库失败: "+err.Error(), "library", "")
+			}
+		}
+	}
 	q := store.LibraryFilesQuery{
 		Limit:  100,
 		Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),
