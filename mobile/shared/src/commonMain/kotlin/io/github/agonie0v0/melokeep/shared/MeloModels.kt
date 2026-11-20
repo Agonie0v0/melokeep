@@ -322,6 +322,16 @@ data class MeloLibraryFilesPage(
 )
 
 @Serializable
+data class MeloLibraryRefreshResult(
+	@SerialName("roots_scanned") val rootsScanned: Int = 0,
+	@SerialName("scanned_files") val scannedFiles: Int = 0,
+	@SerialName("unchanged_files") val unchangedFiles: Int = 0,
+	@SerialName("updated_or_new") val updatedOrNew: Int = 0,
+	@SerialName("marked_missing") val markedMissing: Int = 0,
+	@SerialName("unhealthy_roots") val unhealthyRoots: List<String> = emptyList(),
+)
+
+@Serializable
 data class MeloMetadataCandidate(
 	val id: String = "",
 	val source: String = "",

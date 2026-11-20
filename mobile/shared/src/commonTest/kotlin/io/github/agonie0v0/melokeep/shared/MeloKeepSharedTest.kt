@@ -2000,6 +2000,128 @@ class MeloKeepSharedTest {
 		controllerScope.cancel()
 		client.close()
 	}
+
+	@Test
+	fun refreshLibraryApiAndStudioControllerReloadWorkAndHandleErrors() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		var refreshCalledCount = 0
+		var filesCalledCount = 0
+		var refreshShouldFail = false
+		var includeUnhealthy = false
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			when {
+				request.method == HttpMethod.Post && path == "/api/library/refresh" -> {
+					refreshCalledCount++
+					assertEquals("1", request.headers["X-MeloKeep-Request"])
+					assertEquals("Bearer tok-refresh", request.headers[HttpHeaders.Authorization])
+					if (refreshShouldFail) {
+						respond(
+							content = """{"detail":"曲库正在扫描中"}""",
+							status = HttpStatusCode.Conflict,
+							headers = jsonHeaders,
+						)
+					} else {
+						val unhealthyJson = if (includeUnhealthy) """["/offline/nas"]""" else "[]"
+						respond(
+							content = """{"roots_scanned":1,"scanned_files":42,"unchanged_files":40,"updated_or_new":2,"marked_missing":1,"unhealthy_roots":$unhealthyJson}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					}
+				}
+				request.method == HttpMethod.Get && path == "/api/library/files" -> {
+					filesCalledCount++
+					assertEquals("1", request.headers["X-MeloKeep-Request"])
+					assertEquals("Bearer tok-refresh", request.headers[HttpHeaders.Authorization])
+					respond(
+						content = """{"items":[{"path":"asset:new1","name":"new1.flac","size":1024,"root":"/music","folder":"Fresh","track":{"id":"local-new1","source":"local","source_id":"new1","title":"New Track","artist":"Artist","album":"Fresh","duration":200.0,"cover":"/api/files/cover?path=asset%3Anew1","qualities":[],"playback":{"state":"ready","url":"/api/files/audio?path=asset%3Anew1"}}}],"next_cursor":null,"index_revision":99,"indexing":false,"folders":[{"root":"/music","folder":"Fresh"}]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloStudioController(client, controllerScope)
+
+		// Unconfigured / unauthenticated returns failure immediately without calling API
+		var unauthResult: Result<MeloLibraryRefreshResult>? = null
+		controller.refreshLibraryAndReload { unauthResult = it }
+		assertNotNull(unauthResult)
+		assertTrue(unauthResult!!.isFailure)
+		assertEquals(0, refreshCalledCount)
+
+		// Configure authenticated session
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-refresh",
+			tokenId = "tid-refresh",
+			mediaToken = "1800000000.sig",
+			mediaTokenExpiresAt = 1800000000L,
+			authEnabled = true,
+		)
+
+		// Direct API test
+		val directRes = client.refreshLibrary()
+		assertEquals(1, directRes.rootsScanned)
+		assertEquals(42, directRes.scannedFiles)
+		assertEquals(40, directRes.unchangedFiles)
+		assertEquals(2, directRes.updatedOrNew)
+		assertEquals(1, directRes.markedMissing)
+		assertTrue(directRes.unhealthyRoots.isEmpty())
+
+		// Controller refreshLibraryAndReload with unhealthyRoots reloads files and sets noticeMessage
+		includeUnhealthy = true
+		var successResult: Result<MeloLibraryRefreshResult>? = null
+		controller.refreshLibraryAndReload(query = "New", folder = "Fresh") {
+			successResult = it
+		}
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					!it.filesLoading &&
+						it.libraryFiles.size == 1 &&
+						successResult != null
+				}
+			}
+		}
+		assertTrue(successResult!!.isSuccess)
+		assertEquals(2, refreshCalledCount)
+		assertEquals(1, filesCalledCount)
+		assertEquals("New", controller.state.value.fileQuery)
+		assertEquals("Fresh", controller.state.value.currentFolder)
+		assertEquals(listOf("Fresh"), controller.state.value.libraryFolders.map { it.folder })
+		assertEquals("local-new1", controller.state.value.libraryFiles.single().track?.id)
+		assertTrue(
+			controller.state.value.noticeMessage?.contains("已刷新曲库：共 42 首（新增/变更 2，移除 1）") == true
+		)
+		assertTrue(controller.state.value.noticeMessage?.contains("/offline/nas") == true)
+
+		// Controller failure surfaces errorMessage and invokes onCompleted failure
+		refreshShouldFail = true
+		var failResult: Result<MeloLibraryRefreshResult>? = null
+		controller.refreshLibraryAndReload { failResult = it }
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first {
+					!it.filesLoading &&
+						it.errorMessage == "曲库正在扫描中" &&
+						failResult != null
+				}
+			}
+		}
+		assertTrue(failResult!!.isFailure)
+
+		controllerScope.cancel()
+		client.close()
+	}
 }
 
 class MeloSourceLabelRegistryTest {

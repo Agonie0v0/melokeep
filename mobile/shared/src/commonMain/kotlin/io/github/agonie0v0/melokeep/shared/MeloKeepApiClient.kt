@@ -436,6 +436,13 @@ class MeloKeepApiClient(
 		)
 	}
 
+	suspend fun refreshLibrary(): MeloLibraryRefreshResult {
+		val response = httpClient.post(buildUrl("/api/library/refresh")) {
+			applyMeloHeaders()
+		}
+		return decodeResponse(response)
+	}
+
 	suspend fun getLibraryJobs(
 		offset: Int = 0,
 		size: Int = 30,

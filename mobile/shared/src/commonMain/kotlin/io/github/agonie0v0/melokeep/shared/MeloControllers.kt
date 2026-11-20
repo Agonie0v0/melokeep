@@ -838,33 +838,42 @@ class MeloStudioController(
 		reset: Boolean = true,
 	) {
 		if (!apiClient.settingsStore.currentConfig().isConfigured) return
-		val cleanQuery = query.orEmpty()
-		val cursor = if (reset) null else _state.value.nextCursor
 		scope.launch {
-			_state.update {
-				it.copy(
-					fileQuery = cleanQuery,
-					currentFolder = folder,
-					filesLoading = true,
-					errorMessage = null,
-				)
-			}
+			fetchLibraryFilesInternal(
+				query = query,
+				folder = folder,
+				reset = reset,
+			)
+		}
+	}
+
+	fun refreshLibraryAndReload(
+		query: String? = _state.value.fileQuery,
+		folder: String? = _state.value.currentFolder,
+		onCompleted: ((Result<MeloLibraryRefreshResult>) -> Unit)? = null,
+	) {
+		if (!apiClient.settingsStore.currentConfig().isAuthenticated) {
+			onCompleted?.invoke(Result.failure(MeloApiException(0, "尚未配置或未登录 MeloKeep 服务")))
+			return
+		}
+		scope.launch {
+			_state.update { it.copy(filesLoading = true, errorMessage = null) }
 			try {
-				val page = apiClient.getLibraryFiles(
-					cursor = cursor,
-					limit = 100,
-					query = cleanQuery.takeIf { it.isNotBlank() },
-					folder = folder?.takeIf { it.isNotBlank() },
-				)
-				_state.update { current ->
-					val merged = if (reset) page.items else current.libraryFiles + page.items
-					current.copy(
-						libraryFiles = merged,
-						libraryFolders = if (page.folders.isNotEmpty() || reset) page.folders else current.libraryFolders,
-						nextCursor = page.nextCursor,
-						filesLoading = false,
+				val res = apiClient.refreshLibrary()
+				val unhealthyNote = res.unhealthyRoots.takeIf { it.isNotEmpty() }
+					?.let { "（${it.size} 个目录不可用：${it.joinToString("、")}）" }
+					.orEmpty()
+				_state.update {
+					it.copy(
+						noticeMessage = "已刷新曲库：共 ${res.scannedFiles} 首（新增/变更 ${res.updatedOrNew}，移除 ${res.markedMissing}）$unhealthyNote",
 					)
 				}
+				fetchLibraryFilesInternal(
+					query = query,
+					folder = folder,
+					reset = true,
+				)
+				onCompleted?.invoke(Result.success(res))
 			} catch (e: CancellationException) {
 				_state.update { it.copy(filesLoading = false) }
 				throw e
@@ -872,9 +881,54 @@ class MeloStudioController(
 				_state.update {
 					it.copy(
 						filesLoading = false,
-						errorMessage = e.message ?: "加载曲库文件失败",
+						errorMessage = e.message ?: "刷新曲库失败",
 					)
 				}
+				onCompleted?.invoke(Result.failure(e))
+			}
+		}
+	}
+
+	private suspend fun fetchLibraryFilesInternal(
+		query: String?,
+		folder: String?,
+		reset: Boolean,
+	) {
+		val cleanQuery = query.orEmpty()
+		val cursor = if (reset) null else _state.value.nextCursor
+		_state.update {
+			it.copy(
+				fileQuery = cleanQuery,
+				currentFolder = folder,
+				filesLoading = true,
+				errorMessage = null,
+			)
+		}
+		try {
+			val page = apiClient.getLibraryFiles(
+				cursor = cursor,
+				limit = 100,
+				query = cleanQuery.takeIf { it.isNotBlank() },
+				folder = folder?.takeIf { it.isNotBlank() },
+			)
+			_state.update { current ->
+				val merged = if (reset) page.items else current.libraryFiles + page.items
+				current.copy(
+					libraryFiles = merged,
+					libraryFolders = if (page.folders.isNotEmpty() || reset) page.folders else current.libraryFolders,
+					nextCursor = page.nextCursor,
+					filesLoading = false,
+				)
+			}
+		} catch (e: CancellationException) {
+			_state.update { it.copy(filesLoading = false) }
+			throw e
+		} catch (e: Throwable) {
+			_state.update {
+				it.copy(
+					filesLoading = false,
+					errorMessage = e.message ?: "加载曲库文件失败",
+				)
 			}
 		}
 	}
