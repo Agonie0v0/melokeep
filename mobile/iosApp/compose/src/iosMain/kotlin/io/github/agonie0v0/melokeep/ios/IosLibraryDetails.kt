@@ -2005,7 +2005,7 @@ fun IosDailyMixSheet(
 			Spacer(Modifier.height(10.dp))
 			}
 
-			AnimatedVisibility(
+			androidx.compose.animation.AnimatedVisibility(
 				visible = multiSelecting && tracks.isNotEmpty(),
 				enter = slideInVertically { it } + fadeIn(),
 				exit = slideOutVertically { it } + fadeOut(),
