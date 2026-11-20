@@ -21,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.dropUnlessResumed
@@ -103,9 +105,13 @@ fun LyricsScreenToolbar(
 					TopBarButton(onClick = onOpenStyleSheet) {
 						Text(
 							text = "Aa",
+							textAlign = TextAlign.Center,
+							maxLines = 1,
+							softWrap = false,
 							style = MaterialTheme.typography.titleSmall.copy(
 								fontWeight = FontWeight.Bold,
-								fontSize = 15.sp
+								fontSize = 15.sp,
+								platformStyle = PlatformTextStyle(includeFontPadding = false)
 							)
 						)
 					}

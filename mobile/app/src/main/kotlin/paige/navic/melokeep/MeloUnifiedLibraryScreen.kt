@@ -242,11 +242,12 @@ fun MeloUnifiedLibraryScreen(
 	// 仅「文件夹」子栏目沿用目录过滤，其余子栏目始终基于根目录全量文件聚合
 	val folderArg = if (localSubTab == LibraryLocalSubTab.FOLDERS) studioState.currentFolder else null
 	val reloadLocalFiles: () -> Unit = {
-		studioController.loadLibraryFiles(
+		studioController.refreshLibraryAndReload(
 			query = studioState.fileQuery,
-			folder = folderArg,
-			reset = true
-		)
+			folder = folderArg
+		) {
+			localController.refreshAll()
+		}
 	}
 
 	LaunchedEffect(isNavidromeLoggedIn, isMeloConnected) {

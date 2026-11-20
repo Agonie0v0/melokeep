@@ -18,11 +18,13 @@ import org.koin.core.component.KoinComponent
 import org.koin.dsl.module
 import paige.navic.di.ActivityProvider
 import paige.navic.di.initKoin
+import paige.navic.util.CredentialEncryptor
 import kotlin.system.exitProcess
 
 class Application : android.app.Application(), KoinComponent {
 	override fun onCreate() {
 		super.onCreate()
+		CredentialEncryptor.init(this)
 
 		if (isCrashProcess()) {
 			return

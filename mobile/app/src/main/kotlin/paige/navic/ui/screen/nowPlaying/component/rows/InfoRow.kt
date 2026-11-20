@@ -30,6 +30,7 @@ import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.common.MarqueeText
 import paige.navic.ui.component.common.SmallRatingRow
 import paige.navic.ui.navigation.Screen
+import paige.navic.ui.screen.nowPlaying.component.controls.NowPlayingDownloadButton
 import paige.navic.ui.screen.nowPlaying.component.controls.NowPlayingMoreButton
 import paige.navic.ui.screen.nowPlaying.component.controls.NowPlayingStarButton
 import paige.navic.ui.util.InlineExplicitIconLarge
@@ -136,6 +137,7 @@ fun NowPlayingInfoRow(
 				songIsStarred = songIsStarred,
 				onSetSongIsStarred = onSetSongIsStarred
 			)
+			NowPlayingDownloadButton()
 			NowPlayingMoreButton(
 				songRating = songRating,
 				onSetSongRating = onSetSongRating

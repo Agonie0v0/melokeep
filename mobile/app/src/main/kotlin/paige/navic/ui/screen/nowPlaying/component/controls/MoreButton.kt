@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -22,12 +23,19 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import paige.navic.R
+import paige.navic.database.entity.DownloadStatus
 import paige.navic.di.LocalNavStack
+import paige.navic.di.LocalSnackBarState
+import paige.navic.domain.manager.session.DownloadManager
 import paige.navic.domain.model.DomainPlaylist
+import paige.navic.melokeep.MeloTrackMapper
 import paige.navic.playback.MediaPlayer
+import paige.navic.ui.component.dialog.DeleteDownloadTarget
 import paige.navic.ui.component.dialog.ShareDialog
+import paige.navic.ui.component.dialog.rememberDownloadDeletionHandler
 import paige.navic.ui.component.sheet.SleepTimerSheet
 import paige.navic.ui.component.sheet.SongSheet
 import paige.navic.ui.icons.Icons
@@ -44,8 +52,16 @@ fun NowPlayingMoreButton(
 ) {
 	val backStack = LocalNavStack.current
 	val player = koinInject<MediaPlayer>()
+	val downloadManager = koinInject<DownloadManager>()
+	val snackBarState = LocalSnackBarState.current
+	val deletionHandler = rememberDownloadDeletionHandler()
+	val scope = rememberCoroutineScope()
 	val playerState by player.uiState.collectAsStateWithLifecycle()
+	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(initialValue = emptyList())
 	val song = playerState.currentSong
+	val download = remember(song?.id, allDownloads) {
+		song?.let { current -> allDownloads.firstOrNull { it.songId == current.id } }
+	}
 	var expanded by remember { mutableStateOf(false) }
 	var sleepTimerSheetShown by rememberSaveable { mutableStateOf(false) }
 	var playlistDialogShown by rememberSaveable { mutableStateOf(false) }
@@ -94,6 +110,25 @@ fun NowPlayingMoreButton(
 				},
 				rating = songRating,
 				onSetRating = onSetSongRating,
+				downloadStatus = download?.status ?: DownloadStatus.NOT_DOWNLOADED,
+				onDownload = {
+					if (song.isExternal || MeloTrackMapper.isMeloSongId(song.id)) {
+						downloadManager.downloadExternalSong(song)
+					} else {
+						downloadManager.downloadSong(song.id)
+					}
+					scope.launch {
+						snackBarState.currentSnackbarData?.dismiss()
+						snackBarState.showSnackbar("已加入离线下载：${song.title}")
+					}
+				},
+				onCancelDownload = {
+					downloadManager.cancelDownload(song.id)
+				},
+				onDeleteDownload = {
+					expanded = false
+					deletionHandler.requestDelete(DeleteDownloadTarget.Single(song.id, song.title))
+				},
 				showSleepTimer = true,
 				onSleepTimer = {
 					expanded = false

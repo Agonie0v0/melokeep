@@ -314,10 +314,7 @@ internal fun LibraryLocalSection(
 				onDownloadSong = downloadOne,
 				onCancelSong = cancelOne,
 				onDeleteOffline = deleteOne,
-				onRefresh = {
-					localController.refreshAll()
-					onRefreshFiles()
-				}
+				onRefresh = onRefreshFiles
 			)
 
 			LibraryLocalSubTab.SONGS -> LocalTrackListView(
@@ -822,6 +819,7 @@ private fun LocalOverviewContent(
 				)
 				IconButton(
 					onClick = onRefresh,
+					enabled = !filesLoading,
 					modifier = Modifier.size(32.dp)
 				) {
 					Icon(

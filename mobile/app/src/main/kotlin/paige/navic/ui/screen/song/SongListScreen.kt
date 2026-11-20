@@ -51,6 +51,7 @@ import paige.navic.R
 import paige.navic.R.string.info_no_songs
 import paige.navic.di.LocalBottomBarScrollManager
 import paige.navic.di.LocalSizeClass
+import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
 import paige.navic.domain.model.DomainSong
@@ -75,6 +76,7 @@ import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Check
 import paige.navic.ui.icons.outlined.Checklist
 import paige.navic.ui.icons.outlined.Close
+import paige.navic.ui.icons.outlined.Download
 import paige.navic.ui.icons.outlined.Queue
 import paige.navic.ui.icons.outlined.PlaylistAdd
 import paige.navic.ui.screen.playlist.dialog.PlaylistUpdateDialog
@@ -105,6 +107,7 @@ fun SongListScreen(
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	val lazyPagingItems = state.data?.items?.collectAsLazyPagingItems()
 	val downloadManager = koinInject<DownloadManager>()
+	val snackBarState = LocalSnackBarState.current
 
 	val selectedSorting by viewModel.selectedSorting.collectAsStateWithLifecycle()
 	val selectedReversed by viewModel.selectedReversed.collectAsStateWithLifecycle()
@@ -242,6 +245,29 @@ fun SongListScreen(
 							FilledTonalIconButton(enabled = selectedIds.isNotEmpty() && !preparingSelection, onClick = {
 								playlistIds = selectionOrder.filter { it in selectedIdSet }
 							}) { Icon(Icons.Outlined.PlaylistAdd, stringResource(R.string.action_add_to_playlist)) }
+						}
+						TooltipBox(stringResource(R.string.action_download)) {
+							FilledTonalIconButton(
+								enabled = selectedIds.isNotEmpty() && !preparingSelection,
+								onClick = {
+									val targetIds = selectionOrder.filter { it in selectedIdSet }
+									if (targetIds.isNotEmpty()) {
+										scope.launch {
+											preparingSelection = true
+											try {
+												downloadManager.downloadCollection(targetIds)
+												snackBarState.currentSnackbarData?.dismiss()
+												snackBarState.showSnackbar("已将 ${targetIds.size} 首加入离线下载队列")
+												finishSelection()
+											} finally {
+												preparingSelection = false
+											}
+										}
+									}
+								}
+							) {
+								Icon(Icons.Outlined.Download, stringResource(R.string.action_download))
+							}
 						}
 					}
 					selectionError?.let { ErrorBox(UiState.Error<Unit>(it)) }

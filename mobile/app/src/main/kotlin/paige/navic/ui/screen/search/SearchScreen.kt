@@ -6,20 +6,30 @@
 
 package paige.navic.ui.screen.search
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.plus
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -42,8 +52,11 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,12 +67,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 import paige.navic.R
+import paige.navic.database.entity.DownloadStatus
 import paige.navic.di.LocalBottomBarScrollManager
 import paige.navic.di.LocalSizeClass
+import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
 import paige.navic.domain.model.DomainAlbum
@@ -70,6 +87,10 @@ import paige.navic.domain.model.DomainSong
 import paige.navic.domain.model.DomainSongCollection
 import paige.navic.domain.model.settings.BottomBarVisibilityMode
 import paige.navic.domain.model.settings.ListViewMode
+import paige.navic.melokeep.StudioBatchSelectionDock
+import paige.navic.melokeep.queueSongsOffline
+import paige.navic.melokeep.rememberBatchDockBottomClearance
+import paige.navic.melokeep.removeSongsOffline
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.common.ContentUnavailable
 import paige.navic.ui.component.common.ErrorBox
@@ -83,6 +104,7 @@ import paige.navic.ui.component.layout.artGridPlaceholder
 import paige.navic.ui.component.layout.horizontalSection
 import paige.navic.ui.core.UiState
 import paige.navic.ui.icons.Icons
+import paige.navic.ui.icons.outlined.Checklist
 import paige.navic.ui.icons.outlined.Close
 import paige.navic.ui.icons.outlined.History
 import paige.navic.ui.navigation.PersistentViewModelStoreOwner
@@ -91,6 +113,7 @@ import paige.navic.ui.screen.album.component.AlbumListScreenGridItem
 import paige.navic.ui.screen.album.viewmodel.AlbumListViewModel
 import paige.navic.ui.screen.artist.ArtistListScreenGridItem
 import paige.navic.ui.screen.artist.viewmodel.ArtistListViewModel
+import paige.navic.ui.screen.playlist.dialog.PlaylistUpdateDialog
 import paige.navic.ui.screen.search.component.SearchScreenChips
 import paige.navic.ui.screen.search.component.SearchScreenTopBar
 import paige.navic.ui.screen.search.viewmodel.SearchViewModel
@@ -140,13 +163,23 @@ fun SearchScreen(
 	val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
 
 	val player = koinInject<MediaPlayer>()
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
 
 	var selectedCategory by remember { mutableStateOf(SearchCategory.ALL) }
 	var songToQueue by remember { mutableStateOf<DomainSong?>(null) }
 	var shareId by remember { mutableStateOf<String?>(null) }
 	var manageHistory by remember { mutableStateOf(false) }
 	var clearHistoryConfirmOpen by remember { mutableStateOf(false) }
+	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
+	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	var batchPlaylistSongIds by remember { mutableStateOf<List<String>?>(null) }
 	val downloadDeletionHandler = rememberDownloadDeletionHandler()
+
+	BackHandler(enabled = isMultiSelecting && batchPlaylistSongIds == null) {
+		isMultiSelecting = false
+		selectedSongIds.clear()
+	}
 
 	LaunchedEffect(searchHistory.isEmpty()) {
 		if (searchHistory.isEmpty()) {
@@ -226,84 +259,142 @@ fun SearchScreen(
 						if (showAll || selectedCategory == SearchCategory.ARTISTS) results.filterIsInstance<DomainArtist>() else emptyList()
 					val songs =
 						if (showAll || selectedCategory == SearchCategory.SONGS) results.filterIsInstance<DomainSong>() else emptyList()
-
-					if (query.text.isNotBlank() && albums.isEmpty() && artists.isEmpty() && songs.isEmpty()) {
-						ContentUnavailable(
-							label = stringResource(R.string.info_no_search_results)
-						)
+					val displaySongs = remember(songs, showAll) {
+						if (showAll) songs.take(10) else songs
 					}
 
-					LazyVerticalGrid(
-						modifier = Modifier.fillMaxSize(),
-						columns = GridCells.Fixed(2),
-						contentPadding = contentPadding,
-						state = viewModel.gridState,
-						verticalArrangement = Arrangement.spacedBy(8.dp)
-					) {
-						if (query.text.isNotBlank()) {
-							if (songs.isNotEmpty()) {
-								item(span = { GridItemSpan(maxLineSpan) }) {
-									Text(
-										stringResource(R.string.title_songs),
-										style = MaterialTheme.typography.headlineSmall,
-										modifier = Modifier.padding(
-											horizontal = 16.dp,
-											vertical = 8.dp
-										)
-									)
-								}
-								val displaySongs = if (showAll) songs.take(10) else songs
-								items(
-									displaySongs.size,
-									span = { GridItemSpan(maxLineSpan) }
-								) { index ->
-									val song = displaySongs[index]
-									val download = downloadsMap[song.id]
+					LaunchedEffect(query.text.isBlank(), displaySongs) {
+						if (query.text.isBlank() || displaySongs.isEmpty()) {
+							isMultiSelecting = false
+							selectedSongIds.clear()
+						} else {
+							val visibleIds = displaySongs.mapTo(HashSet()) { it.id }
+							selectedSongIds.keys.retainAll(visibleIds)
+						}
+					}
 
-									SongListScreenItem(
-										modifier = Modifier.animateItem(),
-										song = song,
-										selected = selectedSong == song,
-										starred = if (selectedSong == song) selectedSongIsStarred else song.starredAt != null,
-										rating = if (selectedSong == song) selectedSongRating else (song.userRating
-											?: 0),
-										onSelect = {
-											recordCurrentQuery()
-											viewModel.selectSong(song)
-										},
-										onDeselect = { viewModel.clearSelectedSong() },
-										onSetStarred = { viewModel.starSelectedSong(it) },
-										onSetShareId = { shareId = it },
-										onPlayNext = {
-											recordCurrentQuery()
-											if (player.checkDuplicate(song.id, preferenceManager)) {
-												songToQueue = song
-											} else {
-												player.playNextSingle(song)
+					Box(modifier = Modifier.fillMaxSize()) {
+						if (query.text.isNotBlank() && albums.isEmpty() && artists.isEmpty() && songs.isEmpty()) {
+							ContentUnavailable(
+								label = stringResource(R.string.info_no_search_results)
+							)
+						}
+
+						LazyVerticalGrid(
+							modifier = Modifier.fillMaxSize(),
+							columns = GridCells.Fixed(2),
+							contentPadding = contentPadding + PaddingValues(
+								bottom = if (isMultiSelecting && displaySongs.isNotEmpty()) 148.dp else 0.dp
+							),
+							state = viewModel.gridState,
+							verticalArrangement = Arrangement.spacedBy(8.dp)
+						) {
+							if (query.text.isNotBlank()) {
+								if (displaySongs.isNotEmpty()) {
+									item(span = { GridItemSpan(maxLineSpan) }) {
+										Row(
+											modifier = Modifier
+												.fillMaxWidth()
+												.padding(horizontal = 16.dp, vertical = 8.dp),
+											horizontalArrangement = Arrangement.SpaceBetween,
+											verticalAlignment = Alignment.CenterVertically
+										) {
+											Text(
+												text = stringResource(R.string.title_songs),
+												style = MaterialTheme.typography.headlineSmall
+											)
+											TextButton(
+												onClick = {
+													if (isMultiSelecting) {
+														isMultiSelecting = false
+														selectedSongIds.clear()
+													} else {
+														isMultiSelecting = true
+													}
+												},
+												contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+											) {
+												Icon(
+													imageVector = Icons.Outlined.Checklist,
+													contentDescription = null,
+													modifier = Modifier.size(16.dp)
+												)
+												Spacer(Modifier.width(4.dp))
+												Text(if (isMultiSelecting) "完成" else "多选")
 											}
-										},
-										onAddToQueue = {
-											recordCurrentQuery()
-											if (player.checkDuplicate(song.id, preferenceManager)) {
-												songToQueue = song
-											} else {
-												player.addToQueueSingle(song)
-											}
-										},
-										onClick = {
-											recordCurrentQuery()
-											player.playNow(song)
-										},
-										onSetRating = { viewModel.rateSelectedSong(it) },
-										download = download,
-										onDownload = { downloadManager.downloadSong(song.id) },
-										onCancelDownload = { downloadManager.cancelDownload(song.id) },
-										onDeleteDownload = {
-											downloadDeletionHandler.requestDelete(DeleteDownloadTarget.Single(song.id, song.title))
 										}
-									)
+									}
+									items(
+										displaySongs.size,
+										span = { GridItemSpan(maxLineSpan) }
+									) { index ->
+										val song = displaySongs[index]
+										val download = downloadsMap[song.id]
+										val isChecked = selectedSongIds[song.id] == true
+
+										SongListScreenItem(
+											modifier = Modifier.animateItem(),
+											song = song,
+											selected = !isMultiSelecting && selectedSong == song,
+											selectionMode = isMultiSelecting,
+											checked = isChecked,
+											starred = if (selectedSong == song) selectedSongIsStarred else song.starredAt != null,
+											rating = if (selectedSong == song) selectedSongRating else (song.userRating
+												?: 0),
+											onSelect = {
+												recordCurrentQuery()
+												if (isMultiSelecting) {
+													if (isChecked) {
+														selectedSongIds.remove(song.id)
+													} else {
+														selectedSongIds[song.id] = true
+													}
+												} else {
+													isMultiSelecting = true
+													selectedSongIds[song.id] = true
+												}
+											},
+											onDeselect = { viewModel.clearSelectedSong() },
+											onSetStarred = { viewModel.starSelectedSong(it) },
+											onSetShareId = { shareId = it },
+											onPlayNext = {
+												recordCurrentQuery()
+												if (player.checkDuplicate(song.id, preferenceManager)) {
+													songToQueue = song
+												} else {
+													player.playNextSingle(song)
+												}
+											},
+											onAddToQueue = {
+												recordCurrentQuery()
+												if (player.checkDuplicate(song.id, preferenceManager)) {
+													songToQueue = song
+												} else {
+													player.addToQueueSingle(song)
+												}
+											},
+											onClick = {
+												if (isMultiSelecting) {
+													if (isChecked) {
+														selectedSongIds.remove(song.id)
+													} else {
+														selectedSongIds[song.id] = true
+													}
+												} else {
+													recordCurrentQuery()
+													player.playNow(song)
+												}
+											},
+											onSetRating = { viewModel.rateSelectedSong(it) },
+											download = download,
+											onDownload = { downloadManager.downloadSong(song.id) },
+											onCancelDownload = { downloadManager.cancelDownload(song.id) },
+											onDeleteDownload = {
+												downloadDeletionHandler.requestDelete(DeleteDownloadTarget.Single(song.id, song.title))
+											}
+										)
+									}
 								}
-							}
 
 							horizontalSection(
 								title = R.string.title_albums,
@@ -485,9 +576,93 @@ fun SearchScreen(
 							}
 						}
 					}
+
+						val dockClearance = maxOf(
+							contentPadding.calculateBottomPadding() + 12.dp,
+							rememberBatchDockBottomClearance()
+						)
+						AnimatedVisibility(
+							visible = query.text.isNotBlank() && isMultiSelecting && displaySongs.isNotEmpty(),
+							enter = slideInVertically { it } + fadeIn(),
+							exit = slideOutVertically { it } + fadeOut(),
+							modifier = Modifier
+								.align(Alignment.BottomCenter)
+								.navigationBarsPadding()
+								.padding(bottom = dockClearance, start = 16.dp, end = 16.dp)
+						) {
+							val pickedSongs = displaySongs.filter { selectedSongIds[it.id] == true }
+							val hasRemovableOffline = pickedSongs.any {
+								val st = downloadsMap[it.id]?.status
+								st == DownloadStatus.DOWNLOADED || st == DownloadStatus.DOWNLOADING
+							}
+							StudioBatchSelectionDock(
+								selectedCount = pickedSongs.size,
+								totalCount = displaySongs.size,
+								hasOfflineRemovable = hasRemovableOffline,
+								onSelectAll = {
+									if (pickedSongs.size == displaySongs.size) {
+										selectedSongIds.clear()
+									} else {
+										displaySongs.forEach { selectedSongIds[it.id] = true }
+									}
+								},
+								onClear = { selectedSongIds.clear() },
+								onExit = {
+									isMultiSelecting = false
+									selectedSongIds.clear()
+								},
+								onDownloadSelected = {
+									if (pickedSongs.isNotEmpty()) {
+										scope.launch {
+											queueSongsOffline(downloadManager, pickedSongs)
+											snackBarState.currentSnackbarData?.dismiss()
+											snackBarState.showSnackbar("已将 ${pickedSongs.size} 首加入离线下载队列")
+											isMultiSelecting = false
+											selectedSongIds.clear()
+										}
+									}
+								},
+								onAddToPlaylist = {
+									if (pickedSongs.isNotEmpty()) {
+										batchPlaylistSongIds = pickedSongs.map { it.id }
+									}
+								},
+								onPlaySelected = {
+									if (pickedSongs.isNotEmpty()) {
+										player.playNow(pickedSongs, 0)
+										isMultiSelecting = false
+										selectedSongIds.clear()
+									}
+								},
+								onDeleteOfflineSelected = {
+									if (pickedSongs.isNotEmpty()) {
+										removeSongsOffline(downloadManager, downloadsMap, pickedSongs)
+										scope.launch {
+											snackBarState.currentSnackbarData?.dismiss()
+											snackBarState.showSnackbar("已移除所选曲目的离线缓存")
+										}
+										isMultiSelecting = false
+										selectedSongIds.clear()
+									}
+								}
+							)
+						}
+					}
 				}
 			}
 		}
+	}
+
+	batchPlaylistSongIds?.let { ids ->
+		PlaylistUpdateDialog(
+			songIds = ids.toImmutableList(),
+			onDismissRequest = { batchPlaylistSongIds = null },
+			onSuccess = {
+				batchPlaylistSongIds = null
+				isMultiSelecting = false
+				selectedSongIds.clear()
+			}
+		)
 	}
 
 	if (clearHistoryConfirmOpen) {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -125,7 +126,8 @@ fun TopBarButton(
 	) {
 		Box(contentAlignment = Alignment.Center) {
 			Box(
-				modifier = Modifier.size(24.dp),
+				modifier = Modifier.sizeIn(minWidth = 24.dp, minHeight = 24.dp),
+				contentAlignment = Alignment.Center,
 				content = content
 			)
 		}

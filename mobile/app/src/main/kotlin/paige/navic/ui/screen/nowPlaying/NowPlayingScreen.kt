@@ -61,7 +61,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -492,9 +494,13 @@ private fun NowPlayingStageToolbar(
 					content = {
 						Text(
 							text = "Aa",
+							textAlign = TextAlign.Center,
+							maxLines = 1,
+							softWrap = false,
 							style = MaterialTheme.typography.titleSmall.copy(
 								fontWeight = FontWeight.Bold,
-								fontSize = 14.sp
+								fontSize = 14.sp,
+								platformStyle = PlatformTextStyle(includeFontPadding = false)
 							)
 						)
 					}
