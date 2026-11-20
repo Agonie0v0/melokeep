@@ -28,13 +28,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,11 +79,11 @@ import kotlinx.coroutines.CancellationException
 fun IosHubProfileRoute(
 	settingsStore: MeloSettingsStore,
 	settingsController: MeloSettingsController,
-	studioController: MeloStudioController,
+	@Suppress("UNUSED_PARAMETER") studioController: MeloStudioController,
 	subsonicManager: IosSubsonicManager,
 	audioPlayer: IosAudioPlayer,
 	onOpenOnboarding: () -> Unit,
-	onOpenSleepTimer: () -> Unit = {},
+	@Suppress("UNUSED_PARAMETER") onOpenSleepTimer: () -> Unit = {},
 	bottomPadding: PaddingValues = PaddingValues(0.dp),
 	@Suppress("UNUSED_PARAMETER") onOpenPhoneDownloads: (() -> Unit)? = null,
 ) {
@@ -93,21 +91,21 @@ fun IosHubProfileRoute(
 	val studioPreset by settingsStore.studioThemePreset.collectAsState()
 	val libState by subsonicManager.state.collectAsState()
 	val prefs by subsonicManager.prefs.collectAsState()
-	val playerState by audioPlayer.state.collectAsState()
 
 	val platformContext = LocalPlatformContext.current
 	val imageLoader = remember(platformContext) { SingletonImageLoader.get(platformContext) }
 	val hostNavBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-	val engCfg = settingsState.engineConfig
 	val meloCfg = settingsState.serverConfig
 	val activeServer = libState.activeServer
 	val appVersion = remember { IosSettingsResolveAppVersion() }
+	val displayCurrentVersion = remember(appVersion) {
+		normalizeIosVersionLabel(appVersion, fallback = "1.0.0")
+	}
 
 	var showMeloSheet by rememberSaveable { mutableStateOf(false) }
 	var showNavidromeSheet by rememberSaveable { mutableStateOf(false) }
 	var showAudioEngineSheet by rememberSaveable { mutableStateOf(false) }
 	var showLyricsSheet by rememberSaveable { mutableStateOf(false) }
-	var showSourcesSheet by rememberSaveable { mutableStateOf(false) }
 	var confirmClearCacheOpen by rememberSaveable { mutableStateOf(false) }
 	var cacheRefreshTick by remember { mutableIntStateOf(0) }
 	var cacheClearHint by remember { mutableStateOf<String?>(null) }
@@ -121,12 +119,7 @@ fun IosHubProfileRoute(
 		(coilDisk + playerTemp).coerceAtLeast(0L)
 	}
 	val hasNewVersion = latestRelease != null && MeloSemVer.isNewer(latestRelease!!.tagName, appVersion)
-
-	LaunchedEffect(meloCfg.isConfigured) {
-		if (meloCfg.isConfigured && engCfg == null) {
-			settingsController.loadConfig()
-		}
-	}
+	val displayLatestTag = latestRelease?.tagName?.let { normalizeIosVersionLabel(it) }.orEmpty()
 
 	LaunchedEffect(appVersion) {
 		if (latestRelease == null) {
@@ -161,11 +154,6 @@ fun IosHubProfileRoute(
 		) {
 			// 1. 服务与连接（只展示名称与连接状态，不在主列表暴露域名/端口/用户名）
 			item(key = "ios-hub-services", contentType = "hub-services") {
-				val sourcesValue = when {
-					!meloCfg.isConfigured -> "未连接"
-					engCfg != null -> "${engCfg.sources.size}/${engCfg.availableSources.size}"
-					else -> ""
-				}
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					IosSectionLabel(
 						title = "服务与连接",
@@ -199,34 +187,12 @@ fun IosHubProfileRoute(
 							connected = activeServer != null,
 							onClick = { showNavidromeSheet = true },
 						)
-
-						IosHairlineDivider(startIndent = 34.dp)
-
-						IosHubActionRow(
-							icon = Icons.Rounded.Settings,
-							title = "音源与代理",
-							value = sourcesValue,
-							onClick = {
-								if (meloCfg.isConfigured) {
-									if (engCfg == null) settingsController.loadConfig()
-									showSourcesSheet = true
-								} else {
-									showMeloSheet = true
-								}
-							},
-						)
 					}
 				}
 			}
 
 			// 2. 播放与音频
 			item(key = "ios-hub-audio", contentType = "hub-audio") {
-				val sleepTimer = playerState.sleepTimer
-				val timerValue = when {
-					!sleepTimer.active -> "关闭"
-					sleepTimer.stopAfterCurrent -> "播完当前曲目"
-					else -> formatDurationMs(sleepTimer.remainingSeconds * 1000L)
-				}
 				val brTag = if (prefs.maxBitRate <= 0) "无损" else "${prefs.maxBitRate}k"
 				val rgTag = when (prefs.replayGainMode) {
 					ReplayGainMode.TRACK -> "单曲增益"
@@ -243,7 +209,7 @@ fun IosHubProfileRoute(
 					IosGroupedCard {
 						IosHubActionRow(
 							icon = Icons.Rounded.HighQuality,
-							title = "音质与 ReplayGain",
+							title = "音质与增益",
 							value = audioValue,
 							onClick = { showAudioEngineSheet = true },
 						)
@@ -255,16 +221,6 @@ fun IosHubProfileRoute(
 							title = "歌词设置",
 							value = lyricsSummary,
 							onClick = { showLyricsSheet = true },
-						)
-
-						IosHairlineDivider(startIndent = 46.dp)
-
-						IosHubActionRow(
-							icon = Icons.Rounded.Bedtime,
-							title = "睡眠定时",
-							value = timerValue,
-							valueHighlight = sleepTimer.active,
-							onClick = onOpenSleepTimer,
 						)
 					}
 				}
@@ -415,9 +371,9 @@ fun IosHubProfileRoute(
 							icon = Icons.Rounded.Refresh,
 							title = "检查更新",
 							value = if (hasNewVersion) {
-								"发现 ${latestRelease?.tagName.orEmpty()}"
+								"发现 $displayLatestTag"
 							} else {
-								"当前 v$appVersion"
+								"当前 $displayCurrentVersion"
 							},
 							valueHighlight = hasNewVersion,
 							onClick = { showUpdateDialog = true },
@@ -428,7 +384,7 @@ fun IosHubProfileRoute(
 
 			item(key = "ios-hub-version", contentType = "hub-version") {
 				Text(
-					text = "MeloKeep v$appVersion",
+					text = "MeloKeep $displayCurrentVersion",
 					style = MaterialTheme.typography.labelSmall.tabularNums(),
 					color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
 					textAlign = TextAlign.Center,
@@ -519,13 +475,6 @@ fun IosHubProfileRoute(
 		subsonicManager = subsonicManager,
 		presented = showLyricsSheet,
 		onDismissRequest = { showLyricsSheet = false },
-	)
-
-	IosSourcesAndProxySheet(
-		settingsController = settingsController,
-		settingsState = settingsState,
-		presented = showSourcesSheet,
-		onDismissRequest = { showSourcesSheet = false },
 	)
 }
 

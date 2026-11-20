@@ -167,23 +167,20 @@ fun IosLyricsAndStageSheet(
 					.padding(horizontal = 16.dp, vertical = 8.dp),
 				verticalArrangement = Arrangement.spacedBy(18.dp),
 			) {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "歌词设置")
-					IosSettingsLyricsSectionCard(
-						offsetMs = currentOffset,
-						prefs = prefs,
-						onOffsetChange = { next -> audioPlayer.setLyricsOffset(next) },
-						onUpdatePrefs = { transform -> subsonicManager.updatePrefs(transform) },
-						onResetAll = { resetIosLyricsPreferences(audioPlayer, subsonicManager) },
-					)
-				}
+				IosSettingsLyricsSectionCard(
+					offsetMs = currentOffset,
+					prefs = prefs,
+					onOffsetChange = { next -> audioPlayer.setLyricsOffset(next) },
+					onUpdatePrefs = { transform -> subsonicManager.updatePrefs(transform) },
+					onResetAll = { resetIosLyricsPreferences(audioPlayer, subsonicManager) },
+				)
 			}
 		}
 	}
 }
 
 // =============================================================================
-// 2. 公共独立抽屉：音质与播放 (IosAudioEngineSheet)
+// 2. 公共独立抽屉：音质与增益 (IosAudioEngineSheet)
 // =============================================================================
 
 @Composable
@@ -211,7 +208,7 @@ fun IosAudioEngineSheet(
 				.padding(bottom = 32.dp),
 		) {
 			IosCleanTopBar(
-				title = "音质与播放",
+				title = "音质与增益",
 				onBack = onDismissRequest,
 			)
 
@@ -367,19 +364,6 @@ fun IosAudioEngineSheet(
 								)
 							}
 						}
-					}
-				}
-
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "显示")
-					IosGroupedCard {
-						IosSettingsToggleRow(
-							title = "AMOLED 纯黑",
-							checked = prefs.amoledBlack,
-							onCheckedChange = { checked ->
-								subsonicManager.updatePrefs { it.copy(amoledBlack = checked) }
-							},
-						)
 					}
 				}
 			}
@@ -875,7 +859,7 @@ internal fun IosSettingsHomeSheet(
 				// 4. 极简版本尾注
 				item(key = "ios-settings-version") {
 					Text(
-						text = "MeloKeep v$appVersion",
+						text = "MeloKeep ${normalizeIosVersionLabel(appVersion, fallback = "1.0.0")}",
 						style = MaterialTheme.typography.labelSmall.tabularNums(),
 						color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
 						textAlign = TextAlign.Center,
@@ -2092,7 +2076,20 @@ internal fun IosSettingsLyricsStyleControl(
 
 internal fun IosSettingsResolveAppVersion(): String {
 	val raw = NSBundle.mainBundle.infoDictionary?.get("CFBundleShortVersionString") as? String
-	return raw?.trim()?.takeIf { it.isNotEmpty() } ?: "1.0.0"
+	return raw?.trim()
+		?.removePrefix("v")
+		?.removePrefix("V")
+		?.takeIf { it.isNotEmpty() }
+		?: "1.0.0"
+}
+
+internal fun normalizeIosVersionLabel(raw: String, fallback: String = ""): String {
+	val clean = raw.trim().removePrefix("v").removePrefix("V")
+	return when {
+		clean.isNotEmpty() -> "v$clean"
+		fallback.isNotEmpty() -> "v${fallback.trim().removePrefix("v").removePrefix("V")}"
+		else -> ""
+	}
 }
 
 internal fun iosOpenExternalUrl(rawUrl: String): Boolean {
@@ -2164,6 +2161,8 @@ internal fun IosAppUpdateDialog(
 	val activeRelease = release
 	val hasUpdate = activeRelease != null && MeloSemVer.isNewer(activeRelease.tagName, currentVersion)
 	val ipaAsset = remember(activeRelease) { activeRelease?.findIosIpaAsset() }
+	val displayCurrentVersion = normalizeIosVersionLabel(currentVersion, fallback = "1.0.0")
+	val displayReleaseTag = activeRelease?.tagName?.let { normalizeIosVersionLabel(it) }.orEmpty()
 
 	AlertDialog(
 		onDismissRequest = onDismiss,
@@ -2172,7 +2171,7 @@ internal fun IosAppUpdateDialog(
 			Text(
 				text = when {
 					loading && activeRelease == null -> "正在检查更新"
-					hasUpdate -> "发现新版本 ${activeRelease?.tagName.orEmpty()}"
+					hasUpdate -> "发现新版本 $displayReleaseTag"
 					activeRelease != null -> "版本检查"
 					else -> "应用更新"
 				},
@@ -2191,7 +2190,7 @@ internal fun IosAppUpdateDialog(
 					verticalAlignment = Alignment.CenterVertically,
 				) {
 					Text(
-						text = "当前版本 v$currentVersion",
+						text = "当前版本 $displayCurrentVersion",
 						style = MaterialTheme.typography.bodySmall.tabularNums(),
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
@@ -2205,7 +2204,7 @@ internal fun IosAppUpdateDialog(
 							},
 						) {
 							Text(
-								text = if (hasUpdate) "最新 ${activeRelease.tagName}" else "已是最新 ${activeRelease.tagName}",
+								text = if (hasUpdate) "最新 $displayReleaseTag" else "已是最新 $displayReleaseTag",
 								style = MaterialTheme.typography.labelSmall.tabularNums(),
 								fontWeight = FontWeight.SemiBold,
 								color = if (hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
