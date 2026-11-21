@@ -57,6 +57,326 @@ interface AlbumDetail extends Album {
   tracks: Track[];
 }
 
+const ARTIST_PAGE_SIZE = 60;
+const MAX_AVATAR_CONCURRENCY = 2;
+const AVATAR_CACHE_MAX_ENTRIES = 160;
+const AVATAR_NEGATIVE_TTL_MS = 15_000;
+const AVATAR_NEGATIVE_MAX_ENTRIES = 500;
+
+let cachedArtists: Artist[] | null = null;
+
+interface AvatarQueueItem {
+  url: string;
+  signal: AbortSignal;
+  priority: boolean;
+  resolve: (objectUrl: string | null) => void;
+}
+
+interface ResolvedAvatarState {
+  key: string;
+  sourceUrl: string;
+  objectUrl: string;
+}
+
+const avatarObjectUrlCache = new Map<string, string>();
+const avatarNegativeCache = new Map<string, number>();
+const avatarWaitQueue: AvatarQueueItem[] = [];
+let activeAvatarRequests = 0;
+
+let sharedAvatarObserver: IntersectionObserver | null = null;
+const avatarObserverCallbacks = new WeakMap<
+  Element,
+  (visible: boolean) => void
+>();
+
+function getAvatarObserver(): IntersectionObserver | null {
+  if (typeof IntersectionObserver === "undefined") return null;
+  if (!sharedAvatarObserver) {
+    sharedAvatarObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const cb = avatarObserverCallbacks.get(entry.target);
+          if (cb) cb(entry.isIntersecting);
+        }
+      },
+      { rootMargin: "120px" },
+    );
+  }
+  return sharedAvatarObserver;
+}
+
+function observeAvatarVisibility(
+  el: Element,
+  onChange: (visible: boolean) => void,
+): () => void {
+  const observer = getAvatarObserver();
+  if (!observer) {
+    onChange(true);
+    return () => {};
+  }
+  avatarObserverCallbacks.set(el, onChange);
+  observer.observe(el);
+  return () => {
+    avatarObserverCallbacks.delete(el);
+    observer.unobserve(el);
+  };
+}
+
+function revokeAvatarObjectUrl(objectUrl: string) {
+  if (!objectUrl) return;
+  if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      /* Ignore revoke failures on detached URLs. */
+    }
+  }
+}
+
+function getCachedAvatarUrl(url: string): string | null {
+  const hit = avatarObjectUrlCache.get(url);
+  if (!hit) return null;
+  avatarObjectUrlCache.delete(url);
+  avatarObjectUrlCache.set(url, hit);
+  return hit;
+}
+
+function evictCachedAvatarUrl(url: string) {
+  const hit = avatarObjectUrlCache.get(url);
+  if (!hit) return;
+  avatarObjectUrlCache.delete(url);
+  revokeAvatarObjectUrl(hit);
+}
+
+function storeCachedAvatarUrl(url: string, objectUrl: string): string {
+  const existing = avatarObjectUrlCache.get(url);
+  if (existing) {
+    if (existing !== objectUrl) {
+      revokeAvatarObjectUrl(objectUrl);
+    }
+    avatarObjectUrlCache.delete(url);
+    avatarObjectUrlCache.set(url, existing);
+    return existing;
+  }
+  avatarObjectUrlCache.set(url, objectUrl);
+  while (avatarObjectUrlCache.size > AVATAR_CACHE_MAX_ENTRIES) {
+    const oldestKey = avatarObjectUrlCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    const oldestUrl = avatarObjectUrlCache.get(oldestKey);
+    avatarObjectUrlCache.delete(oldestKey);
+    if (oldestUrl) revokeAvatarObjectUrl(oldestUrl);
+  }
+  return objectUrl;
+}
+
+function isAvatarNegativeCached(url: string): boolean {
+  const expiresAt = avatarNegativeCache.get(url);
+  if (expiresAt === undefined) return false;
+  if (Date.now() >= expiresAt) {
+    avatarNegativeCache.delete(url);
+    return false;
+  }
+  return true;
+}
+
+function markAvatarNegative(url: string) {
+  const now = Date.now();
+  avatarNegativeCache.delete(url);
+  avatarNegativeCache.set(url, now + AVATAR_NEGATIVE_TTL_MS);
+  if (avatarNegativeCache.size > AVATAR_NEGATIVE_MAX_ENTRIES) {
+    for (const [key, exp] of avatarNegativeCache) {
+      if (
+        now >= exp ||
+        avatarNegativeCache.size > AVATAR_NEGATIVE_MAX_ENTRIES
+      ) {
+        avatarNegativeCache.delete(key);
+      }
+      if (avatarNegativeCache.size <= AVATAR_NEGATIVE_MAX_ENTRIES) break;
+    }
+  }
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
+async function drainUnusedResponse(res: Response) {
+  const len = Number(res.headers.get("content-length") || "0");
+  if (Number.isFinite(len) && len > 65_536) {
+    await res.body?.cancel().catch(() => {});
+    return;
+  }
+  await res.arrayBuffer().catch(() => {});
+}
+
+async function runAvatarFetch(
+  url: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (signal.aborted) return null;
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+    return null;
+  }
+  try {
+    const res = await fetch(url, {
+      signal,
+      credentials: "same-origin",
+      referrerPolicy: "no-referrer",
+    });
+    if (signal.aborted) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    if (!res.ok) {
+      await drainUnusedResponse(res);
+      markAvatarNegative(url);
+      return null;
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (
+      contentType &&
+      !contentType.toLowerCase().startsWith("image/") &&
+      !contentType.toLowerCase().startsWith("application/octet-stream")
+    ) {
+      await drainUnusedResponse(res);
+      markAvatarNegative(url);
+      return null;
+    }
+    const blob = await res.blob();
+    if (signal.aborted) return null;
+    if (!blob || blob.size === 0) {
+      markAvatarNegative(url);
+      return null;
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    return storeCachedAvatarUrl(url, objectUrl);
+  } catch (err) {
+    if (signal.aborted || isAbortError(err)) {
+      return null;
+    }
+    markAvatarNegative(url);
+    return null;
+  }
+}
+
+function pumpAvatarQueue() {
+  while (
+    activeAvatarRequests < MAX_AVATAR_CONCURRENCY &&
+    avatarWaitQueue.length > 0
+  ) {
+    const item = avatarWaitQueue.shift()!;
+    if (item.signal.aborted) {
+      item.resolve(null);
+      continue;
+    }
+    const cached = getCachedAvatarUrl(item.url);
+    if (cached) {
+      item.resolve(cached);
+      continue;
+    }
+    if (isAvatarNegativeCached(item.url)) {
+      item.resolve(null);
+      continue;
+    }
+    activeAvatarRequests += 1;
+    void runAvatarFetch(item.url, item.signal)
+      .then((result) => {
+        item.resolve(result);
+      })
+      .finally(() => {
+        activeAvatarRequests = Math.max(0, activeAvatarRequests - 1);
+        pumpAvatarQueue();
+      });
+  }
+}
+
+function scheduleAvatarFetch(
+  url: string,
+  signal: AbortSignal,
+  priority = false,
+): Promise<string | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  const cached = getCachedAvatarUrl(url);
+  if (cached) return Promise.resolve(cached);
+  if (isAvatarNegativeCached(url)) return Promise.resolve(null);
+
+  return new Promise<string | null>((resolve) => {
+    if (signal.aborted) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const item: AvatarQueueItem = {
+      url,
+      signal,
+      priority,
+      resolve: finish,
+    };
+    const onAbort = () => {
+      const idx = avatarWaitQueue.indexOf(item);
+      if (idx >= 0) {
+        avatarWaitQueue.splice(idx, 1);
+      }
+      finish(null);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (priority) {
+      avatarWaitQueue.unshift(item);
+    } else {
+      avatarWaitQueue.push(item);
+    }
+    pumpAvatarQueue();
+  });
+}
+
+function appendLiveQuery(url: string): string {
+  if (!url) return "";
+  const hashIdx = url.indexOf("#");
+  const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+  const hash = hashIdx >= 0 ? url.slice(hashIdx) : "";
+  if (/(?:[?&])live=1(?:&|$)/.test(base)) return url;
+  return `${base}${base.includes("?") ? "&" : "?"}live=1${hash}`;
+}
+
+function buildAvatarCandidates(
+  cover?: string | null,
+  avatarUrl?: string | null,
+  sizeClass: "list" | "cards" | "large" | "" = "",
+): string[] {
+  const rawAvatar = avatarUrl?.trim() || "";
+  const rawCover = cover?.trim() || "";
+  const primary = rawAvatar
+    ? sizeClass === "large"
+      ? appendLiveQuery(rawAvatar)
+      : rawAvatar
+    : "";
+  const list: string[] = [];
+  if (primary) list.push(primary);
+  if (rawCover && rawCover !== primary) list.push(rawCover);
+  return list;
+}
+
+function findCachedAvatar(candidates: string[]): ResolvedAvatarState | null {
+  if (!candidates.length) return null;
+  const key = candidates.join("\0");
+  for (const url of candidates) {
+    const objectUrl = getCachedAvatarUrl(url);
+    if (objectUrl) {
+      return { key, sourceUrl: url, objectUrl };
+    }
+  }
+  return null;
+}
+
 function ArtistAvatar({
   name,
   cover,
@@ -68,24 +388,91 @@ function ArtistAvatar({
   avatarUrl?: string | null;
   sizeClass?: "list" | "cards" | "large" | "";
 }) {
-  const primary = cover?.trim() || "";
-  const secondary = avatarUrl?.trim() || "";
-  const candidates = useMemo(() => {
-    const list: string[] = [];
-    if (primary) list.push(primary);
-    if (secondary && secondary !== primary) list.push(secondary);
-    return list;
-  }, [primary, secondary]);
+  const rawAvatar = avatarUrl?.trim() || "";
+  const candidates = useMemo(
+    () => buildAvatarCandidates(cover, avatarUrl, sizeClass),
+    [cover, avatarUrl, sizeClass],
+  );
+  const candidatesKey = candidates.join("\0");
 
-  const [attempt, setAttempt] = useState(0);
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+  const [inView, setInView] = useState(
+    () => typeof IntersectionObserver === "undefined",
+  );
+  const [resolvedAvatar, setResolvedAvatar] =
+    useState<ResolvedAvatarState | null>(() => findCachedAvatar(candidates));
+
+  const activeAvatar =
+    resolvedAvatar?.key === candidatesKey ? resolvedAvatar : null;
+
   useEffect(() => {
-    setAttempt(0);
-  }, [primary, secondary]);
+    setResolvedAvatar((prev) => {
+      if (prev && prev.key === candidatesKey) return prev;
+      return findCachedAvatar(candidates);
+    });
+  }, [candidates, candidatesKey]);
 
-  const imgSrc = candidates[attempt] || "";
+  useEffect(() => {
+    if (!candidates.length || activeAvatar) return;
+    const el = containerRef.current;
+    if (!el) return;
+    return observeAvatarVisibility(el, (visible) => {
+      setInView(visible);
+    });
+  }, [candidates.length, candidatesKey, activeAvatar]);
+
+  useEffect(() => {
+    if (!inView || !candidates.length || activeAvatar) return;
+    const controller = new AbortController();
+    let cancelled = false;
+
+    async function load() {
+      for (const url of candidates) {
+        if (cancelled || controller.signal.aborted) return;
+        const cached = getCachedAvatarUrl(url);
+        if (cached) {
+          setResolvedAvatar({
+            key: candidatesKey,
+            sourceUrl: url,
+            objectUrl: cached,
+          });
+          return;
+        }
+        if (isAvatarNegativeCached(url)) {
+          continue;
+        }
+        const resolved = await scheduleAvatarFetch(
+          url,
+          controller.signal,
+          sizeClass === "large",
+        );
+        if (cancelled || controller.signal.aborted) return;
+        if (resolved) {
+          if (sizeClass === "large" && rawAvatar && url !== rawAvatar) {
+            avatarNegativeCache.delete(rawAvatar);
+          }
+          setResolvedAvatar({
+            key: candidatesKey,
+            sourceUrl: url,
+            objectUrl: resolved,
+          });
+          return;
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [inView, candidates, candidatesKey, activeAvatar, sizeClass, rawAvatar]);
+
+  const imgSrc = activeAvatar?.objectUrl || "";
 
   return (
     <span
+      ref={containerRef}
       className={`nav-artist-avatar${sizeClass ? ` nav-artist-avatar-${sizeClass}` : ""}`}
       aria-label={sizeClass === "large" && name ? `${name} 头像` : undefined}
     >
@@ -94,9 +481,14 @@ function ArtistAvatar({
           key={imgSrc}
           src={imgSrc}
           alt=""
-          loading="lazy"
           referrerPolicy="no-referrer"
-          onError={() => setAttempt((idx) => idx + 1)}
+          onError={() => {
+            if (activeAvatar) {
+              evictCachedAvatarUrl(activeAvatar.sourceUrl);
+              markAvatarNegative(activeAvatar.sourceUrl);
+            }
+            setResolvedAvatar(null);
+          }}
         />
       ) : (
         <Users aria-hidden="true" />
@@ -166,6 +558,7 @@ export function NavidromeLibrary({
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
+  const [artistPage, setArtistPage] = useState(0);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -264,7 +657,22 @@ export function NavidromeLibrary({
   }
   const albumRequest = useRef<AbortController | null>(null);
   useEffect(() => {
+    setArtistPage(0);
+  }, [mode]);
+  useEffect(() => {
     albumRequest.current?.abort();
+    if (!query && !artist && mode === "artists" && cachedArtists !== null) {
+      setError("");
+      setAlbum(null);
+      setTracks([]);
+      setAlbums([]);
+      setArtists(cachedArtists);
+      setHasMore(false);
+      setBusy(false);
+      return () => {
+        albumRequest.current?.abort();
+      };
+    }
     const abort = new AbortController();
     setBusy(true);
     setError("");
@@ -308,14 +716,16 @@ export function NavidromeLibrary({
       } else if (mode === "artists") {
         setTracks([]);
         setAlbums([]);
-        setArtists(
-          await api<Artist[]>(
-            "/navidrome/artists",
-            "GET",
-            undefined,
-            abort.signal,
-          ),
+        const data = await api<Artist[]>(
+          "/navidrome/artists",
+          "GET",
+          undefined,
+          abort.signal,
         );
+        if (!abort.signal.aborted) {
+          cachedArtists = data;
+          setArtists(data);
+        }
         setHasMore(false);
       } else {
         const data = await api<{ albums: Album[]; has_more: boolean }>(
@@ -347,7 +757,11 @@ export function NavidromeLibrary({
       void api<{ scanning: boolean; count: number }>("/navidrome/scan")
         .then((result) => {
           setScan(result);
-          if (!result.scanning) setRefresh((value) => value + 1);
+          if (!result.scanning) {
+            cachedArtists = null;
+            setArtistPage(0);
+            setRefresh((value) => value + 1);
+          }
         })
         .catch((e) => {
           setError(e.message);
@@ -386,6 +800,7 @@ export function NavidromeLibrary({
     setQuery("");
     setSearch("");
     setOffset(0);
+    setArtistPage(0);
     setSelectedIds(new Set());
     setDownloadError("");
     if (persist) {
@@ -394,6 +809,24 @@ export function NavidromeLibrary({
   }
   const shownTracks = album?.tracks || tracks;
   const pageSize = query || mode === "songs" ? 50 : 48;
+  const artistPageSize = ARTIST_PAGE_SIZE;
+  const isArtistList = !album && !artist && !query && mode === "artists";
+  const artistSearchNeedle = isArtistList ? search.trim().toLowerCase() : "";
+  const filteredArtists = useMemo(() => {
+    if (!artistSearchNeedle) return artists;
+    return artists.filter((item) =>
+      item.name.toLowerCase().includes(artistSearchNeedle),
+    );
+  }, [artists, artistSearchNeedle]);
+  const totalArtistPages = Math.max(
+    1,
+    Math.ceil(filteredArtists.length / artistPageSize),
+  );
+  const safeArtistPage = Math.min(artistPage, totalArtistPages - 1);
+  const pagedArtists = useMemo(() => {
+    const start = safeArtistPage * artistPageSize;
+    return filteredArtists.slice(start, start + artistPageSize);
+  }, [filteredArtists, safeArtistPage, artistPageSize]);
 
   const selectedTracks = useMemo(
     () => shownTracks.filter((track) => selectedIds.has(track.id)),
@@ -568,6 +1001,7 @@ export function NavidromeLibrary({
             e.preventDefault();
             setArtist(null);
             setOffset(0);
+            setArtistPage(0);
             setSelectedIds(new Set());
             setQuery(search.trim());
           }}
@@ -577,7 +1011,10 @@ export function NavidromeLibrary({
             aria-label="搜索 Navidrome 音乐库"
             placeholder="搜索歌曲、歌手或专辑"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setArtistPage(0);
+            }}
           />
           <button
             type="submit"
@@ -649,7 +1086,11 @@ export function NavidromeLibrary({
         <div className="library-heading-actions nav-toolbar-right">
           <button
             className="secondary"
-            onClick={() => setRefresh((value) => value + 1)}
+            onClick={() => {
+              cachedArtists = null;
+              setArtistPage(0);
+              setRefresh((value) => value + 1);
+            }}
             disabled={busy}
           >
             <RefreshCw />
@@ -665,7 +1106,14 @@ export function NavidromeLibrary({
                 "/navidrome/scan",
                 "POST",
               )
-                .then(setScan)
+                .then((result) => {
+                  setScan(result);
+                  if (!result.scanning) {
+                    cachedArtists = null;
+                    setArtistPage(0);
+                    setRefresh((value) => value + 1);
+                  }
+                })
                 .catch((e) => setError(e.message))
                 .finally(() => setScanBusy(false));
             }}
@@ -769,7 +1217,11 @@ export function NavidromeLibrary({
           </button>
           <button
             className="secondary"
-            onClick={() => setRefresh((value) => value + 1)}
+            onClick={() => {
+              cachedArtists = null;
+              setArtistPage(0);
+              setRefresh((value) => value + 1);
+            }}
           >
             重试
           </button>
@@ -1090,9 +1542,9 @@ export function NavidromeLibrary({
                 ))}
               </div>
             )}
-          {!album && mode === "artists" && !query && !artist && (
+          {!album && isArtistList && (
             <div className={`nav-artists nav-artists-${layout}`}>
-              {artists.map((item) => (
+              {pagedArtists.map((item) => (
                 <button
                   className="nav-artist"
                   key={item.id}
@@ -1118,34 +1570,62 @@ export function NavidromeLibrary({
           )}
           {!album &&
             !shownTracks.length &&
-            (mode === "artists" && !query && !artist
-              ? !artists.length
-              : !albums.length) && (
+            (isArtistList ? !pagedArtists.length : !albums.length) && (
               <div className="empty">
                 {query
                   ? "没有匹配的歌曲或专辑，请更换搜索内容。"
-                  : "此范围还没有音乐。可先确认 Navidrome 的音乐目录并扫描曲库。"}
+                  : isArtistList && artists.length > 0
+                    ? "没有匹配的歌手，请更换搜索内容。"
+                    : "此范围还没有音乐。可先确认 Navidrome 的音乐目录并扫描曲库。"}
               </div>
             )}
-          {!album && !artist && (offset > 0 || hasMore) && (
-            <div className="library-pagination">
-              <button
-                className="secondary"
-                disabled={!offset}
-                onClick={() => setOffset(Math.max(0, offset - pageSize))}
-              >
-                上一页
-              </button>
-              <span>第 {Math.floor(offset / pageSize) + 1} 页</span>
-              <button
-                className="secondary"
-                disabled={!hasMore}
-                onClick={() => setOffset(offset + pageSize)}
-              >
-                下一页
-              </button>
-            </div>
-          )}
+          {!album &&
+            !artist &&
+            (isArtistList
+              ? filteredArtists.length > artistPageSize
+              : offset > 0 || hasMore) && (
+              <div className="library-pagination">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={isArtistList ? safeArtistPage === 0 : !offset}
+                  onClick={() => {
+                    if (isArtistList) {
+                      setArtistPage(Math.max(0, safeArtistPage - 1));
+                    } else {
+                      setOffset(Math.max(0, offset - pageSize));
+                    }
+                  }}
+                >
+                  上一页
+                </button>
+                <span>
+                  {isArtistList
+                    ? `第 ${safeArtistPage + 1} / ${totalArtistPages} 页`
+                    : `第 ${Math.floor(offset / pageSize) + 1} 页`}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={
+                    isArtistList
+                      ? safeArtistPage + 1 >= totalArtistPages
+                      : !hasMore
+                  }
+                  onClick={() => {
+                    if (isArtistList) {
+                      setArtistPage(
+                        Math.min(totalArtistPages - 1, safeArtistPage + 1),
+                      );
+                    } else {
+                      setOffset(offset + pageSize);
+                    }
+                  }}
+                >
+                  下一页
+                </button>
+              </div>
+            )}
         </>
       )}
     </section>

@@ -740,22 +740,36 @@ func (s *Server) handleNavidromeCover(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleArtistAvatar(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if name == "" || library.IsIgnoredArtist(name) {
+		w.Header().Set("Cache-Control", "no-store")
 		writeError(w, http.StatusNotFound, "歌手头像不存在")
 		return
 	}
 	snap := s.currentSnapshot()
+	live := r.URL.Query().Get("live") == "1"
 	var (
 		data []byte
 		mime string
 		err  error
 	)
 	if s.deps.Library != nil {
-		data, mime, err = s.deps.Library.ResolveArtistAvatar(r.Context(), snap, name)
+		if live {
+			data, mime, err = s.deps.Library.ResolveArtistAvatarLive(r.Context(), snap, name)
+		} else {
+			data, mime, err = s.deps.Library.ResolveArtistAvatarFast(r.Context(), snap, name)
+		}
 	} else {
-		fetcher := library.NewArtistArtworkFetcher(s.deps.Transport, s.deps.Store, s.deps.Files, library.ArtistArtworkOptions{})
-		data, mime, err = fetcher.ResolveArtistAvatar(r.Context(), snap, name)
+		fetcher := library.NewArtistArtworkFetcher(s.deps.Transport, s.deps.Store, s.deps.Files, library.ArtistArtworkOptions{
+			DisablePrefetch: true,
+		})
+		defer func() { _ = fetcher.Close() }()
+		if live {
+			data, mime, err = fetcher.ResolveArtistAvatarLive(r.Context(), snap, name)
+		} else {
+			data, mime, err = fetcher.ResolveArtistAvatarFast(r.Context(), snap, name)
+		}
 	}
 	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
 		writeDomainError(w, err)
 		return
 	}

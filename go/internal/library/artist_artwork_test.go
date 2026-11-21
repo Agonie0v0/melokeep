@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -836,7 +838,8 @@ func TestHTTPArtistAvatarEndpointAndCachePriority(t *testing.T) {
 		t.Fatalf("expected 0 remote calls on disk cache hit, got %d", remoteCalls.Load())
 	}
 
-	// 4. Web session cookie triggers live remote fallback + caches to disk.
+	// 4. Web session cookie: ?live=1 triggers synchronous remote fallback + caches to disk,
+	// and subsequent default request hits cache with 0 extra remote calls.
 	webLoginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"secret-pass"}`))
 	webLoginReq.Header.Set("Content-Type", "application/json")
 	webLoginReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
@@ -857,17 +860,20 @@ func TestHTTPArtistAvatarEndpointAndCachePriority(t *testing.T) {
 	}
 
 	rec3 := httptest.NewRecorder()
-	req3 := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("陈绮贞"), nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("陈绮贞")+"&live=1", nil)
 	req3.AddCookie(sessionCookie)
 	httpSrv.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), remoteJPEG) {
-		t.Fatalf("remote fallback avatar failed: code=%d body=%s", rec3.Code, rec3.Body.String())
+		t.Fatalf("live remote fallback avatar failed: code=%d body=%s", rec3.Code, rec3.Body.String())
+	}
+	if rec3.Header().Get("Cache-Control") != "public, max-age=86400" {
+		t.Fatalf("expected public max-age=86400 on 200 hit, got %q", rec3.Header().Get("Cache-Control"))
 	}
 	if callsAfterFirst := remoteCalls.Load(); callsAfterFirst != 2 {
 		t.Fatalf("expected 2 remote calls (search + image), got %d", callsAfterFirst)
 	}
 
-	// Second request hits disk cache written above -> 0 extra remote calls.
+	// Second request (default non-live) hits cache written above -> 0 extra remote calls.
 	rec4 := httptest.NewRecorder()
 	req4 := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("陈绮贞"), nil)
 	req4.AddCookie(sessionCookie)
@@ -875,33 +881,36 @@ func TestHTTPArtistAvatarEndpointAndCachePriority(t *testing.T) {
 	if rec4.Code != http.StatusOK || !bytes.Equal(rec4.Body.Bytes(), remoteJPEG) {
 		t.Fatalf("cached avatar failed: code=%d", rec4.Code)
 	}
+	if rec4.Header().Get("Cache-Control") != "public, max-age=86400" {
+		t.Fatalf("expected public max-age=86400 on cached hit, got %q", rec4.Header().Get("Cache-Control"))
+	}
 	if remoteCalls.Load() != 2 {
 		t.Fatalf("expected 0 extra remote calls after caching, total=%d", remoteCalls.Load())
 	}
 
-	// 5. Missing / ignored / unfound artist returns 404, and HEAD succeeds with empty body.
+	// 5. Missing / ignored / unfound artist returns 404 with Cache-Control: no-store, and HEAD succeeds with empty body.
 	rec404 := httptest.NewRecorder()
 	req404 := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name=Unknown+Artist", nil)
 	req404.AddCookie(sessionCookie)
 	httpSrv.ServeHTTP(rec404, req404)
-	if rec404.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for ignored artist, got %d", rec404.Code)
+	if rec404.Code != http.StatusNotFound || rec404.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected 404 + no-store for ignored artist, got code=%d cc=%q", rec404.Code, rec404.Header().Get("Cache-Control"))
 	}
 
 	recMissing := httptest.NewRecorder()
 	reqMissing := httptest.NewRequest(http.MethodGet, "/api/artists/avatar", nil)
 	reqMissing.AddCookie(sessionCookie)
 	httpSrv.ServeHTTP(recMissing, reqMissing)
-	if recMissing.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing query name, got %d", recMissing.Code)
+	if recMissing.Code != http.StatusNotFound || recMissing.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected 404 + no-store for missing query name, got code=%d cc=%q", recMissing.Code, recMissing.Header().Get("Cache-Control"))
 	}
 
 	recUnfound := httptest.NewRecorder()
 	reqUnfound := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("不存在的歌手"), nil)
 	reqUnfound.AddCookie(sessionCookie)
 	httpSrv.ServeHTTP(recUnfound, reqUnfound)
-	if recUnfound.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown artist, got %d", recUnfound.Code)
+	if recUnfound.Code != http.StatusNotFound || recUnfound.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected 404 + no-store for unknown artist, got code=%d cc=%q", recUnfound.Code, recUnfound.Header().Get("Cache-Control"))
 	}
 
 	recHead := httptest.NewRecorder()
@@ -909,5 +918,516 @@ func TestHTTPArtistAvatarEndpointAndCachePriority(t *testing.T) {
 	httpSrv.ServeHTTP(recHead, reqHead)
 	if recHead.Code != http.StatusOK || recHead.Body.Len() != 0 || recHead.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("expected 200 empty body on HEAD, got code=%d bodyLen=%d ct=%q", recHead.Code, recHead.Body.Len(), recHead.Header().Get("Content-Type"))
+	}
+	// Ensure background workers stop cleanly before httptest.Server closes.
+	_ = svc.Close()
+}
+
+func newArtistHTTPTestServerAndCookie(t *testing.T, st *store.Store, coord *files.Coordinator, svc *library.Service, pool *transport.Pool, root files.Root, dataDir string) (*httpapi.Server, *http.Cookie) {
+	t.Helper()
+	rt := config.DefaultRuntimeConfig()
+	rt.DataDir = dataDir
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+
+	httpSrv, err := httpapi.NewServer(httpapi.Dependencies{
+		Store:           st,
+		Transport:       pool,
+		Files:           coord,
+		Library:         svc,
+		Sessions:        auth.NewSessionManager(),
+		RateLimiter:     auth.NewLoginRateLimiter(),
+		Budgets:         config.DefaultResourceBudgets(),
+		InitialSnapshot: snap,
+		AuthEnabled:     true,
+		AuthUserDigest:  sha256.Sum256([]byte("admin")),
+		AuthPassDigest:  sha256.Sum256([]byte("secret-pass")),
+		FrontendFS: fstest.MapFS{
+			"index.html": &fstest.MapFile{Data: []byte("<html>ok</html>")},
+		},
+		IsWindows: true,
+		Platform:  "win32",
+		WorkDir:   root.CanonicalPath,
+	})
+	if err != nil {
+		t.Fatalf("httpapi.NewServer: %v", err)
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"secret-pass"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	loginRec := httptest.NewRecorder()
+	httpSrv.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("web login failed: %d %s", loginRec.Code, loginRec.Body.String())
+	}
+	for _, c := range loginRec.Result().Cookies() {
+		if c.Name == auth.SessionCookieName && c.Path == "/api" && c.Value != "" {
+			return httpSrv, c
+		}
+	}
+	t.Fatalf("missing session cookie")
+	return nil, nil
+}
+
+func TestArtistAvatarFastNonBlockingPrefetchAndLiveMode(t *testing.T) {
+	storeInstance, coord, svc, _, root, dataDir, pool := setupArtistTestLibrary(t)
+
+	slowJPEG := makeFakeJPEG(2100, "slow-upstream")
+	liveJPEG := makeFakeJPEG(2150, "live-upstream")
+	busyJPEG := makeFakeJPEG(2200, "busy-fallback")
+	timeoutJPEG := makeFakeJPEG(2250, "timeout-fallback")
+
+	var slowSearchCalls atomic.Int64
+	var timeoutSearchCalls atomic.Int64
+	var liveInflight atomic.Int64
+	releaseLiveGate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGate := func() {
+		releaseOnce.Do(func() { close(releaseLiveGate) })
+	}
+	t.Cleanup(releaseGate)
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/search/get/web":
+			q := r.URL.Query().Get("s")
+			switch q {
+			case "慢速歌手":
+				slowSearchCalls.Add(1)
+				select {
+				case <-time.After(1100 * time.Millisecond):
+				case <-r.Context().Done():
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"result": map[string]any{
+						"artists": []map[string]any{{"id": 101, "name": "慢速歌手", "picUrl": srv.URL + "/slow.jpg"}},
+					},
+				})
+			case "占位歌手1", "占位歌手2":
+				liveInflight.Add(1)
+				select {
+				case <-releaseLiveGate:
+				case <-time.After(3 * time.Second):
+				case <-r.Context().Done():
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"result": map[string]any{
+						"artists": []map[string]any{{"id": 102, "name": q, "picUrl": srv.URL + "/live.jpg"}},
+					},
+				})
+			case "被挤出歌手":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"result": map[string]any{
+						"artists": []map[string]any{{"id": 103, "name": "被挤出歌手", "picUrl": srv.URL + "/busy.jpg"}},
+					},
+				})
+			case "超时歌手":
+				attempt := timeoutSearchCalls.Add(1)
+				if attempt == 1 {
+					select {
+					case <-time.After(5 * time.Second):
+					case <-r.Context().Done():
+						return
+					}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"result": map[string]any{
+						"artists": []map[string]any{{"id": 104, "name": "超时歌手", "picUrl": srv.URL + "/timeout.jpg"}},
+					},
+				})
+			default:
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "result": map[string]any{"artists": []any{}}})
+			}
+		case "/search/artist":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+		case "/slow.jpg":
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(slowJPEG)
+		case "/live.jpg":
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(liveJPEG)
+		case "/busy.jpg":
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(busyJPEG)
+		case "/timeout.jpg":
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(timeoutJPEG)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	defer func() { _ = svc.Close() }()
+
+	svc.SetArtistArtworkOptions(library.ArtistArtworkOptions{
+		NeteaseBaseURL: srv.URL,
+		DeezerBaseURL:  srv.URL,
+	})
+
+	httpSrv, sessionCookie := newArtistHTTPTestServerAndCookie(t, storeInstance, coord, svc, pool, root, dataDir)
+
+	// 1. Slow upstream (1.1s): 3 concurrent/repeated default requests must return 404 + no-store in <150ms,
+	// deduplicate background prefetch, and return 200 + public max-age=86400 once prefetch finishes.
+	var fastWG sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		fastWG.Add(1)
+		go func() {
+			defer fastWG.Done()
+			start := time.Now()
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("慢速歌手"), nil)
+			req.AddCookie(sessionCookie)
+			httpSrv.ServeHTTP(rec, req)
+			elapsed := time.Since(start)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("expected non-blocking 404, got %d", rec.Code)
+			}
+			if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+				t.Errorf("expected Cache-Control: no-store on 404, got %q", cc)
+			}
+			if elapsed >= 150*time.Millisecond {
+				t.Errorf("expected fast non-blocking response <150ms, took %v", elapsed)
+			}
+		}()
+	}
+	fastWG.Wait()
+
+	deadline := time.Now().Add(4 * time.Second)
+	var slowHit bool
+	for time.Now().Before(deadline) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("慢速歌手"), nil)
+		req.AddCookie(sessionCookie)
+		httpSrv.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			if !bytes.Equal(rec.Body.Bytes(), slowJPEG) {
+				t.Fatalf("prefetched avatar bytes mismatch")
+			}
+			if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=86400" {
+				t.Fatalf("expected Cache-Control: public, max-age=86400 after prefetch, got %q", cc)
+			}
+			slowHit = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !slowHit {
+		t.Fatalf("expected background prefetch to populate avatar within 4s")
+	}
+	if calls := slowSearchCalls.Load(); calls != 1 {
+		t.Fatalf("expected prefetchQueued dedup to issue 1 upstream search, got %d", calls)
+	}
+
+	// 2. liveSem capacity=2: while 2 ?live=1 requests occupy liveSem, a 3rd ?live=1 returns 404 + no-store
+	// quickly (<150ms) and triggers background prefetch, then the 2 held ?live=1 requests complete with 200.
+	var liveWG sync.WaitGroup
+	liveResults := make([]*httptest.ResponseRecorder, 2)
+	for i := 0; i < 2; i++ {
+		idx := i
+		liveWG.Add(1)
+		go func() {
+			defer liveWG.Done()
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape(fmt.Sprintf("占位歌手%d", idx+1))+"&live=1", nil)
+			req.AddCookie(sessionCookie)
+			httpSrv.ServeHTTP(rec, req)
+			liveResults[idx] = rec
+		}()
+	}
+
+	gateWait := time.Now().Add(2 * time.Second)
+	for liveInflight.Load() < 2 && time.Now().Before(gateWait) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if liveInflight.Load() < 2 {
+		t.Fatalf("expected 2 concurrent ?live=1 requests holding liveSem, got %d", liveInflight.Load())
+	}
+
+	busyStart := time.Now()
+	recBusy := httptest.NewRecorder()
+	reqBusy := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("被挤出歌手")+"&live=1", nil)
+	reqBusy.AddCookie(sessionCookie)
+	httpSrv.ServeHTTP(recBusy, reqBusy)
+	if busyElapsed := time.Since(busyStart); busyElapsed >= 150*time.Millisecond {
+		t.Fatalf("expected busy liveSem fallback <150ms, took %v", busyElapsed)
+	}
+	if recBusy.Code != http.StatusNotFound || recBusy.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected 404 + no-store when liveSem busy, got code=%d cc=%q", recBusy.Code, recBusy.Header().Get("Cache-Control"))
+	}
+
+	releaseGate()
+	liveWG.Wait()
+	for i, rec := range liveResults {
+		if rec == nil || rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), liveJPEG) {
+			t.Fatalf("live request %d failed: %+v", i, rec)
+		}
+		if rec.Header().Get("Cache-Control") != "public, max-age=86400" {
+			t.Fatalf("expected Cache-Control: public, max-age=86400 on live 200, got %q", rec.Header().Get("Cache-Control"))
+		}
+	}
+
+	// Busy fallback should have been prefetched in background.
+	busyDeadline := time.Now().Add(3 * time.Second)
+	var busyPrefetched bool
+	for time.Now().Before(busyDeadline) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("被挤出歌手"), nil)
+		req.AddCookie(sessionCookie)
+		httpSrv.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK && bytes.Equal(rec.Body.Bytes(), busyJPEG) {
+			busyPrefetched = true
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !busyPrefetched {
+		t.Fatalf("expected busy ?live=1 fallback to be prefetched in background")
+	}
+
+	// 3. ?live=1 short timeout (3.5s) fails fast and enqueues background prefetch.
+	timeoutStart := time.Now()
+	recTimeout := httptest.NewRecorder()
+	reqTimeout := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("超时歌手")+"&live=1", nil)
+	reqTimeout.AddCookie(sessionCookie)
+	httpSrv.ServeHTTP(recTimeout, reqTimeout)
+	timeoutElapsed := time.Since(timeoutStart)
+	if recTimeout.Code != http.StatusNotFound || recTimeout.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected 404 + no-store on live timeout, got code=%d cc=%q", recTimeout.Code, recTimeout.Header().Get("Cache-Control"))
+	}
+	if timeoutElapsed < 3200*time.Millisecond || timeoutElapsed > 4500*time.Millisecond {
+		t.Fatalf("expected ?live=1 timeout around 3.5s, got %v", timeoutElapsed)
+	}
+
+	toDeadline := time.Now().Add(3 * time.Second)
+	var toPrefetched bool
+	for time.Now().Before(toDeadline) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape("超时歌手"), nil)
+		req.AddCookie(sessionCookie)
+		httpSrv.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK && bytes.Equal(rec.Body.Bytes(), timeoutJPEG) {
+			toPrefetched = true
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !toPrefetched {
+		t.Fatalf("expected timed-out ?live=1 to enqueue background prefetch and succeed")
+	}
+}
+
+func TestArtistAvatarDirIndexCacheReuseAndInvalidation(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	rootDir := filepath.Join(tmp, "music")
+	libRoot := filepath.Join(rootDir, "library")
+	if err := os.MkdirAll(libRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(ctx, store.Options{Path: filepath.Join(tmp, "melokeep.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	root, rec, err := files.RegisterRoot(rootDir, "root-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRoot(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	coord := files.NewCoordinator(st, files.NewAssetLockManager(2*time.Second), []files.Root{root})
+
+	initialPNG := makeFakePNG(1900, "initial-local")
+	externalJPG := makeFakeJPEG(1950, "external-manual")
+	writtenJPG := makeFakeJPEG(2050, "candidate-written")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/written.jpg" {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write(writtenJPG)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+
+	// Empty DataDir avoids disk cache writes so directory index behavior is isolated.
+	rt := config.DefaultRuntimeConfig()
+	rt.DataDir = ""
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+
+	fetcher := library.NewArtistArtworkFetcher(pool, st, coord, library.ArtistArtworkOptions{
+		DirIndexTTL:     350 * time.Millisecond,
+		DisablePrefetch: true,
+	})
+	defer func() { _ = fetcher.Close() }()
+
+	initialDir := filepath.Join(libRoot, "初始歌手")
+	if err := os.MkdirAll(initialDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(initialDir, "artist.png"), initialPNG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. First lookup builds the TTL directory index and returns initialPNG.
+	got, mime, err := fetcher.ResolveArtistAvatarFast(ctx, snap, "初始歌手")
+	if err != nil || mime != "image/png" || !bytes.Equal(got, initialPNG) {
+		t.Fatalf("expected initial local hit, got err=%v mime=%q len=%d", err, mime, len(got))
+	}
+
+	// 2. Direct disk write bypassing WriteArtistArtworkFromCandidate must NOT be scanned until TTL expires.
+	extDir := filepath.Join(libRoot, "外部歌手")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extDir, "artist.jpg"), externalJPG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := fetcher.ResolveArtistAvatarFast(ctx, snap, "外部歌手"); err == nil {
+		t.Fatalf("expected cached directory index reuse to miss externally created folder within TTL")
+	}
+
+	// 3. WriteArtistArtworkFromCandidate writes artist.jpg into a brand new folder whose name differs
+	// from artistName (so memCache keyed by artistName cannot satisfy the lookup); dirIndex update must make it hit immediately.
+	targetFolder := filepath.Join(libRoot, "目录别名歌手")
+	writtenPath, status, err := fetcher.WriteArtistArtworkFromCandidate(ctx, snap, targetFolder, "其他歌手名", srv.URL+"/written.jpg")
+	if err != nil || status != "written" || writtenPath != filepath.Join(targetFolder, "artist.jpg") {
+		t.Fatalf("WriteArtistArtworkFromCandidate failed: path=%q status=%q err=%v", writtenPath, status, err)
+	}
+	gotWritten, mimeWritten, err := fetcher.ResolveArtistAvatarFast(ctx, snap, "目录别名歌手")
+	if err != nil || mimeWritten != "image/jpeg" || !bytes.Equal(gotWritten, writtenJPG) {
+		t.Fatalf("expected dirIndex update to make newly written artist.jpg visible immediately, got err=%v mime=%q len=%d", err, mimeWritten, len(gotWritten))
+	}
+
+	// External folder is still invisible while TTL has not expired (proves targeted update without full rescan).
+	if _, _, err := fetcher.ResolveArtistAvatarFast(ctx, snap, "外部歌手"); err == nil {
+		t.Fatalf("expected unrelated external folder to remain invisible before TTL expiry")
+	}
+
+	// 4. After TTL expires, directory index refreshes and discovers external folder.
+	time.Sleep(400 * time.Millisecond)
+	gotExt, mimeExt, err := fetcher.ResolveArtistAvatarFast(ctx, snap, "外部歌手")
+	if err != nil || mimeExt != "image/jpeg" || !bytes.Equal(gotExt, externalJPG) {
+		t.Fatalf("expected refreshed dirIndex after TTL expiry to find external artist.jpg, got err=%v mime=%q len=%d", err, mimeExt, len(gotExt))
+	}
+}
+
+func TestArtistAvatarServiceCloseAndNilLibraryNoGoroutineLeak(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	rootDir := filepath.Join(tmp, "music")
+	dataDir := filepath.Join(tmp, "data")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, store.Options{Path: filepath.Join(tmp, "melokeep.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	root, rec, err := files.RegisterRoot(rootDir, "root-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRoot(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	coord := files.NewCoordinator(st, files.NewAssetLockManager(2*time.Second), []files.Root{root})
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/search/get/web" {
+			select {
+			case <-time.After(800 * time.Millisecond):
+			case <-r.Context().Done():
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "result": map[string]any{"artists": []any{}}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	// Give runtime a moment to stabilize baseline goroutine count.
+	runtime.GC()
+	time.Sleep(30 * time.Millisecond)
+	baseGoroutines := runtime.NumGoroutine()
+
+	rt := config.DefaultRuntimeConfig()
+	rt.DataDir = dataDir
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+	scraper := library.NewScraper(pool, nil, nil, library.ScraperOptions{})
+	svc := library.NewService(st, coord, nil, nil, scraper, library.ServiceOptions{
+		SnapshotProvider: func() config.Snapshot { return snap },
+	})
+	svc.SetArtistArtworkOptions(library.ArtistArtworkOptions{
+		NeteaseBaseURL: srv.URL,
+		DeezerBaseURL:  srv.URL,
+	})
+
+	httpSrv, sessionCookie := newArtistHTTPTestServerAndCookie(t, st, coord, svc, pool, root, dataDir)
+
+	for i := 0; i < 8; i++ {
+		recReq := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape(fmt.Sprintf("关闭测试歌手-%d", i)), nil)
+		req.AddCookie(sessionCookie)
+		httpSrv.ServeHTTP(recReq, req)
+		if recReq.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", recReq.Code)
+		}
+	}
+
+	if err := svc.Close(); err != nil {
+		t.Fatalf("svc.Close failed: %v", err)
+	}
+	// Idempotent second Close and post-Close Fast call must not panic or leak.
+	if err := svc.Close(); err != nil {
+		t.Fatalf("second svc.Close failed: %v", err)
+	}
+	if _, _, err := svc.ResolveArtistAvatarFast(ctx, snap, "关闭后歌手"); err == nil {
+		t.Fatalf("expected NotFound after Close")
+	}
+
+	// Nil Library path in handleArtistAvatar must not leak background worker goroutines either.
+	nilLibSrv, nilCookie := newArtistHTTPTestServerAndCookie(t, st, coord, nil, pool, root, dataDir)
+	for i := 0; i < 4; i++ {
+		recReq := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/artists/avatar?name="+url.QueryEscape(fmt.Sprintf("临时歌手-%d", i)), nil)
+		req.AddCookie(nilCookie)
+		nilLibSrv.ServeHTTP(recReq, req)
+		if recReq.Code != http.StatusNotFound || recReq.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("expected 404 + no-store for nil Library, got code=%d cc=%q", recReq.Code, recReq.Header().Get("Cache-Control"))
+		}
+	}
+
+	pool.CloseAll()
+
+	leakDeadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(leakDeadline) {
+		if runtime.NumGoroutine() <= baseGoroutines {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > baseGoroutines {
+		t.Fatalf("goroutine leak after Close: base=%d after=%d", baseGoroutines, got)
 	}
 }

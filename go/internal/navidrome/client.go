@@ -246,10 +246,14 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, extra u
 	if stream {
 		maxBytes = -1
 	}
+	timeout := 30 * time.Second
+	if endpoint == "getCoverArt" {
+		timeout = 5 * time.Second
+	}
 	opts := transport.RequestOptions{
 		Domain:                 transport.DomainConfiguredInternal,
 		ConfigRevision:         rev,
-		Timeout:                30 * time.Second,
+		Timeout:                timeout,
 		MaxResponseBytes:       maxBytes,
 		AllowedInternalOrigins: []string{origin},
 		HasSideEffects:         strings.EqualFold(method, http.MethodPost),

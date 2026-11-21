@@ -395,6 +395,7 @@ func (s *Service) artworkFetcher() *ArtistArtworkFetcher {
 	if s == nil {
 		return nil
 	}
+	closed := s.isClosed()
 	s.artworkMu.Lock()
 	defer s.artworkMu.Unlock()
 	if s.artwork == nil {
@@ -402,7 +403,9 @@ func (s *Service) artworkFetcher() *ArtistArtworkFetcher {
 		if s.scraper != nil {
 			artPool = s.scraper.pool
 		}
-		s.artwork = NewArtistArtworkFetcher(artPool, s.store, s.coordinator, ArtistArtworkOptions{})
+		s.artwork = NewArtistArtworkFetcher(artPool, s.store, s.coordinator, ArtistArtworkOptions{
+			DisablePrefetch: closed,
+		})
 	}
 	return s.artwork
 }
@@ -452,6 +455,9 @@ func (s *Service) startBackground(fn func(ctx context.Context)) bool {
 }
 
 func (s *Service) Close() error {
+	if s == nil {
+		return nil
+	}
 	s.ctrlMu.Lock()
 	alreadyClosed := s.closed
 	s.closed = true
@@ -464,6 +470,13 @@ func (s *Service) Close() error {
 		s.watcher.Close()
 	}
 	s.bgWG.Wait()
+
+	s.artworkMu.Lock()
+	artwork := s.artwork
+	s.artworkMu.Unlock()
+	if artwork != nil {
+		_ = artwork.Close()
+	}
 	return nil
 }
 

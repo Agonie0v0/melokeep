@@ -35,8 +35,13 @@ const (
 	defaultArtistMaxImageBytes     = 10 * 1024 * 1024
 	defaultArtistNegativeTTL       = 10 * time.Minute
 	defaultArtistMemoryCacheTTL    = 15 * time.Minute
+	defaultArtistDirIndexTTL       = 30 * time.Second
 	maxArtistMemoryCacheEntries    = 256
 	artistFetchTimeout             = 6 * time.Second
+	artistLiveFetchTimeout         = 3500 * time.Millisecond
+	artistPrefetchQueueSize        = 128
+	artistPrefetchWorkers          = 2
+	artistLiveConcurrency          = 2
 )
 
 var (
@@ -85,12 +90,14 @@ var (
 
 // ArtistArtworkOptions configures base URLs, thresholds, and cache TTLs for artist avatar scraping.
 type ArtistArtworkOptions struct {
-	NeteaseBaseURL string
-	DeezerBaseURL  string
-	NegativeTTL    time.Duration
-	MemoryCacheTTL time.Duration
-	MinImageBytes  int
-	MaxImageBytes  int
+	NeteaseBaseURL  string
+	DeezerBaseURL   string
+	NegativeTTL     time.Duration
+	MemoryCacheTTL  time.Duration
+	DirIndexTTL     time.Duration
+	MinImageBytes   int
+	MaxImageBytes   int
+	DisablePrefetch bool
 }
 
 // ArtistArtworkLookup describes the resolved candidate and bytes for an artist.
@@ -113,8 +120,15 @@ type cachedArtistAvatar struct {
 }
 
 type inflightArtistLookup struct {
-	done chan struct{}
-	res  ArtistArtworkLookup
+	done          chan struct{}
+	res           ArtistArtworkLookup
+	leaderAborted bool
+}
+
+type artistPrefetchTask struct {
+	snap       config.Snapshot
+	artistName string
+	key        string
 }
 
 // ArtistArtworkFetcher scrapes, validates, caches, and atomically persists artist portraits.
@@ -129,19 +143,46 @@ type ArtistArtworkFetcher struct {
 	memCache map[string]cachedArtistAvatar
 	inflight map[string]*inflightArtistLookup
 	dirLocks map[string]*sync.Mutex
+
+	dirIndexBuildMu   sync.Mutex
+	dirIndexMu        sync.Mutex
+	dirIndexExpiresAt time.Time
+	dirIndexBaseDirs  map[string]bool
+	dirIndexExact     map[string][]string
+	dirIndexNorm      map[string][]string
+	dirIndexGen       uint64
+
+	prefetchMu      sync.Mutex
+	disablePrefetch bool
+	closed          bool
+	prefetchCh      chan artistPrefetchTask
+	prefetchQueued  map[string]bool
+	liveSem         chan struct{}
+	prefetchOnce    sync.Once
+	prefetchCtx     context.Context
+	prefetchCancel  context.CancelFunc
+	prefetchWG      sync.WaitGroup
 }
 
 // NewArtistArtworkFetcher constructs an ArtistArtworkFetcher using the given transport pool and stores.
 func NewArtistArtworkFetcher(pool *transport.Pool, st *store.Store, coords *files.Coordinator, opts ArtistArtworkOptions) *ArtistArtworkFetcher {
+	normOpts := normalizeArtistArtworkOptions(opts)
+	prefetchCtx, prefetchCancel := context.WithCancel(context.Background())
 	return &ArtistArtworkFetcher{
-		pool:     pool,
-		store:    st,
-		coords:   coords,
-		opts:     normalizeArtistArtworkOptions(opts),
-		negCache: make(map[string]time.Time),
-		memCache: make(map[string]cachedArtistAvatar),
-		inflight: make(map[string]*inflightArtistLookup),
-		dirLocks: make(map[string]*sync.Mutex),
+		pool:            pool,
+		store:           st,
+		coords:          coords,
+		opts:            normOpts,
+		disablePrefetch: normOpts.DisablePrefetch,
+		negCache:        make(map[string]time.Time),
+		memCache:        make(map[string]cachedArtistAvatar),
+		inflight:        make(map[string]*inflightArtistLookup),
+		dirLocks:        make(map[string]*sync.Mutex),
+		prefetchCh:      make(chan artistPrefetchTask, artistPrefetchQueueSize),
+		prefetchQueued:  make(map[string]bool),
+		liveSem:         make(chan struct{}, artistLiveConcurrency),
+		prefetchCtx:     prefetchCtx,
+		prefetchCancel:  prefetchCancel,
 	}
 }
 
@@ -160,6 +201,9 @@ func normalizeArtistArtworkOptions(opts ArtistArtworkOptions) ArtistArtworkOptio
 	if opts.MemoryCacheTTL <= 0 {
 		opts.MemoryCacheTTL = defaultArtistMemoryCacheTTL
 	}
+	if opts.DirIndexTTL <= 0 {
+		opts.DirIndexTTL = defaultArtistDirIndexTTL
+	}
 	if opts.MinImageBytes <= 0 {
 		opts.MinImageBytes = defaultArtistMinImageBytes
 	}
@@ -174,11 +218,45 @@ func (f *ArtistArtworkFetcher) SetOptions(opts ArtistArtworkOptions) {
 	if f == nil {
 		return
 	}
+	normOpts := normalizeArtistArtworkOptions(opts)
 	f.mu.Lock()
-	f.opts = normalizeArtistArtworkOptions(opts)
+	f.opts = normOpts
 	clear(f.negCache)
 	clear(f.memCache)
 	f.mu.Unlock()
+
+	f.dirIndexMu.Lock()
+	f.dirIndexExpiresAt = time.Time{}
+	f.dirIndexBaseDirs = nil
+	f.dirIndexExact = nil
+	f.dirIndexNorm = nil
+	f.dirIndexGen++
+	f.dirIndexMu.Unlock()
+
+	f.prefetchMu.Lock()
+	f.disablePrefetch = normOpts.DisablePrefetch
+	f.prefetchMu.Unlock()
+}
+
+// Close cancels background prefetch workers and waits for clean exit without closing prefetchCh.
+func (f *ArtistArtworkFetcher) Close() error {
+	if f == nil {
+		return nil
+	}
+	f.prefetchMu.Lock()
+	if f.closed {
+		f.prefetchMu.Unlock()
+		return nil
+	}
+	f.closed = true
+	cancel := f.prefetchCancel
+	f.prefetchMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	f.prefetchWG.Wait()
+	return nil
 }
 
 func (f *ArtistArtworkFetcher) options() ArtistArtworkOptions {
@@ -664,79 +742,87 @@ func (f *ArtistArtworkFetcher) LookupArtistArtwork(ctx context.Context, snap con
 		return cached
 	}
 
-	f.mu.Lock()
-	if call, ok := f.inflight[key]; ok {
-		f.mu.Unlock()
-		select {
-		case <-call.done:
-			res := call.res
-			if res.Found {
-				res.Data = append([]byte(nil), res.Data...)
-				f.writeDiskCache(snap, primary, res.Data)
-			}
-			return res
-		case <-ctx.Done():
-			return ArtistArtworkLookup{Artist: primary, Err: ctx.Err()}
-		}
-	}
-	call := &inflightArtistLookup{done: make(chan struct{})}
-	f.inflight[key] = call
-	f.mu.Unlock()
-
-	var res ArtistArtworkLookup
-	defer func() {
-		call.res = res
-		close(call.done)
+	for attempt := 0; attempt < 2; attempt++ {
 		f.mu.Lock()
-		if f.inflight[key] == call {
-			delete(f.inflight, key)
+		if call, ok := f.inflight[key]; ok {
+			f.mu.Unlock()
+			select {
+			case <-call.done:
+				if call.leaderAborted && ctx.Err() == nil && attempt == 0 {
+					continue
+				}
+				res := call.res
+				if res.Found {
+					res.Data = append([]byte(nil), res.Data...)
+					f.writeDiskCache(snap, primary, res.Data)
+				}
+				return res
+			case <-ctx.Done():
+				return ArtistArtworkLookup{Artist: primary, Err: ctx.Err()}
+			}
 		}
+		call := &inflightArtistLookup{done: make(chan struct{})}
+		f.inflight[key] = call
 		f.mu.Unlock()
-	}()
 
-	if !f.hasPool() {
-		res = ArtistArtworkLookup{Artist: primary, Err: errors.New("网络传输池未初始化")}
+		var res ArtistArtworkLookup
+		func() {
+			defer func() {
+				call.res = res
+				call.leaderAborted = ctx.Err() != nil
+				close(call.done)
+				f.mu.Lock()
+				if f.inflight[key] == call {
+					delete(f.inflight, key)
+				}
+				f.mu.Unlock()
+			}()
+
+			if !f.hasPool() {
+				res = ArtistArtworkLookup{Artist: primary, Err: errors.New("网络传输池未初始化")}
+				return
+			}
+
+			// Keep ctx respected so Shutdown/Cancel or short live timeouts immediately abort in-flight requests.
+			fetchCtx, cancel := context.WithTimeout(ctx, artistFetchTimeout*2)
+			defer cancel()
+
+			var lastErr error
+			allCleanMiss := true
+			for _, query := range cands {
+				src, imgURL, data, mime, cleanMiss, err := f.scrapeAcrossSources(fetchCtx, snap, query)
+				if err == nil && len(data) > 0 {
+					res = ArtistArtworkLookup{
+						Artist:   primary,
+						Source:   src,
+						ImageURL: imgURL,
+						MIME:     mime,
+						Data:     data,
+						Found:    true,
+					}
+					f.writeDiskCache(snap, primary, data)
+					f.putPositiveCache(key, res)
+					return
+				}
+				if !cleanMiss {
+					allCleanMiss = false
+				}
+				if err != nil {
+					lastErr = err
+				}
+			}
+
+			if allCleanMiss && ctx.Err() == nil && fetchCtx.Err() == nil {
+				f.putNegativeCache(key)
+			}
+			if lastErr == nil {
+				lastErr = errors.New("未匹配到有效歌手写真")
+			}
+			res = ArtistArtworkLookup{Artist: primary, Found: false, Err: lastErr}
+		}()
 		return res
 	}
-
-	// Detach caller cancel from shared singleflight? Only use bounded fetch timeout on background?
-	// Keep ctx respected so Shutdown/Cancel immediately aborts in-flight requests.
-	fetchCtx, cancel := context.WithTimeout(ctx, artistFetchTimeout*2)
-	defer cancel()
-
-	var lastErr error
-	allCleanMiss := true
-	for _, query := range cands {
-		src, imgURL, data, mime, cleanMiss, err := f.scrapeAcrossSources(fetchCtx, snap, query)
-		if err == nil && len(data) > 0 {
-			res = ArtistArtworkLookup{
-				Artist:   primary,
-				Source:   src,
-				ImageURL: imgURL,
-				MIME:     mime,
-				Data:     data,
-				Found:    true,
-			}
-			f.writeDiskCache(snap, primary, data)
-			f.putPositiveCache(key, res)
-			return res
-		}
-		if !cleanMiss {
-			allCleanMiss = false
-		}
-		if err != nil {
-			lastErr = err
-		}
-	}
-
-	if allCleanMiss && ctx.Err() == nil {
-		f.putNegativeCache(key)
-	}
-	if lastErr == nil {
-		lastErr = errors.New("未匹配到有效歌手写真")
-	}
-	res = ArtistArtworkLookup{Artist: primary, Found: false, Err: lastErr}
-	return res
+	return ArtistArtworkLookup{Artist: primary, Found: false, Err: errors.New("未匹配到有效歌手写真")}
 }
 
 func (f *ArtistArtworkFetcher) scrapeAcrossSources(ctx context.Context, snap config.Snapshot, artistQuery string) (source, imageURL string, data []byte, mime string, cleanMiss bool, err error) {
@@ -1117,10 +1203,17 @@ func (f *ArtistArtworkFetcher) writeFromCacheIfAvailable(snap config.Snapshot, a
 	unlock := f.lockForDir(artistDir)
 	defer unlock()
 	if _, _, exists := findExistingArtistArtwork(artistDir); exists {
+		f.recordArtistDirInIndex(artistDir)
+		f.clearNegativeCache(artistName, artistDir)
 		return true
 	}
 	target := filepath.Join(artistDir, "artist.jpg")
-	return writeFileAtomic(target, data) == nil
+	if writeFileAtomic(target, data) != nil {
+		return false
+	}
+	f.recordArtistDirInIndex(artistDir)
+	f.clearNegativeCache(artistName, artistDir)
+	return true
 }
 
 func (f *ArtistArtworkFetcher) EnsureArtistArtwork(ctx context.Context, snap config.Snapshot, libRoot, audioPath, artistName string) (targetPath, status string, err error) {
@@ -1133,6 +1226,8 @@ func (f *ArtistArtworkFetcher) EnsureArtistArtwork(ctx context.Context, snap con
 	}
 
 	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		f.recordArtistDirInIndex(artistDir)
+		f.clearNegativeCache(artistName, artistDir)
 		return existing, "exists", nil
 	}
 
@@ -1148,6 +1243,8 @@ func (f *ArtistArtworkFetcher) EnsureArtistArtwork(ctx context.Context, snap con
 	defer unlock()
 
 	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		f.recordArtistDirInIndex(artistDir)
+		f.clearNegativeCache(artistName, artistDir)
 		return existing, "exists", nil
 	}
 
@@ -1155,11 +1252,13 @@ func (f *ArtistArtworkFetcher) EnsureArtistArtwork(ctx context.Context, snap con
 	if err := writeFileAtomic(target, res.Data); err != nil {
 		return "", "", err
 	}
+	f.recordArtistDirInIndex(artistDir)
+	f.clearNegativeCache(artistName, artistDir)
 	return target, "written", nil
 }
 
 // WriteArtistArtworkFromCandidate writes `<artistDir>/artist.jpg` atomically using disk/memory cache,
-// the preselected coverURL, or multi-source lookup fallback, also updating disk cache.
+// the preselected coverURL, or multi-source lookup fallback, also updating disk cache and directory index.
 func (f *ArtistArtworkFetcher) WriteArtistArtworkFromCandidate(ctx context.Context, snap config.Snapshot, artistDir, artistName, coverURL string) (targetPath, status string, err error) {
 	if f == nil {
 		return "", "skipped", errors.New("歌手头像抓取器未初始化")
@@ -1173,6 +1272,8 @@ func (f *ArtistArtworkFetcher) WriteArtistArtworkFromCandidate(ctx context.Conte
 	}
 
 	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		f.recordArtistDirInIndex(artistDir)
+		f.clearNegativeCache(artistName, artistDir)
 		return existing, "exists", nil
 	}
 
@@ -1219,17 +1320,154 @@ func (f *ArtistArtworkFetcher) WriteArtistArtworkFromCandidate(ctx context.Conte
 	defer unlock()
 
 	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		f.recordArtistDirInIndex(artistDir)
+		f.clearNegativeCache(artistName, artistDir)
 		return existing, "exists", nil
 	}
 	target := filepath.Join(artistDir, "artist.jpg")
 	if err := writeFileAtomic(target, data); err != nil {
 		return "", "", err
 	}
+	f.recordArtistDirInIndex(artistDir)
+	f.clearNegativeCache(artistName, artistDir)
+	if mime := detectArtworkMIME(data); mime != "" {
+		f.putPositiveCache(strings.ToLower(primary), ArtistArtworkLookup{
+			Artist: primary,
+			Source: "local",
+			MIME:   mime,
+			Data:   data,
+			Found:  true,
+		})
+	}
 	return target, "written", nil
 }
 
+func (f *ArtistArtworkFetcher) clearNegativeCache(artistName, artistDir string) {
+	if f == nil {
+		return
+	}
+	keys := make([]string, 0, 4)
+	for _, cand := range normalizeArtistCandidates(artistName) {
+		if k := strings.ToLower(cand); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	if base := strings.TrimSpace(filepath.Base(artistDir)); base != "" && base != "." && base != string(filepath.Separator) {
+		keys = append(keys, strings.ToLower(collapseWhitespace(base)))
+	}
+	if len(keys) == 0 {
+		return
+	}
+	f.mu.Lock()
+	for _, k := range keys {
+		delete(f.negCache, k)
+	}
+	f.mu.Unlock()
+}
+
+func (f *ArtistArtworkFetcher) resolveCachedOrLocalArtistAvatar(ctx context.Context, snap config.Snapshot, cands []string) (data []byte, mime string, found bool, negHit bool) {
+	if len(cands) == 0 {
+		return nil, "", false, false
+	}
+	primary := cands[0]
+	key := strings.ToLower(primary)
+
+	if cached, hit := f.getMemoryCache(key); hit {
+		if cached.Found && len(cached.Data) > 0 {
+			return cached.Data, cached.MIME, true, false
+		}
+		return nil, "", false, true
+	}
+
+	if raw, m, ok := f.scanLocalRootsForArtistAvatar(ctx, cands); ok {
+		f.putPositiveCache(key, ArtistArtworkLookup{
+			Artist: primary,
+			Source: "local",
+			MIME:   m,
+			Data:   raw,
+			Found:  true,
+		})
+		return raw, m, true, false
+	}
+
+	for _, cand := range cands {
+		if raw, m, ok := f.readDiskCacheExact(snap, cand); ok {
+			f.putPositiveCache(key, ArtistArtworkLookup{
+				Artist: primary,
+				Source: "cache",
+				MIME:   m,
+				Data:   raw,
+				Found:  true,
+			})
+			return raw, m, true, false
+		}
+	}
+	return nil, "", false, false
+}
+
+// ResolveArtistAvatarFast resolves artist avatar bytes strictly from in-memory cache, 30s local directory
+// index, and disk cache without blocking on remote upstream requests. On cache miss, it enqueues a
+// deduplicated background prefetch task and immediately returns NotFound.
+func (f *ArtistArtworkFetcher) ResolveArtistAvatarFast(ctx context.Context, snap config.Snapshot, artistName string) ([]byte, string, error) {
+	if f == nil {
+		return nil, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "歌手头像服务未初始化")
+	}
+	cands := normalizeArtistCandidates(artistName)
+	if len(cands) == 0 {
+		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "歌手头像不存在")
+	}
+	if data, mime, ok, negHit := f.resolveCachedOrLocalArtistAvatar(ctx, snap, cands); ok {
+		return data, mime, nil
+	} else if negHit {
+		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
+	}
+
+	f.enqueuePrefetch(snap, artistName)
+	return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
+}
+
+// ResolveArtistAvatarLive resolves artist avatar bytes from cache/local index first, and on miss
+// acquires a bounded live scrape slot (capacity 2) with a short 3.5s timeout. If the live slot is
+// busy or the scrape times out, it enqueues background prefetch and returns NotFound.
+func (f *ArtistArtworkFetcher) ResolveArtistAvatarLive(ctx context.Context, snap config.Snapshot, artistName string) ([]byte, string, error) {
+	if f == nil {
+		return nil, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "歌手头像服务未初始化")
+	}
+	cands := normalizeArtistCandidates(artistName)
+	if len(cands) == 0 {
+		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "歌手头像不存在")
+	}
+	if data, mime, ok, negHit := f.resolveCachedOrLocalArtistAvatar(ctx, snap, cands); ok {
+		return data, mime, nil
+	} else if negHit {
+		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
+	}
+
+	if f.liveSem != nil {
+		select {
+		case f.liveSem <- struct{}{}:
+			defer func() { <-f.liveSem }()
+		default:
+			f.enqueuePrefetch(snap, artistName)
+			return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
+		}
+	}
+
+	liveCtx, cancel := context.WithTimeout(ctx, artistLiveFetchTimeout)
+	defer cancel()
+
+	res := f.LookupArtistArtwork(liveCtx, snap, artistName)
+	if res.Found && len(res.Data) > 0 {
+		return res.Data, res.MIME, nil
+	}
+	if ctx.Err() == nil && errors.Is(liveCtx.Err(), context.DeadlineExceeded) {
+		f.enqueuePrefetch(snap, artistName)
+	}
+	return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
+}
+
 // ResolveArtistAvatar resolves artist avatar bytes with priority:
-// 1) `<localLibraryRoot>/<Artist>/artist.{jpg,jpeg,png,webp}` (case-insensitive first-level dir scan),
+// 1) `<localLibraryRoot>/<Artist>/artist.{jpg,jpeg,png,webp}` (30s cached first-level dir index),
 // 2) `<dataDir>/artist-avatars/<sha256(lower(name))>.jpg` disk cache,
 // 3) live Netease/Deezer scrape + disk cache writeback.
 func (f *ArtistArtworkFetcher) ResolveArtistAvatar(ctx context.Context, snap config.Snapshot, artistName string) ([]byte, string, error) {
@@ -1240,15 +1478,10 @@ func (f *ArtistArtworkFetcher) ResolveArtistAvatar(ctx context.Context, snap con
 	if len(cands) == 0 {
 		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "歌手头像不存在")
 	}
-
-	if raw, mime, ok := f.scanLocalRootsForArtistAvatar(ctx, cands); ok {
-		return raw, mime, nil
-	}
-
-	for _, cand := range cands {
-		if raw, mime, ok := f.readDiskCacheExact(snap, cand); ok {
-			return raw, mime, nil
-		}
+	if data, mime, ok, negHit := f.resolveCachedOrLocalArtistAvatar(ctx, snap, cands); ok {
+		return data, mime, nil
+	} else if negHit {
+		return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
 	}
 
 	res := f.LookupArtistArtwork(ctx, snap, artistName)
@@ -1258,64 +1491,278 @@ func (f *ArtistArtworkFetcher) ResolveArtistAvatar(ctx context.Context, snap con
 	return nil, "", model.NewError(model.ErrNotFound, http.StatusNotFound, "未找到歌手头像")
 }
 
-func (f *ArtistArtworkFetcher) scanLocalRootsForArtistAvatar(ctx context.Context, artistCandidates []string) ([]byte, string, bool) {
-	baseDirs := f.collectLocalSearchBaseDirs(ctx)
-	if len(baseDirs) == 0 {
-		return nil, "", false
+func (f *ArtistArtworkFetcher) enqueuePrefetch(snap config.Snapshot, artistName string) {
+	if f == nil || f.prefetchCh == nil {
+		return
+	}
+	key := artistCacheKey(artistName)
+	if key == "" {
+		return
+	}
+	if _, hit := f.getMemoryCache(key); hit {
+		return
 	}
 
-	// Pass 1: exact case-insensitive match on folder name; Pass 2: SafeSegment / normalized match.
-	for pass := 0; pass < 2; pass++ {
-		for _, baseDir := range baseDirs {
-			entries, err := os.ReadDir(baseDir)
-			if err != nil {
-				continue
+	f.prefetchMu.Lock()
+	defer f.prefetchMu.Unlock()
+	if f.closed || f.disablePrefetch || !f.hasPool() {
+		return
+	}
+	if f.prefetchQueued[key] {
+		return
+	}
+	f.prefetchOnce.Do(func() {
+		for i := 0; i < artistPrefetchWorkers; i++ {
+			f.prefetchWG.Add(1)
+			go f.prefetchWorker()
+		}
+	})
+	select {
+	case f.prefetchCh <- artistPrefetchTask{snap: snap, artistName: artistName, key: key}:
+		f.prefetchQueued[key] = true
+	default:
+	}
+}
+
+func (f *ArtistArtworkFetcher) prefetchWorker() {
+	defer f.prefetchWG.Done()
+	for {
+		select {
+		case <-f.prefetchCtx.Done():
+			return
+		case task := <-f.prefetchCh:
+			if f.prefetchCtx.Err() != nil {
+				return
 			}
-			for _, entry := range entries {
-				if ctx.Err() != nil {
-					return nil, "", false
-				}
-				name := entry.Name()
-				if name == "" || files.InternalDirs[name] || strings.HasPrefix(name, ".melokeep-") || strings.HasPrefix(name, ".") {
-					continue
-				}
-				subDir := filepath.Join(baseDir, name)
-				st, sErr := os.Lstat(subDir)
-				if sErr != nil || !st.IsDir() {
-					continue
-				}
-				if isLink, lErr := files.IsReparseOrSymlink(subDir, st); lErr != nil || isLink {
-					continue
-				}
-				matched := false
-				if pass == 0 {
-					for _, cand := range artistCandidates {
-						if strings.EqualFold(name, cand) {
-							matched = true
-							break
-						}
-					}
-				} else {
-					matched = artistSegmentMatches(name, artistCandidates)
-				}
-				if !matched {
-					continue
-				}
-				artPath, _, ok := findExistingArtistArtwork(subDir)
-				if !ok {
-					continue
-				}
-				raw, rErr := os.ReadFile(artPath)
-				if rErr != nil || len(raw) == 0 || len(raw) > f.options().MaxImageBytes {
-					continue
-				}
-				mime := detectArtworkMIME(raw)
-				if mime == "" {
-					continue
-				}
-				return raw, mime, true
+			f.runPrefetchTask(f.prefetchCtx, task)
+		}
+	}
+}
+
+func (f *ArtistArtworkFetcher) runPrefetchTask(ctx context.Context, task artistPrefetchTask) {
+	defer func() {
+		f.prefetchMu.Lock()
+		delete(f.prefetchQueued, task.key)
+		f.prefetchMu.Unlock()
+	}()
+	if ctx.Err() != nil {
+		return
+	}
+	tCtx, cancel := context.WithTimeout(ctx, artistFetchTimeout*2)
+	defer cancel()
+	_ = f.LookupArtistArtwork(tCtx, task.snap, task.artistName)
+}
+
+func dirIndexPathKey(p string) string {
+	clean := filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(clean)
+	}
+	return clean
+}
+
+func appendUniqueDir(dst []string, dir string) []string {
+	key := dirIndexPathKey(dir)
+	for _, existing := range dst {
+		if dirIndexPathKey(existing) == key {
+			return dst
+		}
+	}
+	return append(dst, dir)
+}
+
+func (f *ArtistArtworkFetcher) recordArtistDirInIndex(artistDir string) {
+	if f == nil {
+		return
+	}
+	cleanDir := filepath.Clean(strings.TrimSpace(artistDir))
+	if cleanDir == "" || cleanDir == "." {
+		return
+	}
+	folderName := filepath.Base(cleanDir)
+	if folderName == "" || folderName == "." || files.InternalDirs[folderName] || strings.HasPrefix(folderName, ".melokeep-") || strings.HasPrefix(folderName, ".") || ignoredArtistNames[strings.ToLower(folderName)] {
+		return
+	}
+	st, err := os.Lstat(cleanDir)
+	if err != nil || !st.IsDir() {
+		return
+	}
+	if isLink, lErr := files.IsReparseOrSymlink(cleanDir, st); lErr != nil || isLink {
+		return
+	}
+
+	parentKey := dirIndexPathKey(filepath.Dir(cleanDir))
+	now := time.Now()
+	f.dirIndexMu.Lock()
+	defer f.dirIndexMu.Unlock()
+	f.dirIndexGen++
+	if f.dirIndexExpiresAt.IsZero() || !now.Before(f.dirIndexExpiresAt) {
+		return
+	}
+	if !f.dirIndexBaseDirs[parentKey] {
+		f.dirIndexExpiresAt = time.Time{}
+		f.dirIndexBaseDirs = nil
+		f.dirIndexExact = nil
+		f.dirIndexNorm = nil
+		return
+	}
+	if f.dirIndexExact == nil {
+		f.dirIndexExact = make(map[string][]string)
+	}
+	if f.dirIndexNorm == nil {
+		f.dirIndexNorm = make(map[string][]string)
+	}
+	exactKey := strings.ToLower(folderName)
+	f.dirIndexExact[exactKey] = appendUniqueDir(f.dirIndexExact[exactKey], cleanDir)
+	if norm := NormalizedMeta(folderName); norm != "" {
+		f.dirIndexNorm[norm] = appendUniqueDir(f.dirIndexNorm[norm], cleanDir)
+	}
+}
+
+func (f *ArtistArtworkFetcher) lookupLocalDirsFromIndex(ctx context.Context, artistCandidates []string) []string {
+	if f == nil || len(artistCandidates) == 0 || ctx.Err() != nil {
+		return nil
+	}
+	if err := f.ensureLocalDirIndex(ctx); err != nil {
+		return nil
+	}
+
+	now := time.Now()
+	f.dirIndexMu.Lock()
+	defer f.dirIndexMu.Unlock()
+	if f.dirIndexExpiresAt.IsZero() || !now.Before(f.dirIndexExpiresAt) {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var matched []string
+	addList := func(dirs []string) {
+		for _, d := range dirs {
+			k := dirIndexPathKey(d)
+			if !seen[k] {
+				seen[k] = true
+				matched = append(matched, d)
 			}
 		}
+	}
+
+	// Pass 1: exact case-insensitive match on folder name.
+	for _, cand := range artistCandidates {
+		addList(f.dirIndexExact[strings.ToLower(cand)])
+	}
+	// Pass 2: SafeSegment / normalized match.
+	for _, cand := range artistCandidates {
+		if safeCand := SafeSegment(cand, ""); safeCand != "" {
+			addList(f.dirIndexExact[strings.ToLower(safeCand)])
+		}
+		if normCand := NormalizedMeta(cand); normCand != "" {
+			addList(f.dirIndexNorm[normCand])
+		}
+	}
+	return matched
+}
+
+func (f *ArtistArtworkFetcher) ensureLocalDirIndex(ctx context.Context) error {
+	now := time.Now()
+	f.dirIndexMu.Lock()
+	valid := !f.dirIndexExpiresAt.IsZero() && now.Before(f.dirIndexExpiresAt)
+	f.dirIndexMu.Unlock()
+	if valid {
+		return nil
+	}
+
+	f.dirIndexBuildMu.Lock()
+	defer f.dirIndexBuildMu.Unlock()
+
+	now = time.Now()
+	f.dirIndexMu.Lock()
+	valid = !f.dirIndexExpiresAt.IsZero() && now.Before(f.dirIndexExpiresAt)
+	startGen := f.dirIndexGen
+	f.dirIndexMu.Unlock()
+	if valid {
+		return nil
+	}
+
+	baseDirs := f.collectLocalSearchBaseDirs(ctx)
+	baseSet := make(map[string]bool, len(baseDirs))
+	exact := make(map[string][]string)
+	normMap := make(map[string][]string)
+
+	for _, baseDir := range baseDirs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		baseSet[dirIndexPathKey(baseDir)] = true
+		entries, err := os.ReadDir(baseDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			name := entry.Name()
+			if name == "" || files.InternalDirs[name] || strings.HasPrefix(name, ".melokeep-") || strings.HasPrefix(name, ".") || ignoredArtistNames[strings.ToLower(name)] {
+				continue
+			}
+			if !entry.IsDir() {
+				continue
+			}
+			subDir := filepath.Join(baseDir, name)
+			st, sErr := os.Lstat(subDir)
+			if sErr != nil || !st.IsDir() {
+				continue
+			}
+			if isLink, lErr := files.IsReparseOrSymlink(subDir, st); lErr != nil || isLink {
+				continue
+			}
+			exactKey := strings.ToLower(name)
+			exact[exactKey] = appendUniqueDir(exact[exactKey], subDir)
+			if norm := NormalizedMeta(name); norm != "" {
+				normMap[norm] = appendUniqueDir(normMap[norm], subDir)
+			}
+		}
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	ttl := f.options().DirIndexTTL
+	f.dirIndexMu.Lock()
+	if f.dirIndexGen == startGen {
+		f.dirIndexBaseDirs = baseSet
+		f.dirIndexExact = exact
+		f.dirIndexNorm = normMap
+		f.dirIndexExpiresAt = time.Now().Add(ttl)
+	}
+	f.dirIndexMu.Unlock()
+	return nil
+}
+
+func (f *ArtistArtworkFetcher) scanLocalRootsForArtistAvatar(ctx context.Context, artistCandidates []string) ([]byte, string, bool) {
+	matchedDirs := f.lookupLocalDirsFromIndex(ctx, artistCandidates)
+	if len(matchedDirs) == 0 {
+		return nil, "", false
+	}
+	maxBytes := f.options().MaxImageBytes
+	for _, subDir := range matchedDirs {
+		if ctx.Err() != nil {
+			return nil, "", false
+		}
+		artPath, _, ok := findExistingArtistArtwork(subDir)
+		if !ok {
+			continue
+		}
+		raw, rErr := os.ReadFile(artPath)
+		if rErr != nil || len(raw) == 0 || len(raw) > maxBytes {
+			continue
+		}
+		mime := detectArtworkMIME(raw)
+		if mime == "" {
+			continue
+		}
+		return raw, mime, true
 	}
 	return nil, "", false
 }
@@ -1400,4 +1847,20 @@ func (s *Service) ResolveArtistAvatar(ctx context.Context, snap config.Snapshot,
 		return nil, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "曲库服务未初始化")
 	}
 	return s.artworkFetcher().ResolveArtistAvatar(ctx, snap, artistName)
+}
+
+// ResolveArtistAvatarFast resolves artist avatar bytes without blocking on remote upstream requests.
+func (s *Service) ResolveArtistAvatarFast(ctx context.Context, snap config.Snapshot, artistName string) ([]byte, string, error) {
+	if s == nil {
+		return nil, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "曲库服务未初始化")
+	}
+	return s.artworkFetcher().ResolveArtistAvatarFast(ctx, snap, artistName)
+}
+
+// ResolveArtistAvatarLive resolves artist avatar bytes with bounded live scraping fallback.
+func (s *Service) ResolveArtistAvatarLive(ctx context.Context, snap config.Snapshot, artistName string) ([]byte, string, error) {
+	if s == nil {
+		return nil, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "曲库服务未初始化")
+	}
+	return s.artworkFetcher().ResolveArtistAvatarLive(ctx, snap, artistName)
 }
