@@ -572,13 +572,6 @@ private fun NowPlayingStageToolbar(
 						}
 						HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 						DropdownMenuItem(
-							text = { Text("歌词字号与样式") },
-							onClick = {
-								moreMenuOpen = false
-								onOpenLyricsStyle()
-							}
-						)
-						DropdownMenuItem(
 							text = { Text("全屏歌词与金句分享") },
 							onClick = {
 								moreMenuOpen = false

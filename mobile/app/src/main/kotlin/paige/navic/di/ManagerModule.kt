@@ -93,6 +93,7 @@ val managerModule = module {
 	}
 	single {
 		NavicDataSourceFactory(
+			context = get(),
 			downloadManager = get(),
 			sessionManager = get(),
 			streamCacheManager = get(),

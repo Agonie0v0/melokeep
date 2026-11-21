@@ -8,6 +8,7 @@ package paige.navic.ui.viewmodel
 
 import androidx.paging.PagingData
 import kotlinx.coroutines.flow.Flow
+import paige.navic.ui.core.UiState
 
 
 data class Selectable<T : Any>(
@@ -35,11 +36,16 @@ abstract class SelectableViewModel<T : Any> : AsyncViewModel<Selectable<T>>() {
 	var selected
 		get() = data?.selected
 		set(value) {
-			execute {
-				Selectable(
-					items = items,
+			updateState { state ->
+				val updated = Selectable(
+					items = state.data?.items,
 					selected = value
 				)
+				when (state) {
+					is UiState.Loading -> UiState.Loading(updated)
+					is UiState.Error -> UiState.Error(state.error, updated)
+					is UiState.Success -> UiState.Success(updated)
+				}
 			}
 		}
 

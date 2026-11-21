@@ -36,6 +36,9 @@ interface SongDao {
 	@RawQuery
 	suspend fun getSongIdsByQuery(query: RoomRawQuery): List<String>
 
+	@Query("SELECT COUNT(songId) FROM SongEntity")
+	suspend fun getSongCount(): Int
+
 	@Query("SELECT * FROM SongEntity WHERE songId = :songId LIMIT 1")
 	suspend fun getSongById(songId: String): SongEntity?
 

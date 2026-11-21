@@ -38,7 +38,7 @@ class SongRepository(
 		return songDao.getRandomSongsList(count).map { it.toDomainModel() }
 	}
 
-	private suspend fun getLocalData(
+	suspend fun getLocalData(
 		listType: DomainSongListType,
 		reversed: Boolean = false,
 		filters: Set<DomainFilter> = emptySet(),
@@ -60,13 +60,17 @@ class SongRepository(
 		onRandomOrder = onRandomOrder
 	)
 
+	suspend fun syncLocalData() {
+		dbRepository.syncLibraryIncremental().getOrThrow()
+	}
+
 	private suspend fun refreshLocalData(
 		listType: DomainSongListType,
 		reversed: Boolean = false,
 		filters: Set<DomainFilter> = emptySet(),
 		onRandomOrder: (List<String>) -> Unit = {}
 	): Flow<PagingData<DomainSong>> {
-		dbRepository.syncLibrarySongs().getOrThrow()
+		syncLocalData()
 		return getLocalData(listType, reversed, filters, onRandomOrder)
 	}
 

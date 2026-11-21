@@ -82,4 +82,29 @@ class PermissionManager(
 			permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
 		}
 	}
+
+	fun hasAudioStoragePermission(): Boolean {
+		val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			Manifest.permission.READ_MEDIA_AUDIO
+		} else {
+			Manifest.permission.READ_EXTERNAL_STORAGE
+		}
+		return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+	}
+
+	suspend fun requestAudioStoragePermission(): Boolean {
+		val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			Manifest.permission.READ_MEDIA_AUDIO
+		} else {
+			Manifest.permission.READ_EXTERNAL_STORAGE
+		}
+		val alreadyGranted = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+		return alreadyGranted || suspendCancellableCoroutine { continuation ->
+			pendingContinuation = continuation
+			continuation.invokeOnCancellation {
+				pendingContinuation = null
+			}
+			permissionLauncher.launch(permission)
+		}
+	}
 }

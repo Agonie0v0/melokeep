@@ -100,7 +100,31 @@ class LyricsRepository(
 			return LyricsResult(lines, "MELOKEEP", raw)
 		}
 
-		val song = songDao.getSongById(songId)?.toDomainModel() ?: return null
+		val deviceRepo = if (songId.startsWith("device:")) {
+			org.koin.core.context.GlobalContext.get().getOrNull<DeviceLocalMusicRepository>()
+		} else {
+			null
+		}
+		if (deviceRepo != null) {
+			val sidecarRaw = deviceRepo.readSidecarLyrics(songId)?.takeIf { it.isNotBlank() }
+			if (sidecarRaw != null) {
+				val parsed = LyricsContentParser.parse(sidecarRaw)
+				if (!parsed.isNullOrEmpty()) {
+					return LyricsResult(
+						lines = parsed,
+						providerName = "LOCAL_FILE",
+						rawContent = sidecarRaw
+					)
+				}
+			}
+		}
+
+		val isDeviceSong = songId.startsWith("device:")
+		val song = if (isDeviceSong) {
+			deviceRepo?.getSongById(songId)
+		} else {
+			songDao.getSongById(songId)?.toDomainModel()
+		} ?: return null
 
 		val currentConfig = getConfig()
 		for (provider in currentConfig.providers.filter { it.enabled }) {
@@ -120,7 +144,9 @@ class LyricsRepository(
 						raw?.let { LyricsContentParser.parse(it) }
 					}
 
-					LyricsProvider.Id.SUBSONIC -> {
+					LyricsProvider.Id.SUBSONIC -> if (isDeviceSong) {
+						null
+					} else {
 						val subsonicLyrics = sessionManager.api.getLyrics(song.id).firstOrNull()
 
 						val lines = subsonicLyrics?.lines?.flatMap { line ->

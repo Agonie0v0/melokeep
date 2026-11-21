@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package io.github.agonie0v0.melokeep.ios
 
 import com.russhwolf.settings.Settings
@@ -33,6 +35,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import platform.Foundation.NSDate
 import platform.Foundation.NSDateFormatter
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSString
+import platform.Foundation.NSUTF8StringEncoding
+import platform.Foundation.stringWithContentsOfFile
 import kotlin.math.roundToLong
 import kotlin.random.Random
 
@@ -40,6 +46,7 @@ import kotlin.random.Random
 enum class IosTrackSource {
 	NAVIDROME,
 	MELOKEEP,
+	DEVICE,
 }
 
 @Serializable
@@ -136,6 +143,7 @@ data class IosPlaybackPrefs(
 	val replayGainDefaultMigrated: Boolean = false,
 	val lyricsOffsetMs: Int = 0,
 	val lyricsFontSizeSp: Float = 22f,
+	val lyricsLineSpacingDp: Float = 16f,
 	val lyricsActiveColorHex: String = "",
 	val lyricsInactiveAlpha: Float = 0.48f,
 	val lyricsAlign: String = "center",
@@ -156,12 +164,14 @@ internal fun normalizeIosLyricsHexOrEmpty(raw: String): String {
 internal fun sanitizeIosPlaybackPrefs(prefs: IosPlaybackPrefs): IosPlaybackPrefs {
 	val safePreamp = if (prefs.replayGainPreampDb.isNaN()) 6.0f else prefs.replayGainPreampDb.coerceIn(-6f, 12f)
 	val safeFontSp = if (prefs.lyricsFontSizeSp.isNaN()) 22f else prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val safeLineSpacingDp = if (prefs.lyricsLineSpacingDp.isNaN()) 16f else prefs.lyricsLineSpacingDp.coerceIn(4f, 36f)
 	val safeAlpha = if (prefs.lyricsInactiveAlpha.isNaN()) 0.48f else prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
 	val safeAlign = if (prefs.lyricsAlign.trim().lowercase() == "start") "start" else "center"
 	return prefs.copy(
 		replayGainPreampDb = safePreamp,
 		lyricsOffsetMs = prefs.lyricsOffsetMs.coerceIn(-5000, 5000),
 		lyricsFontSizeSp = safeFontSp,
+		lyricsLineSpacingDp = safeLineSpacingDp,
 		lyricsActiveColorHex = normalizeIosLyricsHexOrEmpty(prefs.lyricsActiveColorHex),
 		lyricsInactiveAlpha = safeAlpha,
 		lyricsAlign = safeAlign,
@@ -492,73 +502,128 @@ class IosSubsonicManager(
 	}
 
 	fun refreshOverview() {
+		if (client == null) return
+		scope.launch {
+			refreshOverviewSuspend()
+		}
+	}
+
+	suspend fun refreshOverviewSuspend() {
 		val activeClient = client ?: return
 		val activeServerId = _state.value.activeServer?.id
-		val shouldReloadSongs = _state.value.allSongsLoaded
-		scope.launch {
-			_state.update { it.copy(loadingOverview = true, errorMessage = null) }
-			try {
-				coroutineScope {
-					val recentDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Recent, size = 20, offset = 0) }.getOrDefault(emptyList()) }
-					val newestDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Newest, size = 20, offset = 0) }.getOrDefault(emptyList()) }
-					val randomDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Random, size = 20, offset = 0) }.getOrDefault(emptyList()) }
-					val frequentDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Frequent, size = 20, offset = 0) }.getOrDefault(emptyList()) }
-					val allAlbumsDeferred = async { runCatching { fetchAllAlbumsPaginated(activeClient) }.getOrDefault(emptyList()) }
-					val artistsDeferred = async { runCatching { activeClient.getArtists().index.flatMap { it.artists } }.getOrDefault(emptyList()) }
-					val playlistsDeferred = async { runCatching { activeClient.getPlaylists() }.getOrDefault(emptyList()) }
-					val starredDeferred = async { runCatching { activeClient.getStarredID3() }.getOrNull() }
-					val genresDeferred = async { runCatching { activeClient.getGenres().map { it.name }.filter { it.isNotBlank() }.distinct().sorted() }.getOrDefault(emptyList()) }
+		val prevState = _state.value
+		_state.update { it.copy(loadingOverview = true, errorMessage = null) }
+		try {
+			val prevAlbumIds = prevState.allAlbums.map { it.id }.toSet()
+			val (newestAlbums, artists) = coroutineScope {
+				val recentDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Recent, size = 20, offset = 0) }.getOrDefault(emptyList()) }
+				val newestDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Newest, size = 50, offset = 0) }.getOrDefault(emptyList()) }
+				val randomDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Random, size = 20, offset = 0) }.getOrDefault(emptyList()) }
+				val frequentDeferred = async { runCatching { activeClient.getAlbumsID3(AlbumListType.Frequent, size = 20, offset = 0) }.getOrDefault(emptyList()) }
+				val artistsDeferred = async { runCatching { activeClient.getArtists().index.flatMap { it.artists } }.getOrDefault(emptyList()) }
+				val playlistsDeferred = async { runCatching { activeClient.getPlaylists() }.getOrDefault(emptyList()) }
+				val starredDeferred = async { runCatching { activeClient.getStarredID3() }.getOrNull() }
+				val genresDeferred = async { runCatching { activeClient.getGenres().map { it.name }.filter { it.isNotBlank() }.distinct().sorted() }.getOrDefault(emptyList()) }
 
-					val recent = recentDeferred.await().map { it.toSummary(activeClient) }
-					val newest = newestDeferred.await().map { it.toSummary(activeClient) }
-					val random = randomDeferred.await().map { it.toSummary(activeClient) }
-					val frequent = frequentDeferred.await().map { it.toSummary(activeClient) }
-					val allAlbums = allAlbumsDeferred.await().map { it.toSummary(activeClient) }
-					val artists = artistsDeferred.await().map { it.toSummary(activeClient) }
-					val playlists = playlistsDeferred.await().map { it.toSummary(activeClient) }
-					val starred = starredDeferred.await()
-					val genres = genresDeferred.await()
-					val starredSongs = starred?.songs.orEmpty().map { it.toIosTrack(activeClient, activeServerId) }
-					val starredAlbums = starred?.albums.orEmpty().map { it.toSummary(activeClient) }
-					val starredArtists = starred?.artists.orEmpty().map { it.toSummary(activeClient) }
-					val starredIdSet = buildSet {
-						starredSongs.forEach { add(it.rawId) }
-						starredAlbums.forEach { add(it.id) }
-						starredArtists.forEach { add(it.id) }
-					}
+				val recent = recentDeferred.await().map { it.toSummary(activeClient) }
+				val newestRaw = newestDeferred.await()
+				val newest = newestRaw.map { it.toSummary(activeClient) }
+				val random = randomDeferred.await().map { it.toSummary(activeClient) }
+				val frequent = frequentDeferred.await().map { it.toSummary(activeClient) }
+				val artistsRaw = artistsDeferred.await()
+				val artistSummaries = artistsRaw.map { it.toSummary(activeClient) }
+				val playlists = playlistsDeferred.await().map { it.toSummary(activeClient) }
+				val starred = starredDeferred.await()
+				val genres = genresDeferred.await()
+				val starredSongs = starred?.songs.orEmpty().map { it.toIosTrack(activeClient, activeServerId) }
+				val starredAlbums = starred?.albums.orEmpty().map { it.toSummary(activeClient) }
+				val starredArtists = starred?.artists.orEmpty().map { it.toSummary(activeClient) }
+				val starredIdSet = buildSet {
+					starredSongs.forEach { add(it.rawId) }
+					starredAlbums.forEach { add(it.id) }
+					starredArtists.forEach { add(it.id) }
+				}
 
-					_state.update {
-						it.copy(
-							loadingOverview = false,
-							recentAlbums = recent,
-							newestAlbums = newest,
-							randomAlbums = random,
-							frequentAlbums = frequent,
-							allAlbums = allAlbums,
-							artists = artists,
-							playlists = playlists,
-							starredSongs = starredSongs,
-							starredAlbums = starredAlbums,
-							starredArtists = starredArtists,
-							genres = genres,
-							starredIds = starredIdSet,
-							unstarredIds = emptySet(),
-						)
-					}
+				val mergedAlbums = if (prevState.allAlbums.isEmpty()) {
+					newest
+				} else {
+					val existingById = prevState.allAlbums.associateBy { it.id }.toMutableMap()
+					(recent + newest + random + frequent).forEach { existingById[it.id] = it }
+					existingById.values.toList()
 				}
-				if (shouldReloadSongs) {
-					fetchAllSongs(forceRefresh = true)
-				}
-			} catch (e: CancellationException) {
-				_state.update { it.copy(loadingOverview = false) }
-				throw e
-			} catch (e: Throwable) {
+
 				_state.update {
 					it.copy(
 						loadingOverview = false,
-						errorMessage = e.message ?: "加载 Navidrome 曲库失败",
+						recentAlbums = recent,
+						newestAlbums = newest,
+						randomAlbums = random,
+						frequentAlbums = frequent,
+						allAlbums = mergedAlbums,
+						artists = artistSummaries,
+						playlists = playlists,
+						starredSongs = starredSongs,
+						starredAlbums = starredAlbums,
+						starredArtists = starredArtists,
+						genres = genres,
+						starredIds = starredIdSet,
+						unstarredIds = emptySet(),
 					)
 				}
+				newestRaw to artistSummaries
+			}
+
+			val expectedAlbumCount = artists.sumOf { it.albumCount }
+			val newAlbumIds = newestAlbums.filter { it.id !in prevAlbumIds }
+			val needBackgroundAlbumSync = prevState.allAlbums.isEmpty() ||
+				newAlbumIds.isNotEmpty() ||
+				(expectedAlbumCount > 0 && kotlin.math.abs(expectedAlbumCount - prevState.allAlbums.size) > 0)
+
+			if (needBackgroundAlbumSync) {
+				scope.launch {
+					if (prevState.allAlbums.isEmpty() ||
+						(expectedAlbumCount > 0 && kotlin.math.abs(expectedAlbumCount - _state.value.allAlbums.size) > newestAlbums.size)
+					) {
+						val fullAlbums = runCatching { fetchAllAlbumsPaginated(activeClient) }.getOrNull()
+						if (!fullAlbums.isNullOrEmpty()) {
+							val fullSummaries = fullAlbums.map { it.toSummary(activeClient) }
+							_state.update { it.copy(allAlbums = fullSummaries) }
+						}
+					}
+					if (_state.value.allSongsLoaded && newAlbumIds.isNotEmpty()) {
+						val semaphore = Semaphore(8)
+						val newTracks = coroutineScope {
+							newAlbumIds.take(40).map { album ->
+								async {
+									semaphore.withPermit {
+										runCatching {
+											activeClient.getAlbum(album.id).songs.map {
+												it.toIosTrack(activeClient, activeServerId)
+											}
+										}.getOrDefault(emptyList())
+									}
+								}
+							}.awaitAll().flatten()
+						}
+						if (newTracks.isNotEmpty()) {
+							_state.update { cur ->
+								val existingIds = cur.allSongs.mapTo(hashSetOf()) { it.id }
+								val additions = newTracks.filter { existingIds.add(it.id) }
+								if (additions.isEmpty()) cur else cur.copy(allSongs = additions + cur.allSongs)
+							}
+						}
+					}
+				}
+			}
+		} catch (e: CancellationException) {
+			_state.update { it.copy(loadingOverview = false) }
+			throw e
+		} catch (e: Throwable) {
+			_state.update {
+				it.copy(
+					loadingOverview = false,
+					errorMessage = e.message ?: "加载 Navidrome 曲库失败",
+				)
 			}
 		}
 	}
@@ -929,22 +994,45 @@ class IosSubsonicManager(
 			_state.update { it.copy(errorMessage = "未连接 Navidrome") }
 		}
 		return try {
-			val status = activeClient.startScan()
+			var permitted = true
+			var scanCount = 0
+			var isScanning = false
+			try {
+				val status = activeClient.startScan()
+				scanCount = status.count
+				isScanning = status.scanning
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				val msg = e.message.orEmpty()
+				val isUnauthorized = msg.contains("not authorized", ignoreCase = true) ||
+					msg.contains("unauthorized", ignoreCase = true) ||
+					msg.contains("code 50", ignoreCase = true) ||
+					msg.contains("403")
+				if (!isUnauthorized) {
+					throw e
+				}
+				permitted = false
+			}
+			if (permitted && isScanning) {
+				delay(800)
+			}
+			refreshOverviewSuspend()
 			_state.update {
 				it.copy(
 					errorMessage = null,
-					noticeMessage = if (status.count > 0) {
-						"已触发 Navidrome 扫库（当前 ${status.count} 首）"
-					} else {
-						"已触发 Navidrome 扫库"
+					noticeMessage = when {
+						permitted && scanCount > 0 -> "已触发 Navidrome 扫库并刷新曲库（当前 $scanCount 首）"
+						permitted -> "已触发 Navidrome 扫库并刷新曲库"
+						else -> "已刷新获取最新 Navidrome 曲库（当前账号无服务端扫盘权限，依赖服务端自动监听）"
 					},
 				)
 			}
-			Result.success(status.scanning to status.count)
+			Result.success(isScanning to scanCount)
 		} catch (e: CancellationException) {
 			throw e
 		} catch (e: Throwable) {
-			_state.update { it.copy(errorMessage = e.message ?: "触发 Navidrome 扫库失败") }
+			_state.update { it.copy(errorMessage = e.message ?: "刷新 Navidrome 曲库失败") }
 			Result.failure(e)
 		}
 	}
@@ -1269,6 +1357,7 @@ class IosSubsonicManager(
 					meloApiClient.resolveMediaUrl(resolved.playback.url)
 				}
 			}
+			IosTrackSource.DEVICE -> track.streamUrl ?: track.rawId
 		}
 	}
 
@@ -1288,6 +1377,32 @@ class IosSubsonicManager(
 			IosTrackSource.MELOKEEP -> {
 				val raw = runCatching { meloApiClient.getTrackLyrics(track.rawId) }.getOrDefault("")
 				parseRawLyrics(raw, provider = "MeloKeep")
+			}
+			IosTrackSource.DEVICE -> {
+				val audioPath = track.rawId
+				val base = audioPath.substringBeforeLast('.', "")
+				val candidates = if (base.isNotBlank()) {
+					listOf("$base.lrc", "$base.LRC", "$base.txt")
+				} else {
+					emptyList()
+				}
+				val fm = NSFileManager.defaultManager
+				val raw = candidates.firstNotNullOfOrNull { lrcPath ->
+					if (fm.fileExistsAtPath(lrcPath)) {
+						NSString.stringWithContentsOfFile(
+							lrcPath,
+							encoding = NSUTF8StringEncoding,
+							error = null,
+						)
+					} else {
+						null
+					}
+				}
+				if (!raw.isNullOrBlank()) {
+					parseRawLyrics(raw, provider = "本地歌词")
+				} else {
+					IosLyricsResult(emptyList(), false)
+				}
 			}
 			IosTrackSource.NAVIDROME -> {
 				val activeClient = client ?: return IosLyricsResult(emptyList(), false)

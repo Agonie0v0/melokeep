@@ -20,7 +20,7 @@ class PlaylistRepository(
 	private val playlistDao: PlaylistDao,
 	private val dbRepository: DbRepository,
 ) {
-	private suspend fun getLocalData(
+	suspend fun getLocalData(
 		listType: DomainPlaylistListType,
 		reversed: Boolean,
 		filters: Set<DomainFilter> = emptySet()
@@ -33,14 +33,16 @@ class PlaylistRepository(
 		toDomain = { it.toDomainModel() }
 	)
 
+	suspend fun syncLocalData() {
+		dbRepository.syncPlaylistsIncremental().getOrThrow()
+	}
+
 	private suspend fun refreshLocalData(
 		listType: DomainPlaylistListType,
 		reversed: Boolean,
 		filters: Set<DomainFilter> = emptySet()
 	): Flow<PagingData<DomainPlaylist>> {
-		dbRepository.syncPlaylists().getOrThrow().forEach { playlist ->
-			dbRepository.syncPlaylistSongs(playlist.playlistId).getOrThrow()
-		}
+		syncLocalData()
 		return getLocalData(listType, reversed, filters)
 	}
 

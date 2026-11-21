@@ -14,12 +14,14 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import paige.navic.R
 import paige.navic.database.dao.DownloadDao
 import paige.navic.database.entity.DownloadEntity
@@ -45,9 +47,9 @@ class DownloadWorker(
 			var downloaded = 0
 			var failed = 0
 
-			while (true) {
+			while (!isStopped) {
 				val queued = downloadDao.getDownloadsByStatus(DownloadStatus.DOWNLOADING)
-				if (queued.isEmpty()) break
+				if (queued.isEmpty() || isStopped) break
 
 				val batch = processBatch(queued)
 
@@ -86,6 +88,15 @@ class DownloadWorker(
 
 				Result.failure()
 			}
+		} finally {
+			withContext(NonCancellable) {
+				val remaining = runCatching {
+					downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING)
+				}.getOrDefault(0)
+				if (isStopped || remaining == 0) {
+					notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+				}
+			}
 		}
 	}
 
@@ -95,6 +106,11 @@ class DownloadWorker(
 		val total = queued.size
 		var completed = 0
 		var failed = 0
+
+		if (isStopped || downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0) {
+			notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+			return 0 to 0
+		}
 
 		setForeground(createForegroundInfo(0, total))
 
@@ -106,17 +122,24 @@ class DownloadWorker(
 			val workers = List(concurrency) {
 				launch {
 					for ((songId) in queue) {
+						if (isStopped) break
+						val entity = downloadDao.getDownloadById(songId)
+						if (entity == null || entity.status != DownloadStatus.DOWNLOADING) {
+							continue
+						}
 						try {
 							downloadProcessor.download(songId)
 
 							progressMutex.withLock {
 								completed++
-								updateForeground(completed, total)
+								if (!isStopped && downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) > 0) {
+									updateForeground(completed, total)
+								}
 							}
 						} catch (_: DownloadCancelledException) {
-							progressMutex.withLock {
-								completed++
-								updateForeground(completed, total)
+							if (isStopped || downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0) {
+								notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+								break
 							}
 						} catch (e: CancellationException) {
 							throw e
@@ -143,7 +166,9 @@ class DownloadWorker(
 							progressMutex.withLock {
 								completed++
 								if (markedFailed) failed++
-								updateForeground(completed, total)
+								if (!isStopped && downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) > 0) {
+									updateForeground(completed, total)
+								}
 							}
 						}
 					}
@@ -153,11 +178,15 @@ class DownloadWorker(
 			workers.joinAll()
 		}
 
+		if (isStopped || downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0) {
+			notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+		}
+
 		return completed to failed
 	}
 
 	private suspend fun updateForeground(completed: Int, total: Int) {
-		if (total <= 0) return
+		if (total <= 0 || isStopped) return
 
 		val progress = completed.toFloat() / total.toFloat()
 

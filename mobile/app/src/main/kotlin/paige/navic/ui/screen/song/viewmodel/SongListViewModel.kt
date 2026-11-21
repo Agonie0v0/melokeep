@@ -7,8 +7,17 @@
 package paige.navic.ui.screen.song.viewmodel
 
 import androidx.lifecycle.viewModelScope
+import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.connectivity.ReachabilityFlow
 import paige.navic.domain.manager.session.SessionManager
@@ -19,9 +28,11 @@ import paige.navic.domain.model.DomainSongListType
 import paige.navic.domain.model.toBitmask
 import paige.navic.domain.model.toDomainFilters
 import paige.navic.domain.repository.SongRepository
+import paige.navic.ui.core.UiState
+import paige.navic.ui.viewmodel.Selectable
 import paige.navic.ui.viewmodel.SelectableViewModel
 
-
+@OptIn(ExperimentalCoroutinesApi::class)
 class SongListViewModel(
 	initialListType: DomainSongListType? = null,
 	initialFilters: Set<DomainFilter>? = null,
@@ -39,8 +50,27 @@ class SongListViewModel(
 		initialFilters ?: preferenceManager.songFilters.toDomainFilters()
 	)
 
+	private val _isRefreshing = MutableStateFlow(false)
+	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+	private val refreshSignal = MutableStateFlow(0)
+
 	val isReachable = reachability.isReachable
 	private var randomSongIds = emptyList<String>()
+
+	private val pagedItems: Flow<PagingData<DomainSong>> =
+		combine(selectedSorting, selectedReversed, selectedFilters, refreshSignal) { sort, reversed, filters, _ ->
+			Triple(sort, reversed, filters)
+		}
+			.flatMapLatest { (sort, reversed, filters) ->
+				repository.getLocalData(
+					listType = sort,
+					reversed = reversed,
+					filters = filters,
+					onRandomOrder = { randomSongIds = it }
+				)
+			}
+			.cachedIn(viewModelScope)
 
 	suspend fun getSelectionOrder(): List<String> =
 		if (selectedSorting.value == DomainSongListType.Random) randomSongIds
@@ -49,19 +79,41 @@ class SongListViewModel(
 	suspend fun getSelectedSongs(ids: List<String>): List<DomainSong> = repository.getSongsByIds(ids)
 
 	init {
-		launch {
-			sessionManager.sessionState.collect { if (it is SessionState.Authenticated) refreshSongs(false) }
+		setSuccess(Selectable(items = pagedItems, selected = null))
+		viewModelScope.launch {
+			sessionManager.sessionState.collect {
+				if (it is SessionState.Authenticated) refreshSongs(false)
+			}
 		}
 	}
 
-	fun refreshSongs(fullRefresh: Boolean) = launch {
-		items = repository.getSongs(
-			fullRefresh,
-			selectedSorting.value,
-			selectedReversed.value,
-			selectedFilters.value,
-			onRandomOrder = { randomSongIds = it }
-		).cachedIn(viewModelScope)
+	fun refreshSongs(fullRefresh: Boolean) {
+		if (!fullRefresh) {
+			if (selectedSorting.value == DomainSongListType.Random) {
+				refreshSignal.value++
+			}
+			if (uiState.value.data?.items == null) {
+				setSuccess(Selectable(items = pagedItems, selected = selected))
+			} else if (uiState.value is UiState.Error) {
+				clearError()
+			}
+			return
+		}
+		if (_isRefreshing.value) return
+		viewModelScope.launch {
+			_isRefreshing.value = true
+			setLoading()
+			try {
+				repository.syncLocalData()
+				setSuccess(Selectable(items = pagedItems, selected = selected))
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Exception) {
+				updateState { UiState.Error(e, Selectable(items = pagedItems, selected = it.data?.selected)) }
+			} finally {
+				_isRefreshing.value = false
+			}
+		}
 	}
 
 	fun starSong(isStarred: Boolean) {
@@ -72,7 +124,6 @@ class SongListViewModel(
 			} else {
 				repository.unstarSong(selection.id)
 			}
-			refreshSongs(false)
 		}
 	}
 
@@ -86,13 +137,11 @@ class SongListViewModel(
 	fun setSorting(sorting: DomainSongListType) {
 		selectedSorting.value = sorting
 		preferenceManager.songSortType = sorting
-		refreshSongs(false)
 	}
 
 	fun setReversed(reversed: Boolean) {
 		selectedReversed.value = reversed
 		preferenceManager.songSortReversed = reversed
-		refreshSongs(false)
 	}
 
 	fun toggleFilter(filter: DomainFilter) {
@@ -104,6 +153,5 @@ class SongListViewModel(
 		}
 		selectedFilters.value = newFilters
 		preferenceManager.songFilters = newFilters.toBitmask()
-		refreshSongs(false)
 	}
 }

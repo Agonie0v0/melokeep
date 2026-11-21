@@ -222,7 +222,9 @@ class SessionManager(
 
 	fun getCoverArtUrl(coverArtId: String) = if (
 		coverArtId.startsWith("http://", ignoreCase = true) ||
-		coverArtId.startsWith("https://", ignoreCase = true)
+		coverArtId.startsWith("https://", ignoreCase = true) ||
+		coverArtId.startsWith("content://", ignoreCase = true) ||
+		coverArtId.startsWith("file://", ignoreCase = true)
 	) {
 		coverArtId
 	} else {
@@ -248,7 +250,8 @@ class SessionManager(
 
 	data class DirectNavidromeScanResult(
 		val scanning: Boolean = true,
-		val count: Long? = null
+		val count: Long? = null,
+		val serverScanPermitted: Boolean = true
 	)
 
 	suspend fun triggerLibraryScan(): DirectNavidromeScanResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -280,6 +283,13 @@ class SessionManager(
 			reqBuilder.header(k, v)
 		}
 		okHttp.newCall(reqBuilder.build()).execute().use { response ->
+			if (response.code == 403) {
+				return@withContext DirectNavidromeScanResult(
+					scanning = false,
+					count = null,
+					serverScanPermitted = false
+				)
+			}
 			if (!response.isSuccessful) {
 				throw IllegalStateException("Navidrome 扫库请求失败 (HTTP ${response.code})")
 			}
@@ -291,7 +301,18 @@ class SessionManager(
 			val status = (subResp?.get("status") as? kotlinx.serialization.json.JsonPrimitive)?.content
 			if (status != null && status != "ok") {
 				val errObj = subResp["error"] as? kotlinx.serialization.json.JsonObject
+				val errCode = (errObj?.get("code") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
 				val errMsg = (errObj?.get("message") as? kotlinx.serialization.json.JsonPrimitive)?.content
+				val isUnauthorized = errCode == 50 ||
+					(errMsg?.contains("not authorized", ignoreCase = true) == true) ||
+					(errMsg?.contains("unauthorized", ignoreCase = true) == true)
+				if (isUnauthorized) {
+					return@withContext DirectNavidromeScanResult(
+						scanning = false,
+						count = null,
+						serverScanPermitted = false
+					)
+				}
 				throw IllegalStateException(errMsg?.takeIf { it.isNotBlank() } ?: "Navidrome 拒绝了扫库请求")
 			}
 			val scanObj = subResp?.get("scanStatus") as? kotlinx.serialization.json.JsonObject
@@ -299,7 +320,11 @@ class SessionManager(
 				?.content?.toBooleanStrictOrNull() ?: true
 			val count = (scanObj?.get("count") as? kotlinx.serialization.json.JsonPrimitive)
 				?.content?.toLongOrNull()
-			DirectNavidromeScanResult(scanning = scanning, count = count)
+			DirectNavidromeScanResult(
+				scanning = scanning,
+				count = count,
+				serverScanPermitted = true
+			)
 		}
 	}
 }

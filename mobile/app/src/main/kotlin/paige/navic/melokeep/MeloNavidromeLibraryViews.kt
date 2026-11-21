@@ -97,6 +97,7 @@ import paige.navic.domain.model.DomainSong
 import paige.navic.domain.model.DomainSongCollection
 import paige.navic.domain.model.DomainSongListType
 import paige.navic.domain.model.settings.ListViewMode
+import paige.navic.domain.repository.DbRepository
 import paige.navic.domain.repository.SongRepository
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.common.CoverArt
@@ -171,6 +172,7 @@ internal fun LibraryNavidromeStreamingSection(
 	val player = koinInject<MediaPlayer>()
 	val downloadManager = koinInject<DownloadManager>()
 	val preferenceManager = koinInject<PreferenceManager>()
+	val dbRepository = koinInject<DbRepository>()
 	val songRepository = koinInject<SongRepository>()
 	val songDao = koinInject<SongDao>()
 	val backStack = LocalNavStack.current
@@ -234,21 +236,28 @@ internal fun LibraryNavidromeStreamingSection(
 		actionSheetSong = song
 	}
 
+	var isOverviewRefreshing by remember { mutableStateOf(false) }
+
 	when (subTab) {
 		LibraryNavidromeSubTab.OVERVIEW -> {
-			val isLoading = recentAlbumsState is UiState.Loading ||
-				playlistsState is UiState.Loading ||
-				artistsState is UiState.Loading
 			PullToRefreshBox(
 				modifier = Modifier.fillMaxSize(),
-				finished = !isLoading,
+				isRefreshing = isOverviewRefreshing,
 				onRefresh = {
-					recentAlbumsVm.refreshAlbums(true)
-					playlistsVm.refreshPlaylists(true)
-					artistsVm.refreshArtists(true)
-					songsVm.refreshSongs(false)
-				},
-				key = listOf(recentAlbumsState, playlistsState, artistsState)
+					if (!isOverviewRefreshing) {
+						isOverviewRefreshing = true
+						scope.launch {
+							try {
+								dbRepository.syncLibraryIncremental().getOrThrow()
+							} catch (err: Exception) {
+								snackBarState.currentSnackbarData?.dismiss()
+								snackBarState.showSnackbar(err.message ?: "刷新曲库失败")
+							} finally {
+								isOverviewRefreshing = false
+							}
+						}
+					}
+				}
 			) {
 				NavidromeOverviewContent(
 					recentAlbums = recentAlbumsPaging,
@@ -306,14 +315,14 @@ internal fun LibraryNavidromeStreamingSection(
 			val selectedSorting by albumsVm.listType.collectAsStateWithLifecycle()
 			val selectedReversed by albumsVm.selectedReversed.collectAsStateWithLifecycle()
 			val selectedFilters by albumsVm.selectedFilters.collectAsStateWithLifecycle()
-			val isLoading = albumsState is UiState.Loading ||
+			val isRefreshingAlbums by albumsVm.isRefreshing.collectAsStateWithLifecycle()
+			val isLoading = isRefreshingAlbums ||
 				albumsPaging?.loadState?.refresh is LoadState.Loading
 
 			PullToRefreshBox(
 				modifier = Modifier.fillMaxSize(),
-				finished = !isLoading,
-				onRefresh = { albumsVm.refreshAlbums(true) },
-				key = albumsState
+				isRefreshing = isRefreshingAlbums,
+				onRefresh = { albumsVm.refreshAlbums(true) }
 			) {
 				NavidromeAlbumsSubContent(
 					albums = albumsPaging,
@@ -367,13 +376,13 @@ internal fun LibraryNavidromeStreamingSection(
 		}
 
 		LibraryNavidromeSubTab.PLAYLISTS -> {
-			val isLoading = playlistsState is UiState.Loading ||
+			val isRefreshingPlaylists by playlistsVm.isRefreshing.collectAsStateWithLifecycle()
+			val isLoading = isRefreshingPlaylists ||
 				playlistsPaging?.loadState?.refresh is LoadState.Loading
 			PullToRefreshBox(
 				modifier = Modifier.fillMaxSize(),
-				finished = !isLoading,
-				onRefresh = { playlistsVm.refreshPlaylists(true) },
-				key = playlistsState
+				isRefreshing = isRefreshingPlaylists,
+				onRefresh = { playlistsVm.refreshPlaylists(true) }
 			) {
 				NavidromePlaylistsSubContent(
 					playlists = playlistsPaging,
@@ -397,13 +406,13 @@ internal fun LibraryNavidromeStreamingSection(
 		}
 
 		LibraryNavidromeSubTab.ARTISTS -> {
-			val isLoading = artistsState is UiState.Loading ||
+			val isRefreshingArtists by artistsVm.isRefreshing.collectAsStateWithLifecycle()
+			val isLoading = isRefreshingArtists ||
 				artistsPaging?.loadState?.refresh is LoadState.Loading
 			PullToRefreshBox(
 				modifier = Modifier.fillMaxSize(),
-				finished = !isLoading,
-				onRefresh = { artistsVm.refreshArtists(true) },
-				key = artistsState
+				isRefreshing = isRefreshingArtists,
+				onRefresh = { artistsVm.refreshArtists(true) }
 			) {
 				NavidromeArtistsSubContent(
 					artists = artistsPaging,
@@ -422,14 +431,14 @@ internal fun LibraryNavidromeStreamingSection(
 			val selectedSorting by songsVm.selectedSorting.collectAsStateWithLifecycle()
 			val selectedReversed by songsVm.selectedReversed.collectAsStateWithLifecycle()
 			val selectedFilters by songsVm.selectedFilters.collectAsStateWithLifecycle()
-			val isLoading = songsState is UiState.Loading ||
+			val isRefreshingSongs by songsVm.isRefreshing.collectAsStateWithLifecycle()
+			val isLoading = isRefreshingSongs ||
 				songsPaging?.loadState?.refresh is LoadState.Loading
 
 			PullToRefreshBox(
 				modifier = Modifier.fillMaxSize(),
-				finished = !isLoading,
-				onRefresh = { songsVm.refreshSongs(true) },
-				key = songsState
+				isRefreshing = isRefreshingSongs,
+				onRefresh = { songsVm.refreshSongs(true) }
 			) {
 				NavidromeSongsSubContent(
 					songs = songsPaging,
@@ -814,12 +823,13 @@ private fun NavidromeOverviewContent(
 		}
 
 		item(key = "overview-recent-vinyl-carousel", contentType = "carousel") {
-			if (recentAlbums == null || albumCount == 0) {
+			val recentInitialLoading = recentAlbums?.loadState?.refresh is LoadState.Loading
+			if (recentAlbums == null || (albumCount == 0 && !recentInitialLoading)) {
 				MeloQuietEmptyState(
 					message = "暂无最近入库专辑",
 					icon = Icons.Outlined.Album
 				)
-			} else {
+			} else if (albumCount > 0) {
 				LazyRow(
 					contentPadding = PaddingValues(horizontal = 16.dp),
 					horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -851,14 +861,15 @@ private fun NavidromeOverviewContent(
 			)
 		}
 
-		if (playlists == null || playlistCount == 0) {
+		val playlistsInitialLoading = playlists?.loadState?.refresh is LoadState.Loading
+		if (playlists == null || (playlistCount == 0 && !playlistsInitialLoading)) {
 			item(key = "overview-playlists-empty", contentType = "empty") {
 				MeloQuietEmptyState(
 					message = "暂无歌单",
 					icon = Icons.Outlined.LibraryMusic
 				)
 			}
-		} else {
+		} else if (playlistCount > 0) {
 			items(
 				count = playlistRows,
 				key = { rowIdx ->

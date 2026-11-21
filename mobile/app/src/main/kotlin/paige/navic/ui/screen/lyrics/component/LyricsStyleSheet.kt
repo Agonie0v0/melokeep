@@ -67,6 +67,7 @@ internal const val DEFAULT_LYRICS_FONT_SIZE_SP = 28f
 internal const val DEFAULT_LYRICS_ACTIVE_COLOR_HEX = ""
 internal const val DEFAULT_LYRICS_INACTIVE_ALPHA = 0.45f
 internal const val DEFAULT_LYRICS_TEXT_ALIGN = "start"
+internal const val DEFAULT_LYRICS_LINE_SPACING_DP = 12f
 
 fun parseLyricsHexColor(rawHex: String): Color? {
 	val cleaned = rawHex.trim().removePrefix("#")
@@ -96,6 +97,7 @@ fun resetLyricsStylePreferences(preferenceManager: PreferenceManager) {
 	preferenceManager.lyricsActiveColorHex = DEFAULT_LYRICS_ACTIVE_COLOR_HEX
 	preferenceManager.lyricsInactiveAlpha = DEFAULT_LYRICS_INACTIVE_ALPHA
 	preferenceManager.lyricsTextAlign = DEFAULT_LYRICS_TEXT_ALIGN
+	preferenceManager.lyricsLineSpacingDp = DEFAULT_LYRICS_LINE_SPACING_DP
 }
 
 @Composable
@@ -147,6 +149,31 @@ fun LyricsStyleCustomizationControls(
 					preferenceManager.lyricsFontSizeSp = value.coerceIn(18f, 40f)
 				},
 				valueRange = 18f..40f
+			)
+		}
+		Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+			val lineSpacingDp = preferenceManager.lyricsLineSpacingDp.coerceIn(4f, 32f)
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically
+			) {
+				Text(
+					text = "歌词行间距",
+					style = MaterialTheme.typography.titleSmall
+				)
+				Text(
+					text = "${lineSpacingDp.toInt()} dp",
+					style = MaterialTheme.typography.labelMedium,
+					color = MaterialTheme.colorScheme.onSurfaceVariant
+				)
+			}
+			Slider(
+				value = lineSpacingDp,
+				onValueChange = { value ->
+					preferenceManager.lyricsLineSpacingDp = value.coerceIn(4f, 32f)
+				},
+				valueRange = 4f..32f
 			)
 		}
 

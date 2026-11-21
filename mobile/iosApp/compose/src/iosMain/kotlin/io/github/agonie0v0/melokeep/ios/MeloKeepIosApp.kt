@@ -28,6 +28,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -87,6 +88,7 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TravelExplore
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -121,6 +123,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -138,6 +141,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -153,6 +157,7 @@ import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
 import io.github.agonie0v0.melokeep.shared.MeloTrack
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -1018,6 +1023,16 @@ private fun NowPlayingFullScreenSheet(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						if (showLyricsMode) {
+							IconButton(
+								onClick = { showLyricsSettingsSheet = true },
+								modifier = Modifier.size(36.dp),
+							) {
+								Icon(
+									imageVector = Icons.Rounded.Tune,
+									contentDescription = "歌词样式与设置",
+									tint = MaterialTheme.colorScheme.onSurface,
+								)
+							}
 							Box {
 								IconButton(onClick = { moreMenuOpen = true }, modifier = Modifier.size(36.dp)) {
 									Icon(
@@ -1065,21 +1080,6 @@ private fun NowPlayingFullScreenSheet(
 											)
 										}
 									}
-									HorizontalDivider()
-									DropdownMenuItem(
-										text = { Text("歌词样式与设置") },
-										leadingIcon = {
-											Icon(
-												imageVector = Icons.Rounded.Settings,
-												contentDescription = null,
-												modifier = Modifier.size(18.dp),
-											)
-										},
-										onClick = {
-											moreMenuOpen = false
-											showLyricsSettingsSheet = true
-										},
-									)
 								}
 							}
 						}
@@ -1243,6 +1243,8 @@ private fun NowPlayingFullScreenSheet(
 										)
 									}
 								}
+
+								track.sourceType == IosTrackSource.DEVICE -> Unit
 
 								else -> {
 									IconButton(
@@ -1526,8 +1528,18 @@ private fun NowPlayingLyricsPanel(
 	val progress by progressFlow.collectAsState()
 	val listState = rememberLazyListState()
 	val density = LocalDensity.current
+	var isScrollCooldown by remember { mutableStateOf(false) }
+	LaunchedEffect(listState.isScrollInProgress) {
+		if (listState.isScrollInProgress) {
+			isScrollCooldown = true
+		} else if (isScrollCooldown) {
+			delay(350)
+			isScrollCooldown = false
+		}
+	}
 
 	val clampedFontSp = prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val clampedLineSpacingDp = prefs.lyricsLineSpacingDp.coerceIn(4f, 36f)
 	val inactiveFontSp = (clampedFontSp - 4f).coerceAtLeast(13f)
 	val clampedInactiveAlpha = prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
 	val resolvedAlign = if (prefs.lyricsAlign == "start") TextAlign.Start else TextAlign.Center
@@ -1584,10 +1596,15 @@ private fun NowPlayingLyricsPanel(
 				state = listState,
 				modifier = Modifier.fillMaxSize(),
 				contentPadding = PaddingValues(top = 24.dp, bottom = 72.dp, start = 8.dp, end = 8.dp),
-				verticalArrangement = Arrangement.spacedBy(16.dp),
+				verticalArrangement = Arrangement.spacedBy(clampedLineSpacingDp.dp),
 			) {
 				itemsIndexed(lyrics.lines, key = { idx, line -> "${idx}_${line.timeMs ?: -1L}" }) { idx, line ->
 					val isActive = !lyrics.synced || idx == activeIndex
+					val targetTimeMs = line.timeMs
+					val latestOnSeekTo by rememberUpdatedState(onSeekTo)
+					var textLayoutResult by remember(line.text, clampedFontSp, resolvedAlign) {
+						mutableStateOf<TextLayoutResult?>(null)
+					}
 					Text(
 						text = line.text,
 						fontSize = if (isActive) clampedFontSp.sp else inactiveFontSp.sp,
@@ -1595,13 +1612,30 @@ private fun NowPlayingLyricsPanel(
 						fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
 						color = if (isActive) activeColor else inactiveColor,
 						textAlign = resolvedAlign,
+						onTextLayout = { textLayoutResult = it },
 						modifier = Modifier
 							.fillMaxWidth()
-							.clip(RoundedCornerShape(10.dp))
-							.clickable(enabled = line.timeMs != null) {
-								line.timeMs?.let { onSeekTo((it + offsetMs).coerceAtLeast(0L)) }
-							}
-							.padding(vertical = 4.dp, horizontal = 8.dp),
+							.padding(vertical = 4.dp, horizontal = 8.dp)
+							.pointerInput(targetTimeMs, offsetMs) {
+								if (targetTimeMs == null) return@pointerInput
+								val slopPx = 8.dp.toPx()
+								detectTapGestures { offset ->
+									if (listState.isScrollInProgress || isScrollCooldown) {
+										return@detectTapGestures
+									}
+									val layout = textLayoutResult ?: return@detectTapGestures
+									for (lineIndex in 0 until layout.lineCount) {
+										val left = layout.getLineLeft(lineIndex) - slopPx
+										val right = layout.getLineRight(lineIndex) + slopPx
+										val top = layout.getLineTop(lineIndex) - slopPx
+										val bottom = layout.getLineBottom(lineIndex) + slopPx
+										if (offset.x in left..right && offset.y in top..bottom) {
+											latestOnSeekTo((targetTimeMs + offsetMs).coerceAtLeast(0L))
+											break
+										}
+									}
+								}
+							},
 					)
 				}
 			}

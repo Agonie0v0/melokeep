@@ -47,7 +47,12 @@ class ExoArtworkLoader(
 	}
 
 	override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
-		if (uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)) {
+		if (
+			uri.scheme.equals("http", ignoreCase = true) ||
+			uri.scheme.equals("https", ignoreCase = true) ||
+			uri.scheme.equals("content", ignoreCase = true) ||
+			uri.scheme.equals("file", ignoreCase = true)
+		) {
 			return bitmapLoader.loadBitmap(uri)
 		}
 		val coverId = uri.lastPathSegment

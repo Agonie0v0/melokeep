@@ -133,8 +133,9 @@ import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.launch
 
 internal enum class IosLibSourceMode(val label: String) {
-	NAVIDROME("Navidrome 库"),
-	LOCAL("本地库"),
+	NAVIDROME("Navidrome"),
+	LOCAL("Melokeep"),
+	DEVICE("手机本地"),
 }
 
 internal enum class IosLibNavSubTab(val label: String) {
@@ -278,8 +279,20 @@ fun IosLibraryRoute(
 	var navSearchOpen by rememberSaveable { mutableStateOf(false) }
 	var localSearchOpen by rememberSaveable { mutableStateOf(false) }
 	var localSearchDraft by rememberSaveable { mutableStateOf(studioState.fileQuery) }
+	var deviceSearchOpen by rememberSaveable { mutableStateOf(false) }
+	var deviceSearchQuery by rememberSaveable { mutableStateOf("") }
+	val deviceMusicState by IosDeviceMusicManager.state.collectAsState()
 	var libHistoryManageMode by remember { mutableStateOf(false) }
 	var showClearLibHistoryConfirm by remember { mutableStateOf(false) }
+
+	LaunchedEffect(sourceMode) {
+		if (sourceMode == IosLibSourceMode.DEVICE &&
+			deviceMusicState.allTracks.isEmpty() &&
+			!deviceMusicState.scanning
+		) {
+			IosDeviceMusicManager.refresh()
+		}
+	}
 
 	LaunchedEffect(librarySearchHistory.isEmpty()) {
 		if (librarySearchHistory.isEmpty()) {
@@ -618,12 +631,25 @@ fun IosLibraryRoute(
 							localSubTabName = it.name
 							localDetailRoute = null
 						},
+						deviceSearchOpen = deviceSearchOpen,
+						deviceSearchQuery = deviceSearchQuery,
+						onDeviceSearchQueryChange = { deviceSearchQuery = it },
+						onToggleDeviceSearch = {
+							val next = !deviceSearchOpen
+							deviceSearchOpen = next
+							if (!next) deviceSearchQuery = ""
+						},
+						onRefreshDeviceMusic = { IosDeviceMusicManager.refresh() },
+						onImportDeviceFolder = { IosDeviceMusicManager.presentFolderPicker() },
 					)
 
 					// 紧凑提示横幅
 					val errorText = studioState.errorMessage?.takeIf { it.isNotBlank() }
 						?: localState.errorMessage?.takeIf { it.isNotBlank() }
-					val feedbackText = errorText ?: inlineNotice?.takeIf { it.isNotBlank() }
+						?: deviceMusicState.errorMessage?.takeIf { it.isNotBlank() }
+					val feedbackText = errorText
+						?: inlineNotice?.takeIf { it.isNotBlank() }
+						?: deviceMusicState.noticeMessage?.takeIf { it.isNotBlank() }
 					val isFeedbackError = errorText != null
 					if (feedbackText != null) {
 						Surface(
@@ -670,10 +696,12 @@ fun IosLibraryRoute(
 											if (isFeedbackError) {
 												studioController.clearError()
 												activeLocalController.clearError()
+												IosDeviceMusicManager.clearMessages()
 											} else {
 												inlineNotice = null
 												studioController.clearNotice()
 												activeLocalController.clearNotice()
+												IosDeviceMusicManager.clearMessages()
 											}
 										},
 									contentAlignment = Alignment.Center,
@@ -788,6 +816,16 @@ fun IosLibraryRoute(
 										bottomPadding = bottomPadding,
 									)
 								}
+							}
+
+							IosLibSourceMode.DEVICE -> {
+								IosLibDeviceLocalSection(
+									deviceState = deviceMusicState,
+									searchQuery = deviceSearchQuery,
+									audioPlayer = audioPlayer,
+									currentTrackId = playerState.currentTrack?.id,
+									bottomPadding = bottomPadding,
+								)
 							}
 						}
 					}
@@ -1178,6 +1216,12 @@ private fun IosLibTopHeader(
 	onSelectNavSubTab: (IosLibNavSubTab) -> Unit,
 	localSubTab: IosLibLocalSubTab,
 	onSelectLocalSubTab: (IosLibLocalSubTab) -> Unit,
+	deviceSearchOpen: Boolean,
+	deviceSearchQuery: String,
+	onDeviceSearchQueryChange: (String) -> Unit,
+	onToggleDeviceSearch: () -> Unit,
+	onRefreshDeviceMusic: () -> Unit,
+	onImportDeviceFolder: () -> Unit,
 ) {
 	val focusManager = LocalFocusManager.current
 	val localSearchable = localSubTab == IosLibLocalSubTab.FOLDERS ||
@@ -1207,7 +1251,9 @@ private fun IosLibTopHeader(
 					shape = CircleShape,
 					color = MaterialTheme.colorScheme.surfaceContainerHigh,
 					border = iosLibHairlineBorder(),
-					modifier = Modifier.width(216.dp),
+					modifier = Modifier
+						.weight(1f)
+						.widthIn(max = 312.dp),
 				) {
 					Row(
 						modifier = Modifier
@@ -1234,7 +1280,7 @@ private fun IosLibTopHeader(
 									.clip(CircleShape)
 									.background(pillBg)
 									.clickable { onSelectSourceMode(mode) }
-									.padding(horizontal = 8.dp, vertical = 6.dp),
+									.padding(horizontal = 4.dp, vertical = 6.dp),
 								contentAlignment = Alignment.Center,
 							) {
 								Text(
@@ -1259,35 +1305,60 @@ private fun IosLibTopHeader(
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
 				) {
-					if (sourceMode == IosLibSourceMode.NAVIDROME) {
-						IosLibHeaderCircleButton(
-							icon = if (hasSavedServers) Icons.Rounded.SwapHoriz else Icons.Rounded.Dns,
-							contentDescription = if (hasSavedServers) "切换服务器" else "配置服务器",
-							onClick = onOpenServerSheet,
-						)
+					when (sourceMode) {
+						IosLibSourceMode.NAVIDROME -> {
+							IosLibHeaderCircleButton(
+								icon = if (hasSavedServers) Icons.Rounded.SwapHoriz else Icons.Rounded.Dns,
+								contentDescription = if (hasSavedServers) "切换服务器" else "配置服务器",
+								onClick = onOpenServerSheet,
+							)
 
-						if (isNavidromeConnected) {
-							IosLibHeaderCircleButton(
-								icon = if (navSearchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
-								contentDescription = "搜索 Navidrome 库",
-								onClick = onToggleNavSearch,
-								active = navSearchOpen,
-							)
+							if (isNavidromeConnected) {
+								IosLibHeaderCircleButton(
+									icon = if (navSearchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
+									contentDescription = "搜索 Navidrome 库",
+									onClick = onToggleNavSearch,
+									active = navSearchOpen,
+								)
+							}
 						}
-					} else if (isMeloConnected) {
-						if (localSubTab == IosLibLocalSubTab.FOLDERS) {
-							IosLibHeaderCircleButton(
-								icon = Icons.Rounded.Add,
-								contentDescription = "新建目录",
-								onClick = onOpenCreateFolder,
-							)
+
+						IosLibSourceMode.LOCAL -> {
+							if (isMeloConnected) {
+								if (localSubTab == IosLibLocalSubTab.FOLDERS) {
+									IosLibHeaderCircleButton(
+										icon = Icons.Rounded.Add,
+										contentDescription = "新建目录",
+										onClick = onOpenCreateFolder,
+									)
+								}
+								if (localSearchable) {
+									IosLibHeaderCircleButton(
+										icon = if (localSearchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
+										contentDescription = "搜索本地库",
+										onClick = onToggleLocalSearch,
+										active = localSearchOpen,
+									)
+								}
+							}
 						}
-						if (localSearchable) {
+
+						IosLibSourceMode.DEVICE -> {
 							IosLibHeaderCircleButton(
-								icon = if (localSearchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
-								contentDescription = "搜索本地库",
-								onClick = onToggleLocalSearch,
-								active = localSearchOpen,
+								icon = Icons.Rounded.Folder,
+								contentDescription = "导入文件夹",
+								onClick = onImportDeviceFolder,
+							)
+							IosLibHeaderCircleButton(
+								icon = Icons.Rounded.Refresh,
+								contentDescription = "刷新手机本地音乐",
+								onClick = onRefreshDeviceMusic,
+							)
+							IosLibHeaderCircleButton(
+								icon = if (deviceSearchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
+								contentDescription = "搜索手机本地音乐",
+								onClick = onToggleDeviceSearch,
+								active = deviceSearchOpen,
 							)
 						}
 					}
@@ -1383,6 +1454,20 @@ private fun IosLibTopHeader(
 						)
 					}
 				}
+			}
+
+			// 第三行：手机本地音乐搜索栏
+			androidx.compose.animation.AnimatedVisibility(
+				visible = sourceMode == IosLibSourceMode.DEVICE && deviceSearchOpen,
+			) {
+				IosLibCompactSearchBar(
+					value = deviceSearchQuery,
+					placeholder = "搜索手机本地歌曲、歌手或目录…",
+					onValueChange = onDeviceSearchQueryChange,
+					onClear = { onDeviceSearchQueryChange("") },
+					onSubmit = { focusManager.clearFocus() },
+					showSubmitButton = false,
+				)
 			}
 		}
 	}
@@ -1665,7 +1750,7 @@ private fun NavidromeUnconnectedView(
 					.height(42.dp),
 				shape = RoundedCornerShape(12.dp),
 			) {
-				Text("切换至本地库")
+				Text("切换至 Melokeep")
 			}
 		}
 	}

@@ -1984,4 +1984,188 @@ func TestWeComEmptyAllowedUsersPermitsEnterpriseMembers(t *testing.T) {
 	}
 }
 
+func TestTelegramDownloadSizeAndMergedSingleMessageEdit(t *testing.T) {
+	ctx := context.Background()
+	st := newBotTestStore(t)
+	backend := newMockBackend()
+
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "merged.flac")
+	audioBytes := []byte("fLaC-test-merged-payload-123456")
+	if err := os.WriteFile(audioPath, audioBytes, 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	fileTok := "asset:asset-merged-1"
+	backend.files[fileTok] = audioPath
+
+	var mu sync.Mutex
+	var tgMethods []string
+	var sentBodies []map[string]any
+	var nextMsgID int64 = 700
+	failEditWith400 := false
+
+	tgSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+
+		mu.Lock()
+		defer mu.Unlock()
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		method := parts[len(parts)-1]
+		tgMethods = append(tgMethods, method)
+		sentBodies = append(sentBodies, body)
+
+		if method == "editMessageText" && failEditWith400 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":          false,
+				"error_code":  400,
+				"description": "Bad Request: message to edit not found",
+			})
+			return
+		}
+
+		msgID := nextMsgID
+		if method == "sendMessage" {
+			nextMsgID++
+		} else if mid, ok := body["message_id"].(float64); ok && mid > 0 {
+			msgID = int64(mid)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"message_id": msgID,
+			},
+		})
+	}))
+	defer tgSrv.Close()
+
+	cfg := DefaultConfig()
+	cfg.AllowTestLoopback = true
+	cfg.PublicURL = "https://music.example.com"
+	cfg.TGEnabled = true
+	cfg.TGAPIURL = tgSrv.URL
+	cfg.TGToken = "123456:tok"
+	cfg.TGAllowedUsers = "1001"
+
+	svc, err := NewService(ctx, ServiceOptions{Store: st, Backend: backend, Initial: cfg})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(svc.Close)
+
+	now := time.Now().Unix()
+	sz := int64(25 * 1024 * 1024) // 25.0 MB
+	searchID := "abcd1234"
+	searchKey := "tg:1001:" + searchID
+	card := botSearchResult{
+		ID:      searchKey,
+		Keyword: "星辰",
+		Expires: now + 600,
+		View:    "source",
+		SourceStates: []botSourceState{{
+			ID:     "src1",
+			Label:  "TestSource",
+			State:  "ready",
+			Tracks: []model.TrackDTO{{
+				ID:        "pub-star-1",
+				Title:     "星辰大海",
+				Artist:    "测试歌手",
+				SizeBytes: &sz,
+				Qualities: []model.QualityDTO{{ID: "flac", Label: "无损 FLAC"}},
+			}},
+		}},
+	}
+	if err := svc.saveSearchResult(ctx, card); err != nil {
+		t.Fatalf("saveSearchResult: %v", err)
+	}
+
+	// 1. Trigger download via TG inline button: even when mockBackend.EnqueueDownload
+	// returns job.Track without SizeBytes, bot falls back to search card size and
+	// tags TaskCardID so initial sendMessage records message_id=700.
+	if err := svc.ExecuteInbound(ctx, InboundMessage{
+		ID:        "cb-dl-1",
+		Channel:   ChannelTelegram,
+		User:      "1001",
+		Text:      "/download " + searchID + " 1 0",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("ExecuteInbound /dl: %v", err)
+	}
+	if _, err := svc.ProcessOutboxOnce(ctx, 10); err != nil {
+		t.Fatalf("ProcessOutboxOnce #1: %v", err)
+	}
+
+	mu.Lock()
+	if len(tgMethods) != 1 || tgMethods[0] != "sendMessage" {
+		t.Fatalf("expected 1 sendMessage for enqueue, got %v", tgMethods)
+	}
+	enqText, _ := sentBodies[0]["text"].(string)
+	if !strings.Contains(enqText, "预计大小：25.0 MB") {
+		t.Fatalf("expected predicted size 25.0 MB in TG enqueue message, got %q", enqText)
+	}
+	mu.Unlock()
+
+	// Locate the job created by mockBackend and mark it completed.
+	var createdJobID string
+	backend.mu.Lock()
+	for id, j := range backend.jobs {
+		createdJobID = id
+		j.Status = "complete"
+		j.File = &fileTok
+		j.Bytes = int64(len(audioBytes))
+		backend.jobs[id] = j
+	}
+	backend.mu.Unlock()
+	if createdJobID == "" {
+		t.Fatal("expected mockBackend job to be created")
+	}
+
+	// Verify botTaskOwner persisted MessageID=700.
+	if mid := svc.loadTaskCardMessageID(ctx, createdJobID); mid == nil || *mid != 700 {
+		t.Fatalf("expected persisted task card message_id=700, got %v", mid)
+	}
+
+	// 2. Process completion notice -> must use editMessageText on message_id=700!
+	if err := svc.ProcessDownloadNoticesOnce(ctx); err != nil {
+		t.Fatalf("ProcessDownloadNoticesOnce: %v", err)
+	}
+	if _, err := svc.ProcessOutboxOnce(ctx, 10); err != nil {
+		t.Fatalf("ProcessOutboxOnce #2: %v", err)
+	}
+
+	mu.Lock()
+	if len(tgMethods) != 2 || tgMethods[1] != "editMessageText" {
+		t.Fatalf("expected 2nd TG call to be editMessageText merging queue+complete, got %v", tgMethods)
+	}
+	if gotID, _ := sentBodies[1]["message_id"].(float64); int64(gotID) != 700 {
+		t.Fatalf("expected editMessageText on message_id=700, got %v", sentBodies[1]["message_id"])
+	}
+	completeText, _ := sentBodies[1]["text"].(string)
+	if !strings.Contains(completeText, "下载完成") {
+		t.Fatalf("expected merged message to show 下载完成, got %q", completeText)
+	}
+	mu.Unlock()
+
+	// 3. Simulate missing message (HTTP 400 on editMessageText): must gracefully fallback to sendMessage.
+	mu.Lock()
+	failEditWith400 = true
+	mu.Unlock()
+	if err := svc.enqueueReply(ctx, ChannelTelegram, "1001", "taskcard:"+createdJobID+":retrytest", OutboxPayload{
+		Text:       "重试完成",
+		TaskCardID: createdJobID,
+	}); err != nil {
+		t.Fatalf("enqueueReply fallback test: %v", err)
+	}
+	if _, err := svc.ProcessOutboxOnce(ctx, 10); err != nil {
+		t.Fatalf("ProcessOutboxOnce fallback: %v", err)
+	}
+	mu.Lock()
+	if len(tgMethods) != 4 || tgMethods[2] != "editMessageText" || tgMethods[3] != "sendMessage" {
+		t.Fatalf("expected editMessageText then sendMessage fallback, got %v", tgMethods)
+	}
+	mu.Unlock()
+}
+
 var _ = transport.NewPool

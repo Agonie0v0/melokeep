@@ -43,6 +43,15 @@ interface DownloadDao {
 	@Query("DELETE FROM DownloadEntity WHERE status = :status")
 	suspend fun deleteDownloadsByStatus(status: DownloadStatus)
 
+	@Query("DELETE FROM DownloadEntity WHERE songId IN (:songIds) AND status = :status")
+	suspend fun deleteDownloadsByIdsAndStatus(songIds: Collection<String>, status: DownloadStatus)
+
+	@Query("SELECT songId FROM DownloadEntity WHERE songId IN (:songIds) AND status = 'FAILED'")
+	suspend fun getFailedDownloadIds(songIds: Collection<String>): List<String>
+
+	@Query("DELETE FROM DownloadEntity WHERE songId IN (:songIds)")
+	suspend fun deleteDownloadsByIds(songIds: Collection<String>)
+
 	@Query("UPDATE DownloadEntity SET status = :status, progress = :progress WHERE songId = :songId")
 	suspend fun updateProgress(songId: String, status: DownloadStatus, progress: Float)
 

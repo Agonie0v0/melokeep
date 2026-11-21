@@ -115,7 +115,7 @@ import paige.navic.util.toFileSize
 private enum class PhoneDownloadSourceFilter(val label: String) {
 	ALL("全部"),
 	NAVIDROME("Navidrome"),
-	LOCAL("本地库")
+	LOCAL("Melokeep")
 }
 
 private data class DownloadSourceCounts(
@@ -356,13 +356,16 @@ fun MeloPhoneDownloadCenterContent(
 		) {
 			// 1. 本机存储紧凑概览卡
 			item(key = "phone-storage-dashboard", contentType = "dashboard") {
+				val hasActiveDownloads = isDownloadingLibrary || allDownloads.any {
+					it.status == DownloadStatus.DOWNLOADING
+				}
 				PhoneStorageOverviewCard(
 					downloadCount = downloadCount,
 					downloadSizeFormatted = downloadSizeBytes.toFileSize(),
 					freeSpaceFormatted = freeSpaceFormatted,
 					isInternalStorage = isInternalStorage,
 					hasExternalStorage = hasExternalStorage,
-					isDownloadingLibrary = isDownloadingLibrary,
+					isDownloadingLibrary = hasActiveDownloads,
 					libraryProgress = libraryProgress,
 					onSelectStorage = { target ->
 						if (preferenceManager.downloadStorage != target) {
@@ -374,7 +377,7 @@ fun MeloPhoneDownloadCenterContent(
 						}
 					},
 					onToggleLibraryDownload = {
-						if (!isDownloadingLibrary) {
+						if (!hasActiveDownloads) {
 							downloadManager.downloadEntireLibrary()
 						} else {
 							downloadManager.cancelAllActiveDownloads()
@@ -577,7 +580,7 @@ fun MeloPhoneDownloadCenterContent(
 					val emptyMessage = when (selectedTab) {
 						0 -> "暂无下载中的曲目"
 						1 -> when (sourceFilter) {
-							PhoneDownloadSourceFilter.LOCAL -> "暂无本地库离线曲目"
+							PhoneDownloadSourceFilter.LOCAL -> "暂无 Melokeep 离线曲目"
 							PhoneDownloadSourceFilter.NAVIDROME -> "暂无 Navidrome 离线曲目"
 							PhoneDownloadSourceFilter.ALL -> "暂无离线曲目"
 						}

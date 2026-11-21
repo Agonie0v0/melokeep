@@ -710,3 +710,92 @@ func TestDownloadRejectsCorruptAudioWhenFFmpegAvailable(t *testing.T) {
 		t.Fatalf("corrupt audio must not publish file, got %v", done.File)
 	}
 }
+
+func TestToDTOPreservesSizeMetadataAndVariantFallback(t *testing.T) {
+	prov := &stubProvider{
+		id: "StubMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			return nil, errors.New("unused")
+		},
+	}
+	st, svc, _, _ := setupDownloadEnv(t, prov, nil)
+	ctx := context.Background()
+
+	// 1. MetadataJSON carries size_bytes and size_label.
+	trackID1, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		Source:       "StubMusicClient",
+		Locator:      "loc-meta-size",
+		RootSource:   "StubMusicClient",
+		Title:        "SizeMetaTrack",
+		Artist:       "ArtistA",
+		Album:        "AlbumA",
+		DurationMS:   180000,
+		MetadataJSON: `{"size_bytes":24576000,"size_label":"23.4 MB"}`,
+	}, []model.MediaVariant{{VariantID: "v_flac", Label: "FLAC", Codec: "flac", Lossless: true, Availability: "full"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: "pub-meta-size",
+		Kind:     "candidate",
+		TargetID: trackID1,
+		Source:   "StubMusicClient",
+		SourceID: "loc-meta-size",
+	}, "v_flac"); err != nil {
+		t.Fatal(err)
+	}
+	dto1, err := svc.ToDTO(ctx, model.Download{
+		ID:             "dl-meta-1",
+		PublicID:       "pub-meta-size",
+		QualityID:      "v_flac",
+		DownloadSource: "StubMusicClient",
+		Status:         model.DownloadQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto1.Track.SizeBytes == nil || *dto1.Track.SizeBytes != 24576000 {
+		t.Fatalf("expected SizeBytes=24576000 from MetadataJSON, got %v", dto1.Track.SizeBytes)
+	}
+	if dto1.Track.SizeLabel == nil || *dto1.Track.SizeLabel != "23.4 MB" {
+		t.Fatalf("expected SizeLabel=23.4 MB from MetadataJSON, got %v", dto1.Track.SizeLabel)
+	}
+
+	// 2. Fallback to variant SizeBytes when MetadataJSON has no size.
+	varSz := int64(9876543)
+	trackID2, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		Source:       "StubMusicClient",
+		Locator:      "loc-variant-size",
+		RootSource:   "StubMusicClient",
+		Title:        "VariantSizeTrack",
+		Artist:       "ArtistB",
+		Album:        "AlbumB",
+		DurationMS:   200000,
+		MetadataJSON: `{}`,
+	}, []model.MediaVariant{{VariantID: "v_mp3", Label: "320k", Codec: "mp3", SizeBytes: &varSz, Availability: "full"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: "pub-variant-size",
+		Kind:     "candidate",
+		TargetID: trackID2,
+		Source:   "StubMusicClient",
+		SourceID: "loc-variant-size",
+	}, "v_mp3"); err != nil {
+		t.Fatal(err)
+	}
+	dto2, err := svc.ToDTO(ctx, model.Download{
+		ID:             "dl-var-1",
+		PublicID:       "pub-variant-size",
+		QualityID:      "v_mp3",
+		DownloadSource: "StubMusicClient",
+		Status:         model.DownloadQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto2.Track.SizeBytes == nil || *dto2.Track.SizeBytes != varSz {
+		t.Fatalf("expected SizeBytes=%d fallback from variant, got %v", varSz, dto2.Track.SizeBytes)
+	}
+}

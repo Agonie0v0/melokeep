@@ -629,10 +629,15 @@ func (s *Service) enqueueCompletedTaskPrompt(ctx context.Context, channel, user,
 			text += "\n\n请在网页端下载原文件，或在通知设置填写公网访问地址后发送「获取链接」。"
 		}
 	}
+	var taskCardID string
+	if channel == ChannelTelegram {
+		taskCardID = job.ID
+	}
 	return s.enqueueReply(ctx, channel, user, eventKey, OutboxPayload{
-		Text:    text,
-		Buttons: buttons,
-		JobID:   job.ID,
+		Text:       text,
+		Buttons:    buttons,
+		JobID:      job.ID,
+		TaskCardID: taskCardID,
 	})
 }
 

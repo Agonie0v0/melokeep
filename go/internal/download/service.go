@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -591,6 +592,32 @@ func (s *Service) List(ctx context.Context, limit int) ([]model.Download, error)
 	return s.store.ListDownloads(ctx, limit)
 }
 
+func parsePositiveInt64(v any) *int64 {
+	var n int64
+	switch val := v.(type) {
+	case json.Number:
+		if parsed, err := val.Int64(); err == nil {
+			n = parsed
+		} else if f, err := val.Float64(); err == nil {
+			n = int64(f)
+		}
+	case float64:
+		n = int64(val)
+	case int64:
+		n = val
+	case int:
+		n = int64(val)
+	case string:
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64); err == nil {
+			n = parsed
+		}
+	}
+	if n <= 0 {
+		return nil
+	}
+	return &n
+}
+
 // ToDTO projects a stored Download into the legacy-compatible DownloadJobDTO,
 // including independent Processing state when an auto-organize LibraryJob exists.
 func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJobDTO, error) {
@@ -599,15 +626,50 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 		Source:   dl.DownloadSource,
 		Playback: model.PlaybackDTO{State: "pending", PreviewOnly: false},
 	}
-	if ref, _, ok, err := s.store.GetPublicRef(ctx, dl.PublicID); err == nil && ok {
+	if ref, defaultVariantID, ok, err := s.store.GetPublicRef(ctx, dl.PublicID); err == nil && ok {
 		if tr, variants, tOk, tErr := s.store.GetProviderTrack(ctx, ref.TargetID); tErr == nil && tOk {
 			var cover *string
+			var sizeBytes *int64
+			var sizeLabel *string
 			var meta map[string]any
 			if tr.MetadataJSON != "" {
-				_ = json.Unmarshal([]byte(tr.MetadataJSON), &meta)
+				dec := json.NewDecoder(strings.NewReader(tr.MetadataJSON))
+				dec.UseNumber()
+				_ = dec.Decode(&meta)
 			}
 			if c, ok := meta["cover"].(string); ok && c != "" {
 				cover = &c
+			}
+			if meta != nil {
+				sizeBytes = parsePositiveInt64(meta["size_bytes"])
+				if sl, ok := meta["size_label"].(string); ok {
+					if trimmed := strings.TrimSpace(sl); trimmed != "" {
+						sizeLabel = &trimmed
+					}
+				}
+			}
+			if sizeBytes == nil {
+				for _, v := range variants {
+					if (v.VariantID == dl.QualityID || v.UpstreamID == dl.QualityID || v.VariantID == defaultVariantID) &&
+						v.SizeBytes != nil && *v.SizeBytes > 0 {
+						val := *v.SizeBytes
+						sizeBytes = &val
+						break
+					}
+				}
+			}
+			if sizeBytes == nil {
+				for _, v := range variants {
+					if v.SizeBytes != nil && *v.SizeBytes > 0 {
+						val := *v.SizeBytes
+						sizeBytes = &val
+						break
+					}
+				}
+			}
+			if sizeBytes == nil && dl.TotalBytes != nil && *dl.TotalBytes > 0 {
+				val := *dl.TotalBytes
+				sizeBytes = &val
 			}
 			trackDTO = model.TrackDTOFromDomain(model.ProviderTrack{
 				PublicID:   dl.PublicID,
@@ -619,6 +681,8 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 				Album:      tr.Album,
 				Duration:   float64(tr.DurationMS) / 1000.0,
 				Cover:      cover,
+				SizeBytes:  sizeBytes,
+				SizeLabel:  sizeLabel,
 				Variants:   variants,
 			}, model.PlaybackDTO{State: "pending", PreviewOnly: false})
 		}

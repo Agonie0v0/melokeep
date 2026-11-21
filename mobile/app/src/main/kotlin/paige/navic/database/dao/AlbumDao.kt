@@ -14,11 +14,17 @@ import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import androidx.room3.Transaction
+import androidx.room3.Upsert
 import kotlinx.coroutines.flow.Flow
 import paige.navic.database.entity.AlbumEntity
 import paige.navic.database.relation.AlbumWithSongs
 import paige.navic.util.Logger
 import kotlin.time.Instant
+
+data class AlbumSyncSummary(
+	val albumId: String,
+	val songCount: Int
+)
 
 @Dao
 interface AlbumDao {
@@ -67,11 +73,14 @@ interface AlbumDao {
 	@Query("SELECT * FROM AlbumEntity WHERE name LIKE '%' || :query || '%' COLLATE NOCASE")
 	suspend fun searchAlbumsList(query: String): List<AlbumWithSongs>
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertAlbum(album: AlbumEntity)
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertAlbums(albums: List<AlbumEntity>)
+
+	@Query("SELECT albumId, songCount FROM AlbumEntity")
+	suspend fun getAlbumSyncSummaries(): List<AlbumSyncSummary>
 
 	@Insert(onConflict = OnConflictStrategy.IGNORE)
 	suspend fun insertAlbumsIgnoringConflicts(albums: List<AlbumEntity>)

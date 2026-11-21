@@ -1701,6 +1701,7 @@ internal fun resetIosLyricsPreferences(
 		it.copy(
 			lyricsOffsetMs = 0,
 			lyricsFontSizeSp = 22f,
+			lyricsLineSpacingDp = 16f,
 			lyricsActiveColorHex = "",
 			lyricsInactiveAlpha = 0.48f,
 			lyricsAlign = "center",
@@ -1743,6 +1744,7 @@ internal fun IosSettingsLyricsStyleControl(
 	modifier: Modifier = Modifier,
 ) {
 	val clampedFontSp = prefs.lyricsFontSizeSp.coerceIn(16f, 34f)
+	val clampedLineSpacingDp = prefs.lyricsLineSpacingDp.coerceIn(4f, 36f)
 	val inactiveFontSp = (clampedFontSp - 4f).coerceAtLeast(13f)
 	val clampedInactiveAlpha = prefs.lyricsInactiveAlpha.coerceIn(0.2f, 0.85f)
 	val currentAlign = if (prefs.lyricsAlign == "start") "start" else "center"
@@ -1755,6 +1757,7 @@ internal fun IosSettingsLyricsStyleControl(
 
 	val isDefault = offsetMs == 0 &&
 		abs(clampedFontSp - 22f) < 0.05f &&
+		abs(clampedLineSpacingDp - 16f) < 0.05f &&
 		currentHex.isEmpty() &&
 		abs(clampedInactiveAlpha - 0.48f) < 0.005f &&
 		currentAlign == "center"
@@ -1830,6 +1833,45 @@ internal fun IosSettingsLyricsStyleControl(
 				},
 				valueRange = 16f..34f,
 				steps = 17,
+				modifier = Modifier.fillMaxWidth(),
+				colors = SliderDefaults.colors(
+					thumbColor = MaterialTheme.colorScheme.primary,
+					activeTrackColor = MaterialTheme.colorScheme.primary,
+					activeTickColor = Color.Transparent,
+					inactiveTickColor = Color.Transparent,
+				),
+			)
+		}
+
+		// 歌词行间距 (4dp - 36dp)
+		Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "歌词行间距",
+					style = MaterialTheme.typography.bodyMedium,
+					fontWeight = FontWeight.Medium,
+				)
+				Text(
+					text = "${clampedLineSpacingDp.roundToInt()} dp",
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					fontWeight = FontWeight.SemiBold,
+					color = MaterialTheme.colorScheme.primary,
+				)
+			}
+			Slider(
+				value = clampedLineSpacingDp,
+				onValueChange = { raw ->
+					val stepped = raw.roundToInt().toFloat().coerceIn(4f, 36f)
+					if (abs(stepped - clampedLineSpacingDp) >= 0.5f) {
+						onUpdatePrefs { it.copy(lyricsLineSpacingDp = stepped) }
+					}
+				},
+				valueRange = 4f..36f,
+				steps = 31,
 				modifier = Modifier.fillMaxWidth(),
 				colors = SliderDefaults.colors(
 					thumbColor = MaterialTheme.colorScheme.primary,

@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -204,6 +206,7 @@ class IosAudioPlayer(
 
 	private val activeDownloadJobs = mutableMapOf<String, Job>()
 	private val downloadTasks = mutableMapOf<String, IosDownloadTask>()
+	private val offlineDownloadSemaphore = Semaphore(4)
 
 	private var unshuffledQueue: List<IosTrackItem> = emptyList()
 	private var pausedByInterruption = false
@@ -879,6 +882,9 @@ class IosAudioPlayer(
 	}
 
 	fun downloadTrackOffline(track: IosTrackItem) {
+		if (track.sourceType == IosTrackSource.DEVICE) {
+			return
+		}
 		if (isTrackOffline(track.id)) {
 			return
 		}
@@ -896,105 +902,110 @@ class IosAudioPlayer(
 
 		val job = scope.launch {
 			try {
-				val url = subsonicManager.resolveStreamUrl(track)
-					?: throw IllegalStateException("无法解析音频下载地址")
-				val ext = track.fileExtension?.lowercase()?.takeIf { it.isNotBlank() } ?: "mp3"
-				val safeName = "${track.id.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.$ext"
-				val finalPath = "$offlineDirPath/$safeName"
-				val tmpPath = "$finalPath.part"
-
-				val fm = NSFileManager.defaultManager
-				if (fm.fileExistsAtPath(tmpPath)) {
-					fm.removeItemAtPath(tmpPath, error = null)
-				}
-				fm.createFileAtPath(tmpPath, contents = null, attributes = null)
-				val handle = NSFileHandle.fileHandleForWritingAtPath(tmpPath)
-					?: throw IllegalStateException("无法创建本地缓存文件")
-
-				var totalWritten = 0L
-				try {
-					subsonicManager.rawHttpClient.prepareGet(url).execute { response ->
-						if (!response.status.isSuccess()) {
-							throw IllegalStateException("下载失败 (HTTP ${response.status.value})")
-						}
-						val totalLen = response.contentLength() ?: 0L
-						val channel = response.bodyAsChannel()
-						val buffer = ByteArray(64 * 1024)
-						var lastReportedProgress = 0f
-						var lastReportedBytes = 0L
-						while (!channel.isClosedForRead && isActive) {
-							val read = channel.readAvailable(buffer, 0, buffer.size)
-							if (read <= 0) break
-							val slice = if (read == buffer.size) buffer else buffer.copyOf(read)
-							handle.writeData(slice.toNSData())
-							totalWritten += read
-							val progress = if (totalLen > 0L) {
-								(totalWritten.toFloat() / totalLen.toFloat()).coerceIn(0.02f, 0.99f)
-							} else {
-								0.5f
-							}
-							val shouldEmit = lastReportedBytes == 0L ||
-								(progress - lastReportedProgress) >= 0.02f ||
-								(totalWritten - lastReportedBytes) >= 256L * 1024L
-							if (shouldEmit) {
-								lastReportedProgress = progress
-								lastReportedBytes = totalWritten
-								downloadTasks[track.id] = IosDownloadTask(
-									track = track,
-									progress = progress,
-									status = "downloading",
-									downloadedBytes = totalWritten,
-									totalBytes = totalLen,
-								)
-								_state.update { cur ->
-									cur.copy(downloadingProgress = cur.downloadingProgress + (track.id to progress))
-								}
-								refreshOfflineState()
-							}
-						}
+				offlineDownloadSemaphore.withPermit {
+					if (!isActive || downloadTasks[track.id]?.status != "downloading") {
+						return@withPermit
 					}
-				} finally {
-					handle.closeFile()
-				}
+					val url = subsonicManager.resolveStreamUrl(track)
+						?: throw IllegalStateException("无法解析音频下载地址")
+					val ext = track.fileExtension?.lowercase()?.takeIf { it.isNotBlank() } ?: "mp3"
+					val safeName = "${track.id.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.$ext"
+					val finalPath = "$offlineDirPath/$safeName"
+					val tmpPath = "$finalPath.part"
 
-				if (!isActive) {
+					val fm = NSFileManager.defaultManager
 					if (fm.fileExistsAtPath(tmpPath)) {
 						fm.removeItemAtPath(tmpPath, error = null)
 					}
-					downloadTasks[track.id] = IosDownloadTask(track = track, status = "cancelled")
-					_state.update { it.copy(downloadingProgress = it.downloadingProgress - track.id) }
-					refreshOfflineState()
-					return@launch
-				}
+					fm.createFileAtPath(tmpPath, contents = null, attributes = null)
+					val handle = NSFileHandle.fileHandleForWritingAtPath(tmpPath)
+						?: throw IllegalStateException("无法创建本地缓存文件")
 
-				if (fm.fileExistsAtPath(finalPath)) {
-					fm.removeItemAtPath(finalPath, error = null)
-				}
-				fm.moveItemAtPath(tmpPath, toPath = finalPath, error = null)
+					var totalWritten = 0L
+					try {
+						subsonicManager.rawHttpClient.prepareGet(url).execute { response ->
+							if (!response.status.isSuccess()) {
+								throw IllegalStateException("下载失败 (HTTP ${response.status.value})")
+							}
+							val totalLen = response.contentLength() ?: 0L
+							val channel = response.bodyAsChannel()
+							val buffer = ByteArray(64 * 1024)
+							var lastReportedProgress = 0f
+							var lastReportedBytes = 0L
+							while (!channel.isClosedForRead && isActive) {
+								val read = channel.readAvailable(buffer, 0, buffer.size)
+								if (read <= 0) break
+								val slice = if (read == buffer.size) buffer else buffer.copyOf(read)
+								handle.writeData(slice.toNSData())
+								totalWritten += read
+								val progress = if (totalLen > 0L) {
+									(totalWritten.toFloat() / totalLen.toFloat()).coerceIn(0.02f, 0.99f)
+								} else {
+									0.5f
+								}
+								val shouldEmit = lastReportedBytes == 0L ||
+									(progress - lastReportedProgress) >= 0.02f ||
+									(totalWritten - lastReportedBytes) >= 256L * 1024L
+								if (shouldEmit) {
+									lastReportedProgress = progress
+									lastReportedBytes = totalWritten
+									downloadTasks[track.id] = IosDownloadTask(
+										track = track,
+										progress = progress,
+										status = "downloading",
+										downloadedBytes = totalWritten,
+										totalBytes = totalLen,
+									)
+									_state.update { cur ->
+										cur.copy(downloadingProgress = cur.downloadingProgress + (track.id to progress))
+									}
+									refreshOfflineState()
+								}
+							}
+						}
+					} finally {
+						handle.closeFile()
+					}
 
-				val record = IosOfflineTrackRecord(
-					track = track,
-					fileName = safeName,
-					sizeBytes = totalWritten,
-					savedAtEpochSec = NSDate().timeIntervalSince1970.roundToLong(),
-				)
-				val nextMap = _state.value.offlineTracks + (track.id to record)
-				persistOfflineRecords(nextMap)
-				downloadTasks[track.id] = IosDownloadTask(
-					track = track,
-					progress = 1.0f,
-					status = "completed",
-					downloadedBytes = totalWritten,
-					totalBytes = totalWritten,
-				)
-				_state.update {
-					it.copy(
-						offlineTracks = nextMap,
-						downloadingProgress = it.downloadingProgress - track.id,
-						noticeMessage = "已离线缓存：${track.title}",
+					if (!isActive || downloadTasks[track.id]?.status != "downloading") {
+						if (fm.fileExistsAtPath(tmpPath)) {
+							fm.removeItemAtPath(tmpPath, error = null)
+						}
+						downloadTasks[track.id] = IosDownloadTask(track = track, status = "cancelled")
+						_state.update { it.copy(downloadingProgress = it.downloadingProgress - track.id) }
+						refreshOfflineState()
+						return@withPermit
+					}
+
+					if (fm.fileExistsAtPath(finalPath)) {
+						fm.removeItemAtPath(finalPath, error = null)
+					}
+					fm.moveItemAtPath(tmpPath, toPath = finalPath, error = null)
+
+					val record = IosOfflineTrackRecord(
+						track = track,
+						fileName = safeName,
+						sizeBytes = totalWritten,
+						savedAtEpochSec = NSDate().timeIntervalSince1970.roundToLong(),
 					)
+					val nextMap = _state.value.offlineTracks + (track.id to record)
+					persistOfflineRecords(nextMap)
+					downloadTasks[track.id] = IosDownloadTask(
+						track = track,
+						progress = 1.0f,
+						status = "completed",
+						downloadedBytes = totalWritten,
+						totalBytes = totalWritten,
+					)
+					_state.update {
+						it.copy(
+							offlineTracks = nextMap,
+							downloadingProgress = it.downloadingProgress - track.id,
+							noticeMessage = "已离线缓存：${track.title}",
+						)
+					}
+					refreshOfflineState()
 				}
-				refreshOfflineState()
 			} catch (e: CancellationException) {
 				val fm = NSFileManager.defaultManager
 				val ext = track.fileExtension?.lowercase()?.takeIf { it.isNotBlank() } ?: "mp3"
@@ -1261,6 +1272,13 @@ class IosAudioPlayer(
 	}
 
 	private suspend fun resolvePlayableNsUrl(track: IosTrackItem): NSURL? {
+		if (track.sourceType == IosTrackSource.DEVICE) {
+			val localPath = track.rawId
+			if (localPath.isNotBlank() && NSFileManager.defaultManager.fileExistsAtPath(localPath)) {
+				return NSURL.fileURLWithPath(localPath)
+			}
+			return null
+		}
 		val offlineRec = _state.value.offlineTracks[track.id]
 		if (offlineRec != null) {
 			val path = "$offlineDirPath/${offlineRec.fileName}"

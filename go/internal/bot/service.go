@@ -76,6 +76,7 @@ type Service struct {
 	seenRate     map[string]time.Time
 	searchMu     sync.Mutex
 	searchResMu  sync.Mutex
+	taskMsgMu    sync.Mutex
 	searchCancel map[string]context.CancelFunc
 	bgCtxMu      sync.RWMutex
 	bgCtx        context.Context
@@ -927,11 +928,49 @@ type botSessionState struct {
 }
 
 type botTaskOwner struct {
-	ID       string `json:"id"`
-	Owner    string `json:"owner"`
-	Channel  string `json:"channel"`
-	User     string `json:"user"`
-	Notified string `json:"notified,omitempty"`
+	ID        string `json:"id"`
+	Owner     string `json:"owner"`
+	Channel   string `json:"channel"`
+	User      string `json:"user"`
+	Notified  string `json:"notified,omitempty"`
+	MessageID *int64 `json:"message_id,omitempty"`
+}
+
+func (s *Service) loadTaskCardMessageID(ctx context.Context, jobID string) *int64 {
+	if s.store == nil || jobID == "" {
+		return nil
+	}
+	s.taskMsgMu.Lock()
+	defer s.taskMsgMu.Unlock()
+	rec, ok, err := s.store.GetDurableRecord(ctx, nsBotTask, jobID)
+	if err != nil || !ok {
+		return nil
+	}
+	var own botTaskOwner
+	if json.Unmarshal([]byte(rec.BodyJSON), &own) != nil || own.MessageID == nil || *own.MessageID <= 0 {
+		return nil
+	}
+	mid := *own.MessageID
+	return &mid
+}
+
+func (s *Service) saveTaskCardMessageID(ctx context.Context, jobID string, msgID int64) {
+	if s.store == nil || jobID == "" || msgID <= 0 {
+		return
+	}
+	s.taskMsgMu.Lock()
+	defer s.taskMsgMu.Unlock()
+	rec, ok, err := s.store.GetDurableRecord(ctx, nsBotTask, jobID)
+	if err != nil || !ok {
+		return
+	}
+	var own botTaskOwner
+	if json.Unmarshal([]byte(rec.BodyJSON), &own) != nil || own.ID == "" {
+		return
+	}
+	own.MessageID = &msgID
+	rawOwn, _ := json.Marshal(own)
+	_, _ = s.store.PutDurableRecord(ctx, nsBotTask, jobID, string(rawOwn), 0)
 }
 
 func (s *Service) ExecuteInbound(ctx context.Context, msg InboundMessage) error {
@@ -1216,6 +1255,10 @@ func (s *Service) handleCommand(ctx context.Context, msg InboundMessage) error {
 		if err != nil {
 			return err
 		}
+		if formatTrackSize(job.Track) == "大小未知" && formatTrackSize(track) != "大小未知" {
+			job.Track.SizeBytes = track.SizeBytes
+			job.Track.SizeLabel = track.SizeLabel
+		}
 		own := botTaskOwner{ID: job.ID, Owner: owner, Channel: msg.Channel, User: msg.User}
 		rawOwn, _ := json.Marshal(own)
 		if _, err := s.store.PutDurableRecord(ctx, nsBotTask, job.ID, string(rawOwn), 0); err != nil {
@@ -1243,10 +1286,17 @@ func (s *Service) handleCommand(ctx context.Context, msg InboundMessage) error {
 			dlButtons = append(dlButtons, tBtns)
 		}
 		dlButtons = append(dlButtons, []InlineButton{{Text: "我的任务", CallbackData: "/status"}})
-		return s.enqueueReply(ctx, msg.Channel, msg.User, "dl_enq:"+msg.ID, OutboxPayload{
-			Text:    strings.Join(replyLines, "\n"),
-			Buttons: dlButtons,
-			JobID:   job.ID,
+		eventKey := "dl_enq:" + msg.ID
+		var taskCardID string
+		if msg.Channel == ChannelTelegram {
+			eventKey = "taskcard:" + job.ID + ":enq:" + msg.ID
+			taskCardID = job.ID
+		}
+		return s.enqueueReply(ctx, msg.Channel, msg.User, eventKey, OutboxPayload{
+			Text:       strings.Join(replyLines, "\n"),
+			Buttons:    dlButtons,
+			JobID:      job.ID,
+			TaskCardID: taskCardID,
 		})
 	case "status":
 		jobs, err := s.backend.ListDownloads(ctx, actor, 10)
@@ -1704,6 +1754,7 @@ func (s *Service) enqueueReply(ctx context.Context, channel, recipient, eventKey
 			itemPayload.JobID = payload.JobID
 			itemPayload.File = payload.File
 			itemPayload.CardKey = payload.CardKey
+			itemPayload.TaskCardID = payload.TaskCardID
 			itemPayload.MediaID = payload.MediaID
 			itemPayload.MediaUntil = payload.MediaUntil
 		}
@@ -1723,6 +1774,12 @@ func (s *Service) enqueueReply(ctx context.Context, channel, recipient, eventKey
 		}
 		if last && payload.CardKey != "" {
 			if err := s.store.ReplacePendingOutboxByPrefix(ctx, "card:"+payload.CardKey+":", params); err != nil {
+				return err
+			}
+			continue
+		}
+		if channel == ChannelTelegram && last && len(chunks) == 1 && payload.TaskCardID != "" && strings.HasPrefix(partKey, "taskcard:"+payload.TaskCardID+":") {
+			if err := s.store.ReplacePendingOutboxByPrefix(ctx, "taskcard:"+payload.TaskCardID+":", params); err != nil {
 				return err
 			}
 			continue
@@ -1934,6 +1991,10 @@ func (s *Service) dispatchChannel(ctx context.Context, item model.OutboxMessage,
 			if card, ok, _ := s.loadSearchResult(ctx, payload.CardKey); ok && card.CardMsg != nil && *card.CardMsg > 0 {
 				editID = *card.CardMsg
 			}
+		} else if payload.TaskCardID != "" {
+			if mid := s.loadTaskCardMessageID(ctx, payload.TaskCardID); mid != nil && *mid > 0 {
+				editID = *mid
+			}
 		}
 		method := "sendMessage"
 		if editID > 0 {
@@ -1941,21 +2002,37 @@ func (s *Service) dispatchChannel(ctx context.Context, item model.OutboxMessage,
 			body["message_id"] = editID
 		}
 		res, err := s.channels.callTelegram(ctx, cfg, rev, s.localAPI, proxy, method, body, "", "", "")
+		if err != nil && method == "editMessageText" {
+			lowerErr := strings.ToLower(err.Error())
+			if strings.Contains(lowerErr, "message is not modified") {
+				return "{}", nil
+			}
+			if payload.TaskCardID != "" && strings.Contains(lowerErr, "error 400") {
+				delete(body, "message_id")
+				method = "sendMessage"
+				res, err = s.channels.callTelegram(ctx, cfg, rev, s.localAPI, proxy, method, body, "", "", "")
+			}
+		}
 		if err != nil {
 			return "", err
 		}
-		if method == "sendMessage" && payload.CardKey != "" {
+		if method == "sendMessage" && (payload.CardKey != "" || payload.TaskCardID != "") {
 			var sentMsg struct {
 				MessageID int64 `json:"message_id"`
 			}
 			if json.Unmarshal(res, &sentMsg) == nil && sentMsg.MessageID > 0 {
-				s.searchResMu.Lock()
-				if card, ok, _ := s.loadSearchResult(ctx, payload.CardKey); ok {
-					mid := sentMsg.MessageID
-					card.CardMsg = &mid
-					_ = s.saveSearchResult(ctx, card)
+				if payload.CardKey != "" {
+					s.searchResMu.Lock()
+					if card, ok, _ := s.loadSearchResult(ctx, payload.CardKey); ok {
+						mid := sentMsg.MessageID
+						card.CardMsg = &mid
+						_ = s.saveSearchResult(ctx, card)
+					}
+					s.searchResMu.Unlock()
 				}
-				s.searchResMu.Unlock()
+				if payload.TaskCardID != "" {
+					s.saveTaskCardMessageID(ctx, payload.TaskCardID, sentMsg.MessageID)
+				}
 			}
 		}
 		return string(res), nil
@@ -2415,17 +2492,27 @@ func (s *Service) ProcessDownloadNoticesOnce(ctx context.Context) error {
 			continue
 		}
 		eventKey := fmt.Sprintf("task:%s:%s", own.ID, job.Status)
+		var taskCardID string
+		if own.Channel == ChannelTelegram {
+			eventKey = fmt.Sprintf("taskcard:%s:%s", own.ID, job.Status)
+			taskCardID = own.ID
+		}
 		if job.Status == "complete" {
 			if job.File == nil || *job.File == "" {
 				_ = s.enqueueReply(ctx, own.Channel, own.User, eventKey, OutboxPayload{
-					Text: "文件已删除或变化，请重新下载。任务编号：" + shortTaskID(job.ID),
+					Text:       "文件已删除或变化，请重新下载。任务编号：" + shortTaskID(job.ID),
+					TaskCardID: taskCardID,
 				})
 			} else {
 				_ = s.enqueueCompletedTaskPrompt(ctx, own.Channel, own.User, eventKey, job)
 			}
 		} else {
+			heading := statusLabelText(job.Status)
+			if own.Channel == ChannelTelegram {
+				heading = messageHeading(own.Channel, statusLabelText(job.Status), "")
+			}
 			text := strings.Join([]string{
-				statusLabelText(job.Status),
+				heading,
 				"",
 				conciseText(job.Track.Title, 60),
 				"任务 " + shortTaskID(job.ID),
@@ -2438,9 +2525,10 @@ func (s *Service) ProcessDownloadNoticesOnce(ctx context.Context) error {
 			}
 			btns = append(btns, []InlineButton{{Text: "我的任务", CallbackData: "/status"}})
 			_ = s.enqueueReply(ctx, own.Channel, own.User, eventKey, OutboxPayload{
-				Text:    text,
-				Buttons: btns,
-				JobID:   job.ID,
+				Text:       text,
+				Buttons:    btns,
+				JobID:      job.ID,
+				TaskCardID: taskCardID,
 			})
 		}
 		own.Notified = job.Status

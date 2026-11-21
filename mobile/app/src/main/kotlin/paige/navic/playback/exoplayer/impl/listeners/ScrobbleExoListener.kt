@@ -35,7 +35,13 @@ class ScrobbleExoListener(
 	}
 
 	private fun scrobbleNowPlaying(songId: String?) {
-		if (!preferenceManager.enableScrobbling || songId == null || songId.startsWith("mk:")) return
+		if (
+			!preferenceManager.enableScrobbling ||
+			songId == null ||
+			songId.startsWith("mk:") ||
+			songId.startsWith("device:") ||
+			songId.startsWith("radio_")
+		) return
 
 		if (!reachability.isReachable.value) return
 
@@ -48,7 +54,13 @@ class ScrobbleExoListener(
 	}
 
 	private fun scrobbleSubmission(songId: String?) {
-		if (!preferenceManager.enableScrobbling || songId == null || songId.startsWith("mk:")) return
+		if (
+			!preferenceManager.enableScrobbling ||
+			songId == null ||
+			songId.startsWith("mk:") ||
+			songId.startsWith("device:") ||
+			songId.startsWith("radio_")
+		) return
 
 		scope.launch(Dispatchers.IO) {
 			val currentTime = Clock.System.now()

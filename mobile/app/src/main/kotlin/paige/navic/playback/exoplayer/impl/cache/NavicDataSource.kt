@@ -6,12 +6,16 @@
 
 package paige.navic.playback.exoplayer.impl.cache
 
+import android.content.ContentUris
+import android.content.Context
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
+import androidx.media3.datasource.ContentDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.FileDataSource
@@ -32,6 +36,7 @@ import java.io.File
 
 @OptIn(UnstableApi::class)
 class NavicDataSource(
+	private val context: Context,
 	private val downloadManager: DownloadManager,
 	private val sessionManager: SessionManager,
 	private val streamCacheManager: StreamCacheManager,
@@ -45,6 +50,7 @@ class NavicDataSource(
 		get() = sessionManager.ttlLruCache
 
 	class NavicDataSourceFactory(
+		private val context: Context,
 		private val downloadManager: DownloadManager,
 		private val sessionManager: SessionManager,
 		private val streamCacheManager: StreamCacheManager,
@@ -54,6 +60,7 @@ class NavicDataSource(
 	) : DataSource.Factory {
 		override fun createDataSource(): DataSource {
 			return NavicDataSource(
+				context,
 				downloadManager,
 				sessionManager,
 				streamCacheManager,
@@ -142,7 +149,8 @@ class NavicDataSource(
 		val resolvedDataSpec = resolvedDataSpecBuilder.build()
 
 		val source = when {
-			targetUri.scheme == "file" || targetUri.scheme == "content" -> FileDataSource()
+			targetUri.scheme == "content" -> ContentDataSource(context)
+			targetUri.scheme == "file" -> FileDataSource()
 			cacheKey != null -> cacheDataSourceFactory.createDataSource()
 			else -> upstreamFactory.createDataSource()
 		}
@@ -196,6 +204,12 @@ class NavicDataSource(
 
 		if (cachedStreamUrl != null) {
 			return cachedStreamUrl.toUri()
+		}
+
+		if (id.startsWith("device:")) {
+			val mediaId = id.removePrefix("device:").toLongOrNull()
+				?: throw java.io.IOException("无效的手机本地音频 ID: $id")
+			return ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId)
 		}
 
 		if (id.startsWith("mk:")) {

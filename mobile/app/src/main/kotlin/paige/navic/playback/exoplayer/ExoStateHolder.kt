@@ -10,9 +10,13 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Process
+import android.provider.Settings
+import android.widget.Toast
 import androidx.annotation.OptIn
+import paige.navic.R
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
@@ -85,7 +89,7 @@ class ExoStateHolder : KoinComponent {
 	val gainProcessor = ExoAudioGainProcessor()
 
 
-	private class MediaSessionCallback(private val player: ExoPlayer) : MediaSession.Callback {
+	private inner class MediaSessionCallback(private val player: ExoPlayer) : MediaSession.Callback {
 		override fun onConnect(
 			session: MediaSession,
 			controller: MediaSession.ControllerInfo
@@ -96,6 +100,7 @@ class ExoStateHolder : KoinComponent {
 
 			val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
 				.buildUpon()
+				.add(SessionCommand(COMMAND_DESKTOP_LYRICS, Bundle.EMPTY))
 				.add(SessionCommand(COMMAND_SHUFFLE, Bundle.EMPTY))
 				.add(SessionCommand(COMMAND_REPEAT, Bundle.EMPTY))
 				.apply {
@@ -126,6 +131,10 @@ class ExoStateHolder : KoinComponent {
 			args: Bundle
 		): ListenableFuture<SessionResult> {
 			when (customCommand.customAction) {
+				COMMAND_DESKTOP_LYRICS -> {
+					toggleDesktopLyricsFromSession(session, player)
+				}
+
 				COMMAND_SHUFFLE -> {
 					player.shuffleModeEnabled = !player.shuffleModeEnabled
 				}
@@ -223,6 +232,18 @@ class ExoStateHolder : KoinComponent {
 	}
 
 	private fun makeButtons(player: Player) = buildList {
+		val lyricsEnabled = preferenceManager.desktopLyricsEnabled && Settings.canDrawOverlays(context)
+		add(
+			CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+				.setCustomIconResId(
+					if (lyricsEnabled) R.drawable.ic_desktop_lyrics_on
+					else R.drawable.ic_desktop_lyrics_off
+				)
+				.setDisplayName(if (lyricsEnabled) "关闭桌面歌词" else "开启桌面歌词")
+				.setSessionCommand(SessionCommand(COMMAND_DESKTOP_LYRICS, Bundle.EMPTY))
+				.build()
+		)
+
 		add(
 			CommandButton.Builder(
 				if (player.shuffleModeEnabled) {
@@ -388,7 +409,30 @@ class ExoStateHolder : KoinComponent {
 		player.playWhenReady = playWhenReady
 	}
 
+	fun refreshCustomLayout() {
+		if (!isInitialized) return
+		mediaSession.setCustomLayout(makeButtons(playerInstance))
+	}
+
+	private fun toggleDesktopLyricsFromSession(session: MediaSession, player: Player) {
+		if (!Settings.canDrawOverlays(context)) {
+			val intent = Intent(
+				Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+				Uri.parse("package:${context.packageName}")
+			).apply {
+				addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+			}
+			runCatching { context.startActivity(intent) }
+			Toast.makeText(context, "请开启悬浮窗权限后再次点击", Toast.LENGTH_SHORT).show()
+			preferenceManager.desktopLyricsEnabled = false
+		} else {
+			preferenceManager.desktopLyricsEnabled = !preferenceManager.desktopLyricsEnabled
+		}
+		session.setCustomLayout(makeButtons(player))
+	}
+
 	companion object {
+		const val COMMAND_DESKTOP_LYRICS = "COMMAND_DESKTOP_LYRICS"
 		const val COMMAND_SHUFFLE = "COMMAND_SHUFFLE"
 		const val COMMAND_REPEAT = "COMMAND_REPEAT"
 		const val COMMAND_SET_SHUFFLE_ORDER = "COMMAND_SET_SHUFFLE_ORDER"

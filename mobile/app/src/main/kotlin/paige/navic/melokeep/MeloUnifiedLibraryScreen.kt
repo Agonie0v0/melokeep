@@ -108,6 +108,7 @@ import paige.navic.ui.icons.outlined.Add
 import paige.navic.ui.icons.outlined.Close
 import paige.navic.ui.icons.outlined.Delete
 import paige.navic.ui.icons.outlined.LibraryMusic
+import paige.navic.ui.icons.outlined.Refresh
 import paige.navic.ui.icons.outlined.Search
 import paige.navic.ui.navigation.Screen
 import paige.navic.ui.theme.MeloBottomChromeClearance
@@ -115,8 +116,9 @@ import paige.navic.ui.theme.defaultFont
 import paige.navic.ui.theme.tabularNums
 
 internal enum class LibrarySourceMode(val label: String) {
-	NAVIDROME("Navidrome 库"),
-	LOCAL("本地库")
+	NAVIDROME("Navidrome"),
+	LOCAL("Melokeep"),
+	DEVICE("手机本地")
 }
 
 internal enum class LibraryLocalSubTab(val label: String) {
@@ -220,6 +222,9 @@ fun MeloUnifiedLibraryScreen(
 
 	var fileSearchOpen by rememberSaveable { mutableStateOf(false) }
 	var fileSearchInput by rememberSaveable { mutableStateOf(studioState.fileQuery) }
+	var deviceSearchOpen by rememberSaveable { mutableStateOf(false) }
+	var deviceSearchQuery by rememberSaveable { mutableStateOf("") }
+	val deviceMusicRepo = koinInject<paige.navic.domain.repository.DeviceLocalMusicRepository>()
 	var mkdirDialogOpen by rememberSaveable { mutableStateOf(false) }
 	var renameFolderTarget by remember { mutableStateOf<LibraryFolderChildEntry?>(null) }
 	var editingFilePath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -414,7 +419,18 @@ fun MeloUnifiedLibraryScreen(
 							)
 						},
 						onRemoveSearchHistory = settingsStore::removeLibrarySearchHistory,
-						onClearSearchHistory = settingsStore::clearLibrarySearchHistory
+						onClearSearchHistory = settingsStore::clearLibrarySearchHistory,
+						deviceSearchOpen = deviceSearchOpen,
+						onToggleDeviceSearch = {
+							val next = !deviceSearchOpen
+							deviceSearchOpen = next
+							if (!next) deviceSearchQuery = ""
+						},
+						deviceSearchQuery = deviceSearchQuery,
+						onDeviceSearchQueryChange = { deviceSearchQuery = it },
+						onRefreshDeviceMusic = {
+							scope.launch { deviceMusicRepo.refresh() }
+						}
 					)
 
 					AnimatedContent(
@@ -479,6 +495,15 @@ fun MeloUnifiedLibraryScreen(
 										onRefreshFiles = reloadLocalFiles
 									)
 								}
+							}
+
+							LibrarySourceMode.DEVICE -> {
+								MeloDeviceLocalLibraryView(
+									searchQuery = deviceSearchQuery,
+									currentPlayingPair = currentPlayingPair,
+									hostNavBottom = hostNavBottom,
+									modifier = Modifier.fillMaxSize()
+								)
 							}
 						}
 					}
@@ -820,7 +845,12 @@ private fun UnifiedLibraryTopHeader(
 	librarySearchHistory: List<String>,
 	onSelectSearchHistory: (String) -> Unit,
 	onRemoveSearchHistory: (String) -> Unit,
-	onClearSearchHistory: () -> Unit
+	onClearSearchHistory: () -> Unit,
+	deviceSearchOpen: Boolean,
+	onToggleDeviceSearch: () -> Unit,
+	deviceSearchQuery: String,
+	onDeviceSearchQueryChange: (String) -> Unit,
+	onRefreshDeviceMusic: () -> Unit
 ) {
 	val focusManager = LocalFocusManager.current
 	var manageHistory by remember { mutableStateOf(false) }
@@ -858,7 +888,9 @@ private fun UnifiedLibraryTopHeader(
 					shape = CircleShape,
 					color = MaterialTheme.colorScheme.surfaceContainerHigh,
 					border = libraryHairlineBorder(),
-					modifier = Modifier.width(216.dp)
+					modifier = Modifier
+						.weight(1f)
+						.widthIn(max = 312.dp)
 				) {
 					Row(
 						modifier = Modifier
@@ -885,7 +917,7 @@ private fun UnifiedLibraryTopHeader(
 									.clip(CircleShape)
 									.background(pillBg)
 									.clickable { onSelectSourceMode(mode) }
-									.padding(horizontal = 8.dp, vertical = 6.dp),
+									.padding(horizontal = 4.dp, vertical = 6.dp),
 								contentAlignment = Alignment.Center
 							) {
 								Text(
@@ -910,28 +942,48 @@ private fun UnifiedLibraryTopHeader(
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(6.dp)
 				) {
-					if (sourceMode == LibrarySourceMode.NAVIDROME) {
-						if (isNavidromeLoggedIn) {
-							HeaderCircleButton(
-								icon = Icons.Outlined.Search,
-								contentDescription = "快搜 Navidrome 库",
-								onClick = onOpenNavidromeSearch
-							)
+					when (sourceMode) {
+						LibrarySourceMode.NAVIDROME -> {
+							if (isNavidromeLoggedIn) {
+								HeaderCircleButton(
+									icon = Icons.Outlined.Search,
+									contentDescription = "快搜 Navidrome 库",
+									onClick = onOpenNavidromeSearch
+								)
+							}
 						}
-					} else if (isMeloConnected) {
-						if (localSubTab == LibraryLocalSubTab.FOLDERS && showLocalSubTabs) {
-							HeaderCircleButton(
-								icon = Icons.Outlined.Add,
-								contentDescription = "新建目录",
-								onClick = onOpenCreateFolder
-							)
+
+						LibrarySourceMode.LOCAL -> {
+							if (isMeloConnected) {
+								if (localSubTab == LibraryLocalSubTab.FOLDERS && showLocalSubTabs) {
+									HeaderCircleButton(
+										icon = Icons.Outlined.Add,
+										contentDescription = "新建目录",
+										onClick = onOpenCreateFolder
+									)
+								}
+								if (localSearchable && showLocalSubTabs) {
+									HeaderCircleButton(
+										icon = if (fileSearchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+										contentDescription = "搜索本地库",
+										onClick = onToggleFileSearch,
+										active = fileSearchOpen
+									)
+								}
+							}
 						}
-						if (localSearchable && showLocalSubTabs) {
+
+						LibrarySourceMode.DEVICE -> {
 							HeaderCircleButton(
-								icon = if (fileSearchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
-								contentDescription = "搜索本地库",
-								onClick = onToggleFileSearch,
-								active = fileSearchOpen
+								icon = Icons.Outlined.Refresh,
+								contentDescription = "刷新手机本地音乐",
+								onClick = onRefreshDeviceMusic
+							)
+							HeaderCircleButton(
+								icon = if (deviceSearchOpen) Icons.Outlined.Close else Icons.Outlined.Search,
+								contentDescription = "搜索手机本地音乐",
+								onClick = onToggleDeviceSearch,
+								active = deviceSearchOpen
 							)
 						}
 					}
@@ -1052,6 +1104,78 @@ private fun UnifiedLibraryTopHeader(
 							modifier = Modifier.height(28.dp)
 						) {
 							Text("搜索", style = MaterialTheme.typography.labelMedium)
+						}
+					}
+				}
+			}
+
+			// 第三行：手机本地音乐搜索输入框
+			AnimatedVisibility(
+				visible = sourceMode == LibrarySourceMode.DEVICE && deviceSearchOpen
+			) {
+				Surface(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 16.dp),
+					shape = CircleShape,
+					color = MaterialTheme.colorScheme.surfaceContainer,
+					border = libraryHairlineBorder()
+				) {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.height(40.dp)
+							.padding(start = 14.dp, end = 6.dp),
+						verticalAlignment = Alignment.CenterVertically
+					) {
+						Icon(
+							imageVector = Icons.Outlined.Search,
+							contentDescription = null,
+							tint = MaterialTheme.colorScheme.onSurfaceVariant,
+							modifier = Modifier.size(16.dp)
+						)
+						Spacer(Modifier.width(8.dp))
+						Box(
+							modifier = Modifier.weight(1f),
+							contentAlignment = Alignment.CenterStart
+						) {
+							if (deviceSearchQuery.isEmpty()) {
+								Text(
+									text = "搜索手机本地歌曲、歌手或目录…",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis
+								)
+							}
+							BasicTextField(
+								value = deviceSearchQuery,
+								onValueChange = onDeviceSearchQueryChange,
+								singleLine = true,
+								textStyle = TextStyle(
+									color = MaterialTheme.colorScheme.onSurface,
+									fontFamily = defaultFont(),
+									fontSize = 14.sp
+								),
+								cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+								keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+								keyboardActions = KeyboardActions(
+									onSearch = { focusManager.clearFocus() }
+								),
+								modifier = Modifier.fillMaxWidth()
+							)
+						}
+						if (deviceSearchQuery.isNotEmpty()) {
+							IconButton(
+								onClick = { onDeviceSearchQueryChange("") },
+								modifier = Modifier.size(30.dp)
+							) {
+								Icon(
+									imageVector = Icons.Outlined.Close,
+									contentDescription = "清除",
+									modifier = Modifier.size(15.dp)
+								)
+							}
 						}
 					}
 				}
@@ -1223,7 +1347,7 @@ private fun NavidromeUnauthenticatedCard(
 					.height(42.dp),
 				shape = RoundedCornerShape(12.dp)
 			) {
-				Text("切换至本地库")
+				Text("切换至 Melokeep")
 			}
 		}
 	}

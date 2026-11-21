@@ -1131,7 +1131,12 @@ class MediaPlayer(
 				setDurationMs(duration.inWholeMilliseconds)
 				setArtworkUri(
 					coverArtId?.let {
-						if (it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)) {
+						if (
+							it.startsWith("http://", ignoreCase = true) ||
+							it.startsWith("https://", ignoreCase = true) ||
+							it.startsWith("content://", ignoreCase = true) ||
+							it.startsWith("file://", ignoreCase = true)
+						) {
 							it.toUri()
 						} else {
 							it.buildCoverUri()
@@ -1144,7 +1149,7 @@ class MediaPlayer(
 		val metadata = metadataBuilder.build()
 
 		val uri = when {
-			id.startsWith("radio_") && !filePath.isNullOrEmpty() -> filePath.toUri()
+			(id.startsWith("radio_") || id.startsWith("device:")) && !filePath.isNullOrEmpty() -> filePath.toUri()
 			else -> id.buildSongUri()
 		}
 

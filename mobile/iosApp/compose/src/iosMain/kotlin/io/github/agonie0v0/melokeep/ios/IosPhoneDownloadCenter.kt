@@ -96,7 +96,7 @@ import kotlinx.coroutines.launch
 private enum class IosPhoneSourceFilter(val label: String) {
 	ALL("全部"),
 	NAVIDROME("Navidrome"),
-	LOCAL("本地库"),
+	LOCAL("Melokeep"),
 }
 
 private enum class IosPhoneItemStatus {
@@ -159,6 +159,7 @@ fun IosPhoneDownloadCenterContent(
 	var showClearConfirmDialog by rememberSaveable { mutableStateOf(false) }
 	var showBatchDeleteConfirmDialog by rememberSaveable { mutableStateOf(false) }
 	var isBatchDownloadingAll by rememberSaveable { mutableStateOf(false) }
+	var batchQueueJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
 	val allDownloadingItems = remember(activeDownloads) {
 		activeDownloads.map { task ->
@@ -256,11 +257,14 @@ fun IosPhoneDownloadCenterContent(
 					activeDownloadCount = activeDownloads.size,
 					isBatchQueuing = isBatchDownloadingAll,
 					onPrimaryAction = {
-						if (activeDownloads.isNotEmpty()) {
+						if (activeDownloads.isNotEmpty() || isBatchDownloadingAll) {
+							batchQueueJob?.cancel()
+							batchQueueJob = null
+							isBatchDownloadingAll = false
 							audioPlayer.cancelAllDownloads()
-						} else if (!isBatchDownloadingAll) {
+						} else {
 							isBatchDownloadingAll = true
-							scope.launch(Dispatchers.Default) {
+							batchQueueJob = scope.launch(Dispatchers.Default) {
 								try {
 									val allSongs = subsonicManager.fetchAllSongsForOffline()
 									val unOffline = allSongs.filter { !audioPlayer.isTrackOffline(it.id) }
@@ -269,6 +273,7 @@ fun IosPhoneDownloadCenterContent(
 									}
 								} finally {
 									isBatchDownloadingAll = false
+									batchQueueJob = null
 								}
 							}
 						}
@@ -486,7 +491,7 @@ fun IosPhoneDownloadCenterContent(
 					val emptyMessage = when (selectedTab) {
 						0 -> "暂无下载中的曲目"
 						1 -> when (sourceFilter) {
-							IosPhoneSourceFilter.LOCAL -> "暂无本地库离线曲目"
+							IosPhoneSourceFilter.LOCAL -> "暂无 Melokeep 离线曲目"
 							IosPhoneSourceFilter.NAVIDROME -> "暂无 Navidrome 离线曲目"
 							IosPhoneSourceFilter.ALL -> "暂无离线曲目"
 						}
@@ -804,9 +809,8 @@ private fun IosPhoneStorageOverviewCard(
 		) {
 			Surface(
 				onClick = onPrimaryAction,
-				enabled = !isBatchQueuing,
 				shape = RoundedCornerShape(11.dp),
-				color = if (isDownloading) {
+				color = if (isDownloading || isBatchQueuing) {
 					MaterialTheme.colorScheme.errorContainer
 				} else {
 					MaterialTheme.colorScheme.primary
@@ -824,19 +828,19 @@ private fun IosPhoneStorageOverviewCard(
 						CircularProgressIndicator(
 							modifier = Modifier.size(15.dp),
 							strokeWidth = 2.dp,
-							color = MaterialTheme.colorScheme.onPrimary,
+							color = MaterialTheme.colorScheme.onErrorContainer,
 						)
 						Spacer(Modifier.width(6.dp))
 					}
 					Text(
 						text = when {
-							isBatchQueuing -> "正在排队…"
+							isBatchQueuing -> "取消排队…"
 							isDownloading -> "取消下载 ($activeDownloadCount)"
 							else -> "离线全部曲库"
 						},
 						style = MaterialTheme.typography.labelLarge,
 						fontWeight = FontWeight.SemiBold,
-						color = if (isDownloading) {
+						color = if (isDownloading || isBatchQueuing) {
 							MaterialTheme.colorScheme.onErrorContainer
 						} else {
 							MaterialTheme.colorScheme.onPrimary

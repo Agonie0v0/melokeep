@@ -64,6 +64,17 @@ fun LyricsScreenContent(
 	val preferenceManager = koinInject<PreferenceManager>()
 
 	val listState = rememberLazyListState()
+	val isScrollCooldown = androidx.compose.runtime.remember {
+		androidx.compose.runtime.mutableStateOf(false)
+	}
+	androidx.compose.runtime.LaunchedEffect(listState.isScrollInProgress) {
+		if (listState.isScrollInProgress) {
+			isScrollCooldown.value = true
+		} else if (isScrollCooldown.value) {
+			kotlinx.coroutines.delay(350)
+			isScrollCooldown.value = false
+		}
+	}
 
 	val lyrics = data?.lines
 	val isSynced = data?.isSynced == true
@@ -163,8 +174,9 @@ fun LyricsScreenContent(
 				},
 				animationSpec = spring(stiffness = Spring.StiffnessLow)
 			)
+			val baseSpacingDp = preferenceManager.lyricsLineSpacingDp.coerceIn(4f, 32f)
 			val linePaddingY by animateDpAsState(
-				targetValue = if (isEmphasised) 20.dp else 12.dp,
+				targetValue = if (isEmphasised) (baseSpacingDp + 8f).dp else baseSpacingDp.dp,
 				animationSpec = MaterialTheme.motionScheme.slowSpatialSpec()
 			)
 			val lineOffsetY by animateDpAsState(
@@ -207,6 +219,9 @@ fun LyricsScreenContent(
 				isSynced = isSynced,
 				isBeatByBeat = hasWords || preferenceManager.lyricsFakeBeatByBeat,
 				onClick = {
+					if (listState.isScrollInProgress || isScrollCooldown.value) {
+						return@LyricsScreenKaraokeText
+					}
 					if (isSelecting) {
 						val lineTextLength = line.text.length
 						if (selectedIndices.isEmpty()) {

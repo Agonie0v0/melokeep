@@ -54,6 +54,7 @@ import io.github.agonie0v0.melokeep.shared.MeloLibraryJob
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
 import io.github.agonie0v0.melokeep.shared.MeloStudioTab
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -64,6 +65,7 @@ import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
 import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SessionState
+import paige.navic.domain.repository.DbRepository
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.layout.NestedTopBarDefaults
 import paige.navic.ui.icons.Icons
@@ -155,6 +157,7 @@ fun MeloStudioScreen(
 	val controller = koinInject<MeloStudioController>()
 	val settingsStore = koinInject<MeloSettingsStore>()
 	val sessionManager = koinInject<SessionManager>()
+	val dbRepository = koinInject<DbRepository>()
 	val downloadManager = koinInject<DownloadManager>()
 	val player = koinInject<MediaPlayer>()
 	val preferenceManager = koinInject<PreferenceManager>()
@@ -275,21 +278,32 @@ fun MeloStudioScreen(
 							if (!directScanningNavidrome) {
 								directScanningNavidrome = true
 								scope.launch {
-									runCatching { sessionManager.triggerLibraryScan() }
-										.onSuccess { res ->
-											directScanningNavidrome = false
-											if (res.count != null && res.count > 0L) {
-												directScanCount = res.count
-											}
-											snackBarState.currentSnackbarData?.dismiss()
-											val suffix = res.count?.takeIf { it > 0L }?.let { "（$it 首）" }.orEmpty()
-											snackBarState.showSnackbar("已触发 Navidrome 扫库$suffix")
+									try {
+										val res = sessionManager.triggerLibraryScan()
+										if (!res.serverScanPermitted && serverConfig.isAuthenticated) {
+											runCatching { controller.triggerNavidromeScan() }
 										}
-										.onFailure { err ->
-											directScanningNavidrome = false
-											snackBarState.currentSnackbarData?.dismiss()
-											snackBarState.showSnackbar(err.message ?: "触发 Navidrome 扫库失败")
+										if (res.count != null && res.count > 0L) {
+											directScanCount = res.count
 										}
+										if (res.serverScanPermitted && res.scanning) {
+											delay(1_000L)
+										}
+										dbRepository.syncLibraryIncremental().getOrThrow()
+										snackBarState.currentSnackbarData?.dismiss()
+										val suffix = res.count?.takeIf { it > 0L }?.let { "（$it 首）" }.orEmpty()
+										val msg = if (res.serverScanPermitted) {
+											"已触发 Navidrome 扫库并同步最新曲库$suffix"
+										} else {
+											"已刷新并获取最新 Navidrome 曲库（当前账号无服务端扫盘权限，依赖服务端自动监听）"
+										}
+										snackBarState.showSnackbar(msg)
+									} catch (err: Exception) {
+										snackBarState.currentSnackbarData?.dismiss()
+										snackBarState.showSnackbar(err.message ?: "刷新 Navidrome 曲库失败")
+									} finally {
+										directScanningNavidrome = false
+									}
 								}
 							}
 						}

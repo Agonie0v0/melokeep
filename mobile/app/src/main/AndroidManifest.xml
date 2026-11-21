@@ -29,6 +29,15 @@
 	<!-- needed for notifications for downloads and syncing db -->
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+	<!-- needed for desktop floating lyrics overlay -->
+	<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+	<!-- needed for browsing local audio folders on device -->
+	<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+	<uses-permission
+		android:name="android.permission.READ_EXTERNAL_STORAGE"
+		android:maxSdkVersion="32" />
+
 	<!-- needed for in-app APK update installation -->
 	<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

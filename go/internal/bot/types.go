@@ -528,6 +528,7 @@ type OutboxPayload struct {
 	JobID         string             `json:"job_id,omitempty"`
 	File          bool               `json:"file,omitempty"`
 	CardKey       string             `json:"card_key,omitempty"`
+	TaskCardID    string             `json:"task_card_id,omitempty"`
 	EditMessageID *int64             `json:"edit_message_id,omitempty"`
 	MediaID       string             `json:"media_id,omitempty"`
 	MediaUntil    int64              `json:"media_until,omitempty"`

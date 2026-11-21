@@ -14,6 +14,7 @@ import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import androidx.room3.Transaction
+import androidx.room3.Upsert
 import kotlinx.coroutines.flow.Flow
 import paige.navic.database.entity.ArtistEntity
 import paige.navic.util.Logger
@@ -47,10 +48,10 @@ interface ArtistDao {
 	@Query("SELECT * FROM ArtistEntity WHERE name LIKE '%' || :query || '%' COLLATE NOCASE")
 	suspend fun searchArtistsList(query: String): List<ArtistEntity>
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertArtist(artist: ArtistEntity)
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertArtists(artists: List<ArtistEntity>)
 
 	@Insert(onConflict = OnConflictStrategy.IGNORE)

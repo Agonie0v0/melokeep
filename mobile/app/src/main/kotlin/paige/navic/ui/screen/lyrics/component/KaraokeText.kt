@@ -104,7 +104,7 @@ fun LyricsScreenKaraokeText(
 		else -> MaterialTheme.colorScheme.onSurface.copy(alpha = alphaTransition)
 	}
 
-	Box(modifier = modifier.clickable { onClick() }) {
+	Box(modifier = modifier) {
 		Text(
 			text = text,
 			fontSize = fontSizeSp.sp,
@@ -113,7 +113,12 @@ fun LyricsScreenKaraokeText(
 			style = textStyle,
 			color = baseColor,
 			onTextLayout = { textLayoutResult = it },
-			modifier = Modifier.fillMaxWidth()
+			modifier = Modifier
+				.fillMaxWidth()
+				.detectLyricTextTap(
+					textLayoutResultProvider = { textLayoutResult },
+					onTap = onClick
+				)
 		)
 
 		if (isActive) {

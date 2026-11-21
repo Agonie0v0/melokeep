@@ -28,7 +28,7 @@ class AlbumRepository(
 ) {
 	suspend fun getAlbumById(id: String) = albumDao.getAlbumById(id)?.toDomainModel()
 
-	private suspend fun getLocalData(
+	suspend fun getLocalData(
 		listType: DomainAlbumListType,
 		reversed: Boolean,
 		filters: Set<DomainFilter> = emptySet()
@@ -48,12 +48,16 @@ class AlbumRepository(
 		toDomain = { it.toDomainModel() }
 	)
 
+	suspend fun syncLocalData() {
+		dbRepository.syncLibraryIncremental().getOrThrow()
+	}
+
 	private suspend fun refreshLocalData(
 		listType: DomainAlbumListType,
 		reversed: Boolean,
 		filters: Set<DomainFilter> = emptySet()
 	): Flow<PagingData<DomainAlbum>> {
-		dbRepository.syncLibrarySongs().getOrThrow()
+		syncLocalData()
 		return getLocalData(listType, reversed, filters)
 	}
 

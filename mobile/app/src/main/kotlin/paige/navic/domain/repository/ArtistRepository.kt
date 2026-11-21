@@ -26,7 +26,7 @@ class ArtistRepository(
 	private val syncManager: SyncManager,
 	private val dbRepository: DbRepository
 ) {
-	private suspend fun getLocalData(
+	suspend fun getLocalData(
 		listType: DomainArtistListType,
 		filters: Set<DomainFilter> = emptySet(),
 		reversed: Boolean = false,
@@ -46,11 +46,15 @@ class ArtistRepository(
 		toDomain = { it.toDomainModel() }
 	)
 
+	suspend fun syncLocalData() {
+		dbRepository.syncArtists().getOrThrow()
+	}
+
 	private suspend fun refreshLocalData(
 		listType: DomainArtistListType,
 		filters: Set<DomainFilter> = emptySet()
 	): Flow<PagingData<DomainArtist>> {
-		dbRepository.syncArtists().getOrThrow()
+		syncLocalData()
 		return getLocalData(listType, filters)
 	}
 

@@ -14,10 +14,18 @@ import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import androidx.room3.Transaction
+import androidx.room3.Upsert
 import paige.navic.database.entity.PlaylistEntity
 import paige.navic.database.entity.PlaylistSongCrossRef
 import paige.navic.database.relation.PlaylistWithSongs
 import paige.navic.util.Logger
+import kotlin.time.Instant
+
+data class PlaylistSyncSummary(
+	val playlistId: String,
+	val songCount: Int,
+	val modifiedAt: Instant
+)
 
 @Dao
 interface PlaylistDao {
@@ -32,11 +40,14 @@ interface PlaylistDao {
 	@Query("SELECT * FROM PlaylistEntity WHERE playlistId IN (:ids)")
 	suspend fun getPlaylistsByIds(ids: List<String>): List<PlaylistWithSongs>
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertPlaylist(playlist: PlaylistEntity)
 
-	@Insert(onConflict = OnConflictStrategy.REPLACE)
+	@Upsert
 	suspend fun insertPlaylists(playlists: List<PlaylistEntity>)
+
+	@Query("SELECT playlistId, songCount, modifiedAt FROM PlaylistEntity")
+	suspend fun getPlaylistSyncSummaries(): List<PlaylistSyncSummary>
 
 	@Insert(onConflict = OnConflictStrategy.REPLACE)
 	suspend fun insertPlaylistSongCrossRefs(crossRefs: List<PlaylistSongCrossRef>)

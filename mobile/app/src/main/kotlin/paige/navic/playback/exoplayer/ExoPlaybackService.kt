@@ -8,6 +8,7 @@ package paige.navic.playback.exoplayer
 
 import android.content.Intent
 import androidx.annotation.OptIn
+import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -32,6 +34,7 @@ import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SyncManager
 import paige.navic.playback.exoplayer.impl.playback.ExoEqualizerManager
 import paige.navic.domain.repository.LyricsRepository
+import paige.navic.statusbar.DesktopLyricsController
 import paige.navic.statusbar.StatusBarLyricsController
 import paige.navic.statusbar.StatusBarLyricsNotificationProvider
 
@@ -51,6 +54,7 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 	private val equalizerManager: EqualizerManager by inject()
 	private val lyricsRepository: LyricsRepository by inject()
 	private var statusBarLyricsController: StatusBarLyricsController? = null
+	private var desktopLyricsController: DesktopLyricsController? = null
 	private var statusBarLyricsProvider: StatusBarLyricsNotificationProvider? = null
 
 	private lateinit var exoEqualizerManager: ExoEqualizerManager
@@ -84,6 +88,16 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 				serviceScope, lyricsRepository, preferenceManager, notificationProvider
 			).also { it.attach(player) }
 
+			desktopLyricsController = DesktopLyricsController(
+				this, serviceScope, lyricsRepository, preferenceManager
+			).also { it.attach(player) }
+
+			serviceScope.launch {
+				snapshotFlow { preferenceManager.desktopLyricsEnabled }
+					.distinctUntilChanged()
+					.collect { stateHolder.refreshCustomLayout() }
+			}
+
 			scrobbleListener = ScrobbleExoListener(
 				player,
 				reachability,
@@ -115,6 +129,8 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 	override fun onDestroy() {
 		exoEqualizerManager.releaseEqualizer()
 		scrobbleListener.release()
+		desktopLyricsController?.release()
+		desktopLyricsController = null
 		statusBarLyricsController?.release()
 		statusBarLyricsProvider?.release()
 		serviceScope.cancel()

@@ -1046,6 +1046,194 @@ internal fun SettingsLyricsAndStagePanel(
 			}
 		}
 
+		// 1b. 桌面悬浮歌词设置
+		item(key = "desktop-lyrics") {
+			val context = LocalContext.current
+			val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+			var hasOverlayPermission by remember {
+				mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+			}
+			var pendingEnableDesktopLyrics by remember { mutableStateOf(false) }
+
+			androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+				val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+					if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+						val granted = android.provider.Settings.canDrawOverlays(context)
+						hasOverlayPermission = granted
+						if (granted && pendingEnableDesktopLyrics) {
+							pendingEnableDesktopLyrics = false
+							preferenceManager.desktopLyricsEnabled = true
+						}
+					}
+				}
+				lifecycleOwner.lifecycle.addObserver(observer)
+				onDispose {
+					lifecycleOwner.lifecycle.removeObserver(observer)
+				}
+			}
+
+			val openOverlayPermissionSettings = {
+				val intent = android.content.Intent(
+					android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+					android.net.Uri.parse("package:${context.packageName}")
+				)
+				runCatching { context.startActivity(intent) }
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "桌面悬浮歌词")
+				MeloGroupedCard {
+					SettingsToggleRow(
+						title = if (hasOverlayPermission) {
+							"开启桌面悬浮歌词"
+						} else {
+							"开启桌面悬浮歌词（需授权悬浮窗）"
+						},
+						checked = preferenceManager.desktopLyricsEnabled && hasOverlayPermission,
+						onCheckedChange = { enabled ->
+							if (!enabled) {
+								pendingEnableDesktopLyrics = false
+								preferenceManager.desktopLyricsEnabled = false
+							} else if (android.provider.Settings.canDrawOverlays(context)) {
+								hasOverlayPermission = true
+								preferenceManager.desktopLyricsEnabled = true
+							} else {
+								pendingEnableDesktopLyrics = true
+								openOverlayPermissionSettings()
+							}
+						}
+					)
+					MeloHairlineDivider(startIndent = 16.dp)
+					SettingsToggleRow(
+						title = "锁定悬浮窗（开启后触摸穿透）",
+						checked = preferenceManager.desktopLyricsLocked,
+						onCheckedChange = { preferenceManager.desktopLyricsLocked = it }
+					)
+					MeloHairlineDivider(startIndent = 16.dp)
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp, vertical = 14.dp),
+						verticalArrangement = Arrangement.spacedBy(12.dp)
+					) {
+						val fontSizeSp = preferenceManager.desktopLyricsFontSizeSp.coerceIn(12f, 32f)
+						Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								Text(
+									text = "悬浮歌词字号",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium
+								)
+								Text(
+									text = "${fontSizeSp.toInt()} sp",
+									style = MaterialTheme.typography.labelMedium,
+									color = MaterialTheme.colorScheme.primary
+								)
+							}
+							Slider(
+								value = fontSizeSp,
+								onValueChange = {
+									preferenceManager.desktopLyricsFontSizeSp = it.coerceIn(12f, 32f)
+								},
+								valueRange = 12f..32f
+							)
+						}
+
+						val bgAlpha = preferenceManager.desktopLyricsBgAlpha.coerceIn(0f, 0.9f)
+						Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								Text(
+									text = "悬浮窗背景不透明度",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium
+								)
+								Text(
+									text = "${(bgAlpha * 100f).toInt()}%",
+									style = MaterialTheme.typography.labelMedium,
+									color = MaterialTheme.colorScheme.primary
+								)
+							}
+							Slider(
+								value = bgAlpha,
+								onValueChange = {
+									preferenceManager.desktopLyricsBgAlpha = it.coerceIn(0f, 0.9f)
+								},
+								valueRange = 0f..0.9f
+							)
+						}
+
+						val colorPresets = listOf(
+							"#FFFFFF" to Color(0xFFFFFFFF),
+							"#FFE082" to Color(0xFFFFE082),
+							"#80DEEA" to Color(0xFF80DEEA),
+							"#F48FB1" to Color(0xFFF48FB1),
+							"#A5D6A7" to Color(0xFFA5D6A7),
+							"#CE93D8" to Color(0xFFCE93D8)
+						)
+						val currentColorHex = preferenceManager.desktopLyricsColorHex
+							.trim()
+							.uppercase()
+							.ifBlank { "#FFFFFF" }
+						Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+							Text(
+								text = "悬浮歌词颜色",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium
+							)
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(10.dp),
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								colorPresets.forEach { (hex, swatchColor) ->
+									val selected = currentColorHex == hex
+									Surface(
+										onClick = { preferenceManager.desktopLyricsColorHex = hex },
+										shape = CircleShape,
+										color = swatchColor,
+										border = androidx.compose.foundation.BorderStroke(
+											width = if (selected) 2.5.dp else 1.dp,
+											color = if (selected) {
+												MaterialTheme.colorScheme.primary
+											} else {
+												MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+											}
+										),
+										modifier = Modifier.size(28.dp)
+									) {}
+								}
+							}
+						}
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							OutlinedButton(
+								onClick = { preferenceManager.desktopLyricsYFraction = 0.15f }
+							) {
+								Text("重置悬浮窗位置")
+							}
+							if (!hasOverlayPermission) {
+								FilledTonalButton(onClick = { openOverlayPermissionSettings() }) {
+									Text("去授权悬浮窗")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// 2. 歌词外观样式
 		item(key = "lyrics-style") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

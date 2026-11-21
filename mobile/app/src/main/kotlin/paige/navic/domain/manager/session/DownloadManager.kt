@@ -19,7 +19,10 @@ import androidx.work.workDataOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +32,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.coroutineContext
 import paige.navic.database.dao.DownloadDao
 import paige.navic.database.dao.SongDao
 import paige.navic.database.entity.DownloadEntity
@@ -60,6 +67,10 @@ class DownloadManager(
 ) {
 	private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 	private val workManager = WorkManager.getInstance(context)
+	private val enqueueMutex = Mutex()
+	private val cancelGeneration = AtomicInteger(0)
+	@Volatile
+	private var libraryEnqueueJob: Job? = null
 
 	val allDownloads = downloadDao.getAllDownloads().map { it.toImmutableList() }
 	val downloadCount = downloadDao.getDownloadsCount()
@@ -85,6 +96,16 @@ class DownloadManager(
 		}
 
 		scope.launch {
+			downloadDao.getDownloadsCount(DownloadStatus.DOWNLOADING).collectLatest { downloadingCount ->
+				if (downloadingCount == 0 && libraryEnqueueJob?.isActive != true) {
+					isDownloadingLibrary.value = false
+					libraryDownloadProgress.value = 0f
+					notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+				}
+			}
+		}
+
+		scope.launch {
 			workManager.getWorkInfosForUniqueWorkFlow(WorkNames.DOWNLOAD_QUEUE)
 				.collectLatest { infos ->
 					val running = infos.lastOrNull { it.state == WorkInfo.State.RUNNING }
@@ -96,9 +117,13 @@ class DownloadManager(
 					if (running != null) {
 						libraryDownloadProgress.value = running.progress
 							.getFloat(WorkKeys.PROGRESS, 0f)
-					} else if (!pending && infos.isNotEmpty()) {
-						isDownloadingLibrary.value = false
-						libraryDownloadProgress.value = 0f
+					} else if (!pending && infos.isNotEmpty() && libraryEnqueueJob?.isActive != true) {
+						val hasQueuedInDb = downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) > 0
+						if (!hasQueuedInDb) {
+							isDownloadingLibrary.value = false
+							libraryDownloadProgress.value = 0f
+							notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+						}
 					}
 				}
 		}
@@ -161,48 +186,88 @@ class DownloadManager(
 	fun downloadEntireLibrary() {
 		if (isDownloadingLibrary.value) return
 
+		val expectedGen = cancelGeneration.get()
 		isDownloadingLibrary.value = true
 		libraryDownloadProgress.value = 0f
 
-		scope.launch {
+		libraryEnqueueJob?.cancel()
+		val job = scope.launch {
 			try {
 				val ids = songDao.getAllSongIds()
+					.filterNot { it.startsWith("device:") }
 
-				if (ids.isEmpty()) {
+				if (ids.isEmpty() || cancelGeneration.get() != expectedGen) {
 					isDownloadingLibrary.value = false
-					libraryDownloadProgress.value = 1f
+					libraryDownloadProgress.value = if (ids.isEmpty()) 1f else 0f
 					return@launch
 				}
 
-				if (enqueueSongs(ids) == 0) {
+				val enqueued = enqueueSongs(ids, expectedGen = expectedGen)
+				if (cancelGeneration.get() != expectedGen) {
+					isDownloadingLibrary.value = false
+					libraryDownloadProgress.value = 0f
+					return@launch
+				}
+				if (enqueued == 0 && downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0) {
 					isDownloadingLibrary.value = false
 					libraryDownloadProgress.value = 1f
 				}
+			} catch (e: kotlinx.coroutines.CancellationException) {
+				isDownloadingLibrary.value = false
+				libraryDownloadProgress.value = 0f
+				throw e
 			} catch (e: Exception) {
 				Logger.e("DownloadManager", "Failed to queue library download", e)
 				isDownloadingLibrary.value = false
 				libraryDownloadProgress.value = 0f
 			}
 		}
+		libraryEnqueueJob = job
+		job.invokeOnCompletion {
+			if (libraryEnqueueJob === job) {
+				libraryEnqueueJob = null
+			}
+		}
 	}
 
-	private suspend fun enqueueSongs(songIds: List<String>): Int {
+	private suspend fun enqueueSongs(
+		songIds: List<String>,
+		expectedGen: Int? = null
+	): Int = enqueueMutex.withLock {
 		if (songIds.isEmpty()) return 0
 
-		val distinctIds = songIds.distinct()
+		val distinctIds = songIds.distinct().filterNot { it.startsWith("device:") }
+		if (distinctIds.isEmpty()) return 0
+
 		val existing = distinctIds
 			.chunked(SQLITE_BATCH_SIZE)
-			.flatMap { chunk -> downloadDao.getActiveOrCompletedDownloadIds(chunk) }
+			.flatMap { chunk ->
+				coroutineContext.ensureActive()
+				if (expectedGen != null && cancelGeneration.get() != expectedGen) return 0
+				downloadDao.getActiveOrCompletedDownloadIds(chunk)
+			}
 			.toSet()
 
 		val newIds = distinctIds.filter { it !in existing }
-
 		if (newIds.isEmpty()) return 0
 
 		newIds
 			.map { DownloadEntity(it, DownloadStatus.DOWNLOADING, 0f) }
 			.chunked(SQLITE_BATCH_SIZE)
-			.forEach { chunk -> downloadDao.insertDownloads(chunk) }
+			.forEach { chunk ->
+				coroutineContext.ensureActive()
+				if (expectedGen != null && cancelGeneration.get() != expectedGen) {
+					downloadDao.deleteDownloadsByStatus(DownloadStatus.DOWNLOADING)
+					return 0
+				}
+				downloadDao.insertDownloads(chunk)
+			}
+
+		coroutineContext.ensureActive()
+		if (expectedGen != null && cancelGeneration.get() != expectedGen) {
+			downloadDao.deleteDownloadsByStatus(DownloadStatus.DOWNLOADING)
+			return 0
+		}
 
 		enqueueWorker()
 		return newIds.size
@@ -221,12 +286,13 @@ class DownloadManager(
 
 		workManager.enqueueUniqueWork(
 			WorkNames.DOWNLOAD_QUEUE,
-			ExistingWorkPolicy.APPEND_OR_REPLACE,
+			ExistingWorkPolicy.KEEP,
 			request
 		)
 	}
 
 	fun cancelAllActiveDownloads() {
+		cancelGeneration.incrementAndGet()
 		isDownloadingLibrary.value = false
 		libraryDownloadProgress.value = 0f
 
@@ -236,17 +302,30 @@ class DownloadManager(
 	}
 
 	private suspend fun cancelActiveDownloadsInternal() {
-		workManager.cancelUniqueWork(WorkNames.DOWNLOAD_QUEUE).await()
-		downloadDao.deleteDownloadsByStatus(DownloadStatus.DOWNLOADING)
-		storageManager.clearTempDownloads()
-		notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+		cancelGeneration.incrementAndGet()
+		libraryEnqueueJob?.let { job ->
+			libraryEnqueueJob = null
+			job.cancelAndJoin()
+		}
+		enqueueMutex.withLock {
+			workManager.cancelUniqueWork(WorkNames.DOWNLOAD_QUEUE).await()
+			workManager.cancelAllWorkByTag(WorkNames.DOWNLOAD_TAG).await()
+			downloadDao.deleteDownloadsByStatus(DownloadStatus.DOWNLOADING)
+			storageManager.clearTempDownloads()
+			notificationManager.cancelNotification(NotificationIds.DOWNLOAD_LIBRARY)
+			isDownloadingLibrary.value = false
+			libraryDownloadProgress.value = 0f
+		}
 	}
 
 	private suspend fun cancelDownloadInternal(songId: String) {
 		val existing = downloadDao.getDownloadById(songId) ?: return
 
 		when (existing.status) {
-			DownloadStatus.DOWNLOADING -> downloadDao.deleteDownload(songId)
+			DownloadStatus.DOWNLOADING -> {
+				downloadDao.deleteDownload(songId)
+				storageManager.deleteSongFiles(songId)
+			}
 
 			DownloadStatus.FAILED -> {
 				downloadDao.deleteDownload(songId)
@@ -260,15 +339,38 @@ class DownloadManager(
 	fun cancelDownload(songId: String) {
 		scope.launch {
 			cancelDownloadInternal(songId)
+			if (downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0 &&
+				libraryEnqueueJob?.isActive != true
+			) {
+				cancelActiveDownloadsInternal()
+			}
 		}
 	}
 
 	fun cancelCollectionDownload(songIds: Collection<String>) {
 		val targetIds = songIds.distinct()
 		if (targetIds.isEmpty()) return
+		cancelGeneration.incrementAndGet()
 		scope.launch {
-			for (songId in targetIds) {
-				cancelDownloadInternal(songId)
+			libraryEnqueueJob?.let { job ->
+				libraryEnqueueJob = null
+				job.cancelAndJoin()
+			}
+			val failedIds = enqueueMutex.withLock {
+				val failed = mutableListOf<String>()
+				targetIds.chunked(SQLITE_BATCH_SIZE).forEach { chunk ->
+					failed += downloadDao.getFailedDownloadIds(chunk)
+					downloadDao.deleteDownloadsByIdsAndStatus(chunk, DownloadStatus.DOWNLOADING)
+					downloadDao.deleteDownloadsByIdsAndStatus(chunk, DownloadStatus.FAILED)
+				}
+				failed
+			}
+			failedIds.forEach { songId ->
+				storageManager.deleteSongFiles(songId)
+			}
+			storageManager.clearTempDownloads()
+			if (downloadDao.countDownloadsByStatus(DownloadStatus.DOWNLOADING) == 0) {
+				cancelActiveDownloadsInternal()
 			}
 		}
 	}
