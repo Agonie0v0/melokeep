@@ -2593,8 +2593,10 @@ export function App() {
       <div className="app">
         <aside className="sidebar">
           <div className="brand">
-            <AudioLines />
-            MeloKeep
+            <span className="brand-mark">
+              <AudioLines aria-hidden="true" />
+            </span>
+            <span className="brand-name">MeloKeep</span>
           </div>
           <div className="sidebar-capsules">
             <Navigation
@@ -3626,6 +3628,7 @@ export function App() {
               updateError={updateError}
               onCheckUpdate={checkSystemUpdate}
               appearance={appearanceCtrl}
+              hasUpdate={hasActiveUpdate}
             />
           )}
           {view === "logs" && <RuntimeLogs active={!loginRequired} />}

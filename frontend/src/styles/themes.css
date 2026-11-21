@@ -4,11 +4,14 @@
   --radius-panel: 12px;
   --radius-control: 9px;
   --row-py: 10px;
-  --container-max: 1480px;
+  --container-max: 1280px;
   --on-accent: #ffffff;
   --glass-bg: color-mix(in srgb, var(--surface) 84%, transparent);
   --glass-heavy: color-mix(in srgb, var(--surface) 92%, transparent);
   --glass-border: color-mix(in srgb, var(--ink) 8%, transparent);
+  --header-bg: color-mix(in srgb, var(--surface) 94%, transparent);
+  --header-shadow:
+    0 4px 20px -6px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
   --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.72);
   --player-surface: color-mix(in srgb, var(--surface) 82%, transparent);
 }
@@ -18,6 +21,9 @@
   --glass-bg: color-mix(in srgb, var(--surface) 84%, transparent);
   --glass-heavy: color-mix(in srgb, var(--surface) 93%, transparent);
   --glass-border: rgba(255, 255, 255, 0.085);
+  --header-bg: color-mix(in srgb, var(--surface) 92%, transparent);
+  --header-shadow:
+    0 6px 24px -6px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --player-surface: color-mix(in srgb, var(--surface) 80%, transparent);
 }
@@ -27,7 +33,7 @@
   --radius-panel: 12px;
   --radius-control: 8px;
   --row-py: 7px;
-  --container-max: 1600px;
+  --container-max: 1360px;
 }
 
 /* ==================== 浅色预设 1：纯净晨雾（默认浅色） ==================== */

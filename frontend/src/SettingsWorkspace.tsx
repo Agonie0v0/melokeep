@@ -37,6 +37,7 @@ export function SettingsWorkspace({
   updateError,
   onCheckUpdate,
   appearance,
+  hasUpdate = false,
   ...engine
 }: ComponentProps<typeof EngineSettings> & {
   tab: SettingsTab;
@@ -46,18 +47,49 @@ export function SettingsWorkspace({
   updateError: string;
   onCheckUpdate: (force: boolean) => Promise<void>;
   appearance?: AppearanceController;
+  hasUpdate?: boolean;
 }) {
   return (
     <div className="settings-workspace">
-      <WorkspaceTabs
-        id="settings"
-        label="设置分类"
-        tabs={tabs}
-        active={tab}
-        change={(value) => setTab(value as SettingsTab)}
-      />
+      <aside className="settings-nav-rail" aria-label="设置导航">
+        <div className="settings-nav-head">
+          <strong>系统设置</strong>
+          <span className="settings-nav-count">{tabs.length} 项</span>
+        </div>
+        <WorkspaceTabs
+          id="settings"
+          label="设置分类"
+          orientation="vertical"
+          tabs={tabs}
+          active={tab}
+          change={(value) => setTab(value as SettingsTab)}
+          badges={
+            updateInfo?.current?.version
+              ? { update: updateInfo.current.version }
+              : undefined
+          }
+          dots={hasUpdate ? { update: true } : undefined}
+        />
+        <div className="settings-nav-foot" aria-label="实例运行状态">
+          <div className="settings-nav-status">
+            <span className="settings-nav-status-dot" aria-hidden="true" />
+            <span>
+              {updateInfo?.current?.in_container
+                ? "Docker 容器 · 运行正常"
+                : "本地服务 · 运行正常"}
+            </span>
+          </div>
+          <div className="settings-nav-meta">
+            {`当前版本 ${updateInfo?.current?.version || "已就绪"}${
+              updateInfo?.current?.short_commit
+                ? ` · ${updateInfo.current.short_commit}`
+                : ""
+            }`}
+          </div>
+        </div>
+      </aside>
       <section
-        className="view"
+        className="view settings-panel-host"
         role="tabpanel"
         id={`settings-panel-${tab}`}
         aria-labelledby={`settings-tab-${tab}`}
