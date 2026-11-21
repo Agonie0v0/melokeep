@@ -90,11 +90,17 @@ func transferHTTP(
 			return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效的媒体下载地址", err)
 		}
 		for k, v := range resolved.Headers {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
 			lk := strings.ToLower(k)
 			if lk == "range" || lk == "if-range" || lk == "accept-encoding" {
 				continue
 			}
 			req.Header.Set(k, v)
+		}
+		if req.Header.Get("User-Agent") == "" {
+			req.Header.Set("User-Agent", provider.DefaultUserAgent)
 		}
 		req.Header.Set("Accept-Encoding", "identity")
 		if len(resolved.Cookies) > 0 {
@@ -163,6 +169,14 @@ func transferHTTP(
 			Status:    resp.StatusCode,
 			Detail:    fmt.Sprintf("音源拒绝下载 (%d)，链接可能已过期", resp.StatusCode),
 			Retryable: true,
+		}
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return 0, nil, "", &model.DomainError{
+			Code:      model.ErrTransport,
+			Status:    resp.StatusCode,
+			Detail:    fmt.Sprintf("音源返回异常状态码 %d", resp.StatusCode),
+			Retryable: false,
 		}
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -369,7 +383,13 @@ func downloadHLS(
 			return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效的 HLS 分片地址", err)
 		}
 		for k, v := range resolved.Headers {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
 			req.Header.Set(k, v)
+		}
+		if req.Header.Get("User-Agent") == "" {
+			req.Header.Set("User-Agent", provider.DefaultUserAgent)
 		}
 		if len(resolved.Cookies) > 0 {
 			req.Header.Set("Cookie", provider.FormatCookieHeader(resolved.Cookies))
@@ -382,6 +402,22 @@ func downloadHLS(
 			return nil, err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, &model.DomainError{
+				Code:      model.ErrAuthRequired,
+				Status:    resp.StatusCode,
+				Detail:    fmt.Sprintf("HLS 请求被拒绝 (%d)", resp.StatusCode),
+				Retryable: true,
+			}
+		}
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+			return nil, &model.DomainError{
+				Code:      model.ErrTransport,
+				Status:    resp.StatusCode,
+				Detail:    fmt.Sprintf("HLS 请求返回状态码 %d", resp.StatusCode),
+				Retryable: false,
+			}
+		}
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 			return nil, &model.DomainError{
 				Code:      model.ErrTransport,
@@ -863,6 +899,7 @@ func fetchBoundedAsset(ctx context.Context, pool *transport.Pool, rawURL string,
 	if err != nil {
 		return nil, "", err
 	}
+	req.Header.Set("User-Agent", provider.DefaultUserAgent)
 	proxyURL, _, _ := provider.SourceRequestOptions(rc, rc.Account.Source)
 	resp, err := pool.Do(ctx, req, transport.RequestOptions{
 		Domain:              transport.DomainPublicMedia,

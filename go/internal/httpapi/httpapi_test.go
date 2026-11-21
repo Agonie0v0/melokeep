@@ -2874,3 +2874,107 @@ func TestNavidromeDownloadAndArchiveHTTP(t *testing.T) {
 		t.Fatalf("expected 2 tracks in search archive, got err=%v count=%d", err, len(zSearch.File))
 	}
 }
+
+func TestHandleStreamInjectsDefaultUserAgentAndSkipsBlankHeaders(t *testing.T) {
+	payload := bytes.Repeat([]byte("MP3STREAM"), 32)
+	var gotUA, gotReferer, gotBlankHeader atomic.Value
+	var useExplicitUA atomic.Bool
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := r.Header.Get("User-Agent")
+		if ua == "" || strings.Contains(ua, "Go-http-client") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		gotUA.Store(ua)
+		gotReferer.Store(r.Header.Get("Referer"))
+		if vals := r.Header.Values("X-Empty"); len(vals) > 0 {
+			gotBlankHeader.Store(strings.Join(vals, ","))
+		} else {
+			gotBlankHeader.Store("")
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer upstream.Close()
+
+	srv, st, _ := newTestServer(t, nil)
+	reg, err := provider.NewRegistry([]provider.Entry{
+		{
+			Provider: &stubProvider{
+				id:         "AudiusMusicClient",
+				engineName: "AudiusMusicClient",
+				resolveFn: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+					hdrs := map[string]string{
+						"User-Agent": "   ",
+						"X-Empty":    "",
+						"Referer":    "https://music.163.com/",
+					}
+					if useExplicitUA.Load() {
+						hdrs = map[string]string{
+							"User-Agent": "ExplicitPlayer/2.5",
+						}
+					}
+					return []model.ResolvedMedia{{
+						VariantID: "v1",
+						URL:       upstream.URL + "/audio.mp3",
+						Headers:   hdrs,
+					}}, nil
+				},
+			},
+			Meta: provider.Metadata{Label: "Audius", Category: "开放许可"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	srv.deps.Providers = reg
+
+	seedStreamTrack := func(locator, pubID string) {
+		trID, sErr := st.UpsertProviderTrack(context.Background(), store.ProviderTrackRecord{
+			Source:     "AudiusMusicClient",
+			Locator:    locator,
+			RootSource: "AudiusMusicClient",
+			Title:      "StreamSong-" + locator,
+			Artist:     "Tester",
+		}, []model.MediaVariant{{VariantID: "v1", Label: "MP3", Codec: "mp3", Availability: "resolved"}})
+		if sErr != nil {
+			t.Fatal(sErr)
+		}
+		if pErr := st.PutPublicRef(context.Background(), model.PublicRef{
+			PublicID: pubID, Kind: "candidate", TargetID: trID, Source: "AudiusMusicClient", SourceID: locator,
+		}, ""); pErr != nil {
+			t.Fatal(pErr)
+		}
+	}
+
+	seedStreamTrack("ua-default", "stream-ua-default")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/stream/stream-ua-default", nil))
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), payload) {
+		t.Fatalf("expected 200 streamed payload, got code=%d len=%d body=%s", rec.Code, rec.Body.Len(), rec.Body.String())
+	}
+	if ua, _ := gotUA.Load().(string); ua != provider.DefaultUserAgent {
+		t.Fatalf("expected DefaultUserAgent %q, got %q", provider.DefaultUserAgent, ua)
+	}
+	if ref, _ := gotReferer.Load().(string); ref != "https://music.163.com/" {
+		t.Fatalf("expected Referer preserved, got %q", ref)
+	}
+	if blank, _ := gotBlankHeader.Load().(string); blank != "" {
+		t.Fatalf("expected blank X-Empty header omitted, got %q", blank)
+	}
+
+	// Explicit User-Agent should be preserved without overwriting.
+	useExplicitUA.Store(true)
+	seedStreamTrack("ua-explicit", "stream-ua-explicit")
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/stream/stream-ua-explicit", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 with explicit UA, got code=%d body=%s", rec2.Code, rec2.Body.String())
+	}
+	if ua, _ := gotUA.Load().(string); ua != "ExplicitPlayer/2.5" {
+		t.Fatalf("expected explicit User-Agent preserved, got %q", ua)
+	}
+}

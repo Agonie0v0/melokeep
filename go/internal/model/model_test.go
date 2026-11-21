@@ -267,3 +267,104 @@ func TestCapabilityAndPluginDTOSerialization(t *testing.T) {
 		t.Fatalf("unexpected TrackDTO: %+v", dto)
 	}
 }
+
+func TestQualityAndTrackDTOSizePassThroughAndFormatSizeLabel(t *testing.T) {
+	if got := model.FormatSizeLabel(nil); got != nil {
+		t.Fatalf("expected nil for nil input, got %q", *got)
+	}
+	for _, n := range []int64{0, -100} {
+		v := n
+		if got := model.FormatSizeLabel(&v); got != nil {
+			t.Fatalf("expected nil for %d, got %q", n, *got)
+		}
+	}
+	formatCases := []struct {
+		bytes int64
+		want  string
+	}{
+		{512, "512 B"},
+		{1024, "1 KB"},
+		{512 * 1024, "512 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{33973862, "32.4 MB"},
+		{1024 * 1024 * 1024, "1.00 GB"},
+		{1320702443, "1.23 GB"},
+	}
+	for _, tc := range formatCases {
+		b := tc.bytes
+		got := model.FormatSizeLabel(&b)
+		if got == nil || *got != tc.want {
+			t.Fatalf("FormatSizeLabel(%d) = %v, want %q", tc.bytes, got, tc.want)
+		}
+	}
+
+	szFLAC := int64(33973862) // 32.4 MB
+	szMP3 := int64(8388608)   // 8.0 MB
+	br999 := 999
+	br320 := 320
+	qFLAC := model.QualityDTOFromVariant(model.MediaVariant{
+		VariantID: "v_flac", Label: "无损音质", Codec: "flac", Bitrate: &br999,
+		Lossless: true, Availability: "full", Evidence: "declared", SizeBytes: &szFLAC,
+	})
+	if qFLAC.SizeBytes == nil || *qFLAC.SizeBytes != szFLAC || qFLAC.SizeLabel == nil || *qFLAC.SizeLabel != "32.4 MB" {
+		t.Fatalf("unexpected QualityDTO size fields: %+v", qFLAC)
+	}
+	qNoSize := model.QualityDTOFromVariant(model.MediaVariant{
+		VariantID: "v_unknown", Label: "未知", Codec: "mp3", Availability: "candidate",
+	})
+	if qNoSize.SizeBytes != nil || qNoSize.SizeLabel != nil {
+		t.Fatalf("expected nil size fields when unset, got %+v", qNoSize)
+	}
+	rawNoSize, err := json.Marshal(qNoSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawNoSize), "size_bytes") || strings.Contains(string(rawNoSize), "size_label") {
+		t.Fatalf("expected omitempty for nil size fields, got %s", string(rawNoSize))
+	}
+
+	// TrackDTOFromDomain auto-fills SizeLabel from SizeBytes when SizeLabel is nil, and preserves variant sizes.
+	tr := model.ProviderTrack{
+		PublicID:  "pub-size-1",
+		Source:    "AudiusMusicClient",
+		SourceID:  "s-1",
+		Title:     "Size Track",
+		Artist:    "Artist",
+		SizeBytes: &szFLAC,
+		Variants: []model.MediaVariant{
+			{VariantID: "v_flac", Label: "FLAC", Codec: "flac", Bitrate: &br999, Lossless: true, SizeBytes: &szFLAC},
+			{VariantID: "v_mp3", Label: "MP3", Codec: "mp3", Bitrate: &br320, SizeBytes: &szMP3},
+		},
+	}
+	dto := model.TrackDTOFromDomain(tr, model.PlaybackDTO{State: "ready"})
+	if dto.SizeBytes == nil || *dto.SizeBytes != szFLAC || dto.SizeLabel == nil || *dto.SizeLabel != "32.4 MB" {
+		t.Fatalf("expected TrackDTO auto SizeLabel 32.4 MB, got bytes=%v label=%v", dto.SizeBytes, dto.SizeLabel)
+	}
+	if len(dto.Qualities) != 2 || dto.Qualities[1].SizeBytes == nil || *dto.Qualities[1].SizeBytes != szMP3 || dto.Qualities[1].SizeLabel == nil || *dto.Qualities[1].SizeLabel != "8.0 MB" {
+		t.Fatalf("expected quality 1 size 8.0 MB, got %+v", dto.Qualities)
+	}
+	rawTrack, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(rawTrack, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["size_label"] != "32.4 MB" {
+		t.Fatalf("expected JSON size_label=32.4 MB, got %v", decoded["size_label"])
+	}
+	quals, _ := decoded["qualities"].([]any)
+	q0, _ := quals[0].(map[string]any)
+	if q0["size_label"] != "32.4 MB" || int64(q0["size_bytes"].(float64)) != szFLAC {
+		t.Fatalf("unexpected JSON quality 0 size fields: %+v", q0)
+	}
+
+	// Explicit Track.SizeLabel must not be overwritten.
+	explicit := "约 33 MB"
+	tr.SizeLabel = &explicit
+	dtoExplicit := model.TrackDTOFromDomain(tr, model.PlaybackDTO{State: "ready"})
+	if dtoExplicit.SizeLabel == nil || *dtoExplicit.SizeLabel != explicit {
+		t.Fatalf("expected explicit SizeLabel %q preserved, got %v", explicit, dtoExplicit.SizeLabel)
+	}
+}

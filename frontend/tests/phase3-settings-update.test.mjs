@@ -14,6 +14,7 @@ import {
 } from "../src/library-utils.ts";
 import {
   DOCKER_SOCK_COMPOSE_LINE,
+  DOCKER_SOCK_RUN_FLAG,
   formatSelfUpdateState,
   getSelfUpdateActionMode,
 } from "../src/update-utils.ts";
@@ -129,6 +130,10 @@ test("update-utils formats action mode and self-update stages accurately", () =>
     DOCKER_SOCK_COMPOSE_LINE,
     "- /var/run/docker.sock:/var/run/docker.sock",
   );
+  assert.equal(
+    DOCKER_SOCK_RUN_FLAG,
+    "-v /var/run/docker.sock:/var/run/docker.sock",
+  );
   assert.equal(getSelfUpdateActionMode(null), "hidden");
   assert.equal(
     getSelfUpdateActionMode({
@@ -166,7 +171,7 @@ test("update-utils formats action mode and self-update stages accurately", () =>
         progress: 0,
       },
     }),
-    "secondary",
+    "up_to_date",
   );
   assert.equal(
     getSelfUpdateActionMode({

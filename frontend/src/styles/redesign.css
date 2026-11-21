@@ -2701,6 +2701,22 @@
   border: 0;
 }
 
+.settings-workspace .settings-section .update-header {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.settings-workspace .settings-section .update-header h2 {
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.settings-workspace .settings-section .update-header-actions button {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 13px;
+}
+
 .settings-workspace .settings-grid,
 .settings-workspace .bot-settings .settings-basics .settings-grid,
 .settings-workspace .bot-settings .settings-sources > .settings-grid,

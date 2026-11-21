@@ -129,6 +129,10 @@ data class MeloQuality(
 	val lossless: Boolean = false,
 	val availability: String = "",
 	val evidence: String = "",
+	@SerialName("size_bytes")
+	val sizeBytes: Long? = null,
+	@SerialName("size_label")
+	val sizeLabel: String? = null,
 )
 
 @Serializable

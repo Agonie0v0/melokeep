@@ -1,19 +1,22 @@
 package model
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 )
 
 // QualityDTO matches frontend/src/types.ts Quality.
 type QualityDTO struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Codec        string `json:"codec"`
-	Bitrate      *int   `json:"bitrate"`
-	Lossless     bool   `json:"lossless"`
-	Availability string `json:"availability"`
-	Evidence     string `json:"evidence"`
+	ID           string  `json:"id"`
+	Label        string  `json:"label"`
+	Codec        string  `json:"codec"`
+	Bitrate      *int    `json:"bitrate"`
+	Lossless     bool    `json:"lossless"`
+	Availability string  `json:"availability"`
+	Evidence     string  `json:"evidence"`
+	SizeBytes    *int64  `json:"size_bytes,omitempty"`
+	SizeLabel    *string `json:"size_label,omitempty"`
 }
 
 // PlaybackDTO matches frontend/src/types.ts Track.playback.
@@ -413,6 +416,31 @@ type ErrorDTO struct {
 	Detail any `json:"detail"`
 }
 
+// FormatSizeLabel formats a positive byte count into a human-readable size label.
+func FormatSizeLabel(sizeBytes *int64) *string {
+	if sizeBytes == nil || *sizeBytes <= 0 {
+		return nil
+	}
+	const (
+		kib = 1024
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+	n := *sizeBytes
+	var label string
+	switch {
+	case n >= gib:
+		label = fmt.Sprintf("%.2f GB", float64(n)/float64(gib))
+	case n >= mib:
+		label = fmt.Sprintf("%.1f MB", float64(n)/float64(mib))
+	case n >= kib:
+		label = fmt.Sprintf("%.0f KB", float64(n)/float64(kib))
+	default:
+		label = fmt.Sprintf("%d B", n)
+	}
+	return &label
+}
+
 func QualityDTOFromVariant(v MediaVariant) QualityDTO {
 	return QualityDTO{
 		ID:           v.VariantID,
@@ -422,6 +450,8 @@ func QualityDTOFromVariant(v MediaVariant) QualityDTO {
 		Lossless:     v.Lossless,
 		Availability: v.Availability,
 		Evidence:     v.Evidence,
+		SizeBytes:    v.SizeBytes,
+		SizeLabel:    FormatSizeLabel(v.SizeBytes),
 	}
 }
 
@@ -429,6 +459,10 @@ func TrackDTOFromDomain(t ProviderTrack, playback PlaybackDTO) TrackDTO {
 	qualities := make([]QualityDTO, 0, len(t.Variants))
 	for _, v := range t.Variants {
 		qualities = append(qualities, QualityDTOFromVariant(v))
+	}
+	sizeLabel := t.SizeLabel
+	if sizeLabel == nil && t.SizeBytes != nil && *t.SizeBytes > 0 {
+		sizeLabel = FormatSizeLabel(t.SizeBytes)
 	}
 	return TrackDTO{
 		PlaylistIndex: t.PlaylistIndex,
@@ -441,7 +475,7 @@ func TrackDTOFromDomain(t ProviderTrack, playback PlaybackDTO) TrackDTO {
 		Duration:      t.Duration,
 		Cover:         t.Cover,
 		SizeBytes:     t.SizeBytes,
-		SizeLabel:     t.SizeLabel,
+		SizeLabel:     sizeLabel,
 		Episodes:      t.Episodes,
 		RootSource:    t.RootSource,
 		Qualities:     qualities,

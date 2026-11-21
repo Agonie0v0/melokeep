@@ -207,6 +207,17 @@ class NavicDataSource(
 		}
 
 		if (id.startsWith("device:")) {
+			val resolvedUri = runCatching {
+				org.koin.core.context.GlobalContext.get()
+					.get<paige.navic.domain.repository.DeviceLocalMusicRepository>()
+					.getSongById(id)
+					?.filePath
+					?.takeIf { it.isNotBlank() }
+					?.toUri()
+			}.getOrNull()
+			if (resolvedUri != null) {
+				return resolvedUri
+			}
 			val mediaId = id.removePrefix("device:").toLongOrNull()
 				?: throw java.io.IOException("无效的手机本地音频 ID: $id")
 			return ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId)

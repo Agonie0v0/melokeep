@@ -44,8 +44,10 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
@@ -71,8 +73,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -97,10 +101,12 @@ import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
 import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
+import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
 import io.github.agonie0v0.melokeep.shared.findIosIpaAsset
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import platform.Foundation.NSBundle
 import platform.Foundation.NSURL
@@ -885,19 +891,6 @@ internal fun IosSettingsMeloConnectionSheet(
 	onDismiss: () -> Unit,
 ) {
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-	var displayName by remember(settingsState.serverConfig.displayName) {
-		mutableStateOf(settingsState.serverConfig.displayName)
-	}
-	var serverUrl by remember(settingsState.serverConfig.baseUrl) { mutableStateOf(settingsState.serverConfig.baseUrl) }
-	var username by remember(settingsState.serverConfig.username) { mutableStateOf(settingsState.serverConfig.username) }
-	var password by remember { mutableStateOf("") }
-	var passVisible by remember { mutableStateOf(false) }
-
-	LaunchedEffect(settingsState.serverConfig.isConfigured) {
-		if (settingsState.serverConfig.isConfigured) {
-			settingsController.refreshDevices()
-		}
-	}
 
 	ModalBottomSheet(
 		onDismissRequest = onDismiss,
@@ -915,15 +908,43 @@ internal fun IosSettingsMeloConnectionSheet(
 				title = "MeloKeep 连接",
 				onBack = onDismiss,
 			)
+			IosMeloConnectionBody(
+				settingsState = settingsState,
+				settingsController = settingsController,
+				hostNavBottom = hostNavBottom,
+			)
+		}
+	}
+}
 
-			Column(
-				modifier = Modifier
-					.fillMaxWidth()
-					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 16.dp)
-					.padding(top = 6.dp, bottom = maxOf(hostNavBottom, 16.dp) + 20.dp),
-				verticalArrangement = Arrangement.spacedBy(18.dp),
-			) {
+@Composable
+private fun IosMeloConnectionBody(
+	settingsState: MeloSettingsUiState,
+	settingsController: MeloSettingsController,
+	hostNavBottom: Dp,
+) {
+	var displayName by remember(settingsState.serverConfig.displayName) {
+		mutableStateOf(settingsState.serverConfig.displayName)
+	}
+	var serverUrl by remember(settingsState.serverConfig.baseUrl) { mutableStateOf(settingsState.serverConfig.baseUrl) }
+	var username by remember(settingsState.serverConfig.username) { mutableStateOf(settingsState.serverConfig.username) }
+	var password by remember { mutableStateOf("") }
+	var passVisible by remember { mutableStateOf(false) }
+
+	LaunchedEffect(settingsState.serverConfig.isConfigured) {
+		if (settingsState.serverConfig.isConfigured) {
+			settingsController.refreshDevices()
+		}
+	}
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.verticalScroll(rememberScrollState())
+			.padding(horizontal = 16.dp)
+			.padding(top = 6.dp, bottom = maxOf(hostNavBottom, 16.dp) + 20.dp),
+		verticalArrangement = Arrangement.spacedBy(18.dp),
+	) {
 				IosGroupedCard {
 					Column(
 						modifier = Modifier.padding(16.dp),
@@ -1130,14 +1151,66 @@ internal fun IosSettingsMeloConnectionSheet(
 						}
 					}
 				}
-			}
-		}
 	}
 }
 
 // =============================================================================
-// 6. Navidrome 多节点管理抽屉
+// 6. Navidrome 多节点管理 & 统一服务器连接抽屉
 // =============================================================================
+
+@Stable
+private class IosNavidromeEditorState {
+	var showDialog by mutableStateOf(false)
+	var editTarget by mutableStateOf<NavidromeServerProfile?>(null)
+	var nameInput by mutableStateOf("")
+	var urlInput by mutableStateOf("")
+	var userInput by mutableStateOf("")
+	var passInput by mutableStateOf("")
+	var saving by mutableStateOf(false)
+	var saveError by mutableStateOf<String?>(null)
+
+	fun openEditor(server: NavidromeServerProfile?) {
+		editTarget = server
+		nameInput = server?.name.orEmpty()
+		urlInput = server?.url.orEmpty()
+		userInput = server?.username.orEmpty()
+		passInput = server?.password.orEmpty()
+		saveError = null
+		showDialog = true
+	}
+}
+
+@Composable
+private fun rememberNavidromeEditorState(): IosNavidromeEditorState = remember { IosNavidromeEditorState() }
+
+@Composable
+private fun IosNavidromeAddButton(onClick: () -> Unit) {
+	Surface(
+		onClick = onClick,
+		shape = CircleShape,
+		color = MaterialTheme.colorScheme.surfaceContainer,
+		border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+	) {
+		Row(
+			modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(4.dp),
+		) {
+			Icon(
+				imageVector = Icons.Rounded.Add,
+				contentDescription = null,
+				tint = MaterialTheme.colorScheme.primary,
+				modifier = Modifier.size(15.dp),
+			)
+			Text(
+				text = "添加",
+				style = MaterialTheme.typography.labelMedium,
+				fontWeight = FontWeight.Medium,
+				color = MaterialTheme.colorScheme.onSurface,
+			)
+		}
+	}
+}
 
 @Composable
 internal fun IosSettingsNavidromeServerSheet(
@@ -1151,24 +1224,7 @@ internal fun IosSettingsNavidromeServerSheet(
 ) {
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 	val scope = rememberCoroutineScope()
-	var showAddDialog by remember { mutableStateOf(false) }
-	var editTarget by remember { mutableStateOf<NavidromeServerProfile?>(null) }
-	var nameInput by remember { mutableStateOf("") }
-	var urlInput by remember { mutableStateOf("") }
-	var userInput by remember { mutableStateOf("") }
-	var passInput by remember { mutableStateOf("") }
-	var saving by remember { mutableStateOf(false) }
-	var saveError by remember { mutableStateOf<String?>(null) }
-
-	fun openEditor(server: NavidromeServerProfile?) {
-		editTarget = server
-		nameInput = server?.name.orEmpty()
-		urlInput = server?.url.orEmpty()
-		userInput = server?.username.orEmpty()
-		passInput = server?.password.orEmpty()
-		saveError = null
-		showAddDialog = true
-	}
+	val editorState = rememberNavidromeEditorState()
 
 	ModalBottomSheet(
 		onDismissRequest = onDismiss,
@@ -1186,39 +1242,41 @@ internal fun IosSettingsNavidromeServerSheet(
 				title = "Navidrome 服务器",
 				onBack = onDismiss,
 				trailing = {
-					Surface(
-						onClick = { openEditor(null) },
-						shape = CircleShape,
-						color = MaterialTheme.colorScheme.surfaceContainer,
-						border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(4.dp),
-						) {
-							Icon(
-								imageVector = Icons.Rounded.Add,
-								contentDescription = null,
-								tint = MaterialTheme.colorScheme.primary,
-								modifier = Modifier.size(15.dp),
-							)
-							Text(
-								text = "添加",
-								style = MaterialTheme.typography.labelMedium,
-								fontWeight = FontWeight.Medium,
-								color = MaterialTheme.colorScheme.onSurface,
-							)
-						}
-					}
+					IosNavidromeAddButton(onClick = { editorState.openEditor(null) })
 				},
 			)
+			IosNavidromeServerBody(
+				servers = servers,
+				activeServerId = activeServerId,
+				editorState = editorState,
+				onSwitchServer = onSwitchServer,
+				onRemoveServer = onRemoveServer,
+			)
+		}
+	}
 
-			Column(
-				modifier = Modifier
-					.fillMaxWidth()
-					.padding(horizontal = 16.dp, vertical = 8.dp),
-			) {
+	IosNavidromeEditorDialog(
+		editorState = editorState,
+		scope = scope,
+		onTestAndSave = onTestAndSave,
+	)
+}
+
+@Composable
+private fun IosNavidromeServerBody(
+	servers: List<NavidromeServerProfile>,
+	activeServerId: String?,
+	editorState: IosNavidromeEditorState,
+	onSwitchServer: (String) -> Unit,
+	onRemoveServer: (String) -> Unit,
+) {
+	fun openEditor(server: NavidromeServerProfile?) = editorState.openEditor(server)
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 16.dp, vertical = 8.dp),
+	) {
 				if (servers.isEmpty()) {
 					IosGroupedCard {
 						IosQuietEmptyState(
@@ -1299,91 +1357,692 @@ internal fun IosSettingsNavidromeServerSheet(
 									IosHairlineDivider(startIndent = 34.dp)
 								}
 							}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun IosNavidromeEditorDialog(
+	editorState: IosNavidromeEditorState,
+	scope: CoroutineScope,
+	onTestAndSave: suspend (name: String, url: String, user: String, pass: String, editId: String?) -> Result<NavidromeServerProfile>,
+) {
+	if (!editorState.showDialog) return
+	AlertDialog(
+		onDismissRequest = { if (!editorState.saving) editorState.showDialog = false },
+		title = { Text(if (editorState.editTarget != null) "编辑 Navidrome 服务器" else "添加 Navidrome 服务器") },
+		text = {
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				OutlinedTextField(
+					value = editorState.nameInput,
+					onValueChange = { editorState.nameInput = it },
+					label = { Text("别名（可选）") },
+					singleLine = true,
+					enabled = !editorState.saving,
+					shape = RoundedCornerShape(12.dp),
+				)
+				OutlinedTextField(
+					value = editorState.urlInput,
+					onValueChange = { editorState.urlInput = it },
+					label = { Text("服务器地址") },
+					placeholder = { Text("http://192.168.1.10:4533") },
+					singleLine = true,
+					enabled = !editorState.saving,
+					shape = RoundedCornerShape(12.dp),
+				)
+				OutlinedTextField(
+					value = editorState.userInput,
+					onValueChange = { editorState.userInput = it },
+					label = { Text("用户名") },
+					singleLine = true,
+					enabled = !editorState.saving,
+					shape = RoundedCornerShape(12.dp),
+				)
+				OutlinedTextField(
+					value = editorState.passInput,
+					onValueChange = { editorState.passInput = it },
+					label = { Text("密码") },
+					singleLine = true,
+					enabled = !editorState.saving,
+					shape = RoundedCornerShape(12.dp),
+				)
+				if (!editorState.saveError.isNullOrBlank()) {
+					Text(
+						editorState.saveError.orEmpty(),
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.error,
+					)
+				}
+			}
+		},
+		confirmButton = {
+			TextButton(
+				onClick = {
+					if (editorState.urlInput.isNotBlank() && editorState.userInput.isNotBlank() && !editorState.saving) {
+						scope.launch {
+							editorState.saving = true
+							editorState.saveError = null
+							val result = onTestAndSave(
+								editorState.nameInput.ifBlank { "Navidrome" },
+								editorState.urlInput.trim(),
+								editorState.userInput.trim(),
+								editorState.passInput,
+								editorState.editTarget?.id,
+							)
+							editorState.saving = false
+							result.onSuccess {
+								editorState.showDialog = false
+							}.onFailure { err ->
+								editorState.saveError = err.message ?: "连接或验证失败"
+							}
+						}
+					}
+				},
+				enabled = !editorState.saving && editorState.urlInput.isNotBlank() && editorState.userInput.isNotBlank(),
+			) {
+				Text(if (editorState.saving) "测试中…" else "保存")
+			}
+		},
+		dismissButton = {
+			TextButton(
+				onClick = { if (!editorState.saving) editorState.showDialog = false },
+				enabled = !editorState.saving,
+			) {
+				Text("取消")
+			}
+		},
+	)
+}
+
+@Composable
+internal fun IosSettingsServerConnectionsSheet(
+	initialTab: Int = 0,
+	settingsState: MeloSettingsUiState,
+	settingsController: MeloSettingsController,
+	servers: List<NavidromeServerProfile>,
+	activeServerId: String?,
+	hostNavBottom: Dp,
+	onSwitchServer: (String) -> Unit,
+	onRemoveServer: (String) -> Unit,
+	onTestAndSaveNavidrome: suspend (name: String, url: String, user: String, pass: String, editId: String?) -> Result<NavidromeServerProfile>,
+	onDismiss: () -> Unit,
+) {
+	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	val scope = rememberCoroutineScope()
+	val editorState = rememberNavidromeEditorState()
+	var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
+	val meloConnected = settingsState.serverConfig.isAuthenticated
+	val navidromeConnected = activeServerId != null && servers.any { it.id == activeServerId }
+
+	ModalBottomSheet(
+		onDismissRequest = onDismiss,
+		sheetState = sheetState,
+		containerColor = MaterialTheme.colorScheme.background,
+		contentColor = MaterialTheme.colorScheme.onSurface,
+		dragHandle = null,
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.imePadding(),
+		) {
+			IosCleanTopBar(
+				title = "服务器连接",
+				onBack = onDismiss,
+				trailing = {
+					if (selectedTab == 1) {
+						IosNavidromeAddButton(onClick = { editorState.openEditor(null) })
+					}
+				},
+			)
+
+			Surface(
+				shape = RoundedCornerShape(12.dp),
+				color = MaterialTheme.colorScheme.surfaceContainer,
+				border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp, vertical = 6.dp),
+			) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(4.dp),
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					listOf(
+						Triple(0, "MeloKeep", meloConnected),
+						Triple(1, "Navidrome", navidromeConnected),
+					).forEach { (tabIdx, tabTitle, connected) ->
+						val active = selectedTab == tabIdx
+						Surface(
+							onClick = { selectedTab = tabIdx },
+							shape = RoundedCornerShape(9.dp),
+							color = if (active) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+							border = if (active) {
+								BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+							} else {
+								null
+							},
+							modifier = Modifier.weight(1f),
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+								horizontalArrangement = Arrangement.Center,
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Box(
+									modifier = Modifier
+										.size(7.dp)
+										.clip(CircleShape)
+										.background(
+											if (connected) MaterialTheme.colorScheme.meloPositive
+											else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+										),
+								)
+								Spacer(Modifier.width(6.dp))
+								Text(
+									text = tabTitle,
+									style = MaterialTheme.typography.labelLarge,
+									fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+									color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
+					}
+				}
+			}
+
+			when (selectedTab) {
+				0 -> IosMeloConnectionBody(
+					settingsState = settingsState,
+					settingsController = settingsController,
+					hostNavBottom = hostNavBottom,
+				)
+				else -> Box(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(bottom = maxOf(hostNavBottom, 16.dp) + 20.dp),
+				) {
+					IosNavidromeServerBody(
+						servers = servers,
+						activeServerId = activeServerId,
+						editorState = editorState,
+						onSwitchServer = onSwitchServer,
+						onRemoveServer = onRemoveServer,
+					)
+				}
+			}
+		}
+	}
+
+	IosNavidromeEditorDialog(
+		editorState = editorState,
+		scope = scope,
+		onTestAndSave = onTestAndSaveNavidrome,
+	)
+}
+
+// =============================================================================
+// 6b. 统一命名别名抽屉与主题外观 / 存储缓存抽屉
+// =============================================================================
+
+@Composable
+internal fun IosSettingsSourcesProxySheet(
+	settingsController: MeloSettingsController,
+	settingsState: MeloSettingsUiState,
+	presented: Boolean,
+	onDismissRequest: () -> Unit,
+) {
+	IosSourcesAndProxySheet(
+		settingsController = settingsController,
+		settingsState = settingsState,
+		presented = presented,
+		onDismissRequest = onDismissRequest,
+	)
+}
+
+@Composable
+internal fun IosSettingsAudioEngineSheet(
+	audioPlayer: IosAudioPlayer,
+	subsonicManager: IosSubsonicManager,
+	presented: Boolean,
+	onDismissRequest: () -> Unit,
+) {
+	IosAudioEngineSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = presented,
+		onDismissRequest = onDismissRequest,
+	)
+}
+
+@Composable
+internal fun IosSettingsLyricsSheet(
+	audioPlayer: IosAudioPlayer,
+	subsonicManager: IosSubsonicManager,
+	presented: Boolean,
+	onDismissRequest: () -> Unit,
+) {
+	IosLyricsAndStageSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = presented,
+		onDismissRequest = onDismissRequest,
+	)
+}
+
+@Composable
+internal fun IosSettingsThemeAppearanceSheet(
+	settingsStore: MeloSettingsStore,
+	subsonicManager: IosSubsonicManager,
+	hostNavBottom: Dp,
+	presented: Boolean,
+	onDismissRequest: () -> Unit,
+) {
+	if (!presented) return
+
+	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	val studioPreset by settingsStore.studioThemePreset.collectAsState()
+	val prefs by subsonicManager.prefs.collectAsState()
+	val activeDescriptor = remember(studioPreset) {
+		MeloStudioPresets.all.firstOrNull { it.id == studioPreset }
+	}
+	val isDynamicPreset = studioPreset == MeloStudioPresets.DYNAMIC
+
+	ModalBottomSheet(
+		onDismissRequest = onDismissRequest,
+		sheetState = sheetState,
+		containerColor = MaterialTheme.colorScheme.background,
+		contentColor = MaterialTheme.colorScheme.onSurface,
+		dragHandle = null,
+	) {
+		Column(modifier = Modifier.fillMaxWidth()) {
+			IosCleanTopBar(
+				title = "主题与外观",
+				onBack = onDismissRequest,
+			)
+
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.verticalScroll(rememberScrollState())
+					.padding(horizontal = 16.dp)
+					.padding(top = 6.dp, bottom = maxOf(hostNavBottom, 16.dp) + 20.dp),
+				verticalArrangement = Arrangement.spacedBy(18.dp),
+			) {
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "主题预设")
+					MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
+						) {
+							rowPresets.forEach { preset ->
+								val selected = studioPreset == preset.id
+								Surface(
+									onClick = { settingsStore.setStudioThemePreset(preset.id) },
+									shape = RoundedCornerShape(14.dp),
+									color = MaterialTheme.colorScheme.surfaceContainer,
+									border = BorderStroke(
+										width = if (selected) 1.5.dp else IosHairlineWidth,
+										color = if (selected) {
+											MaterialTheme.colorScheme.primary
+										} else {
+											MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+										},
+									),
+									modifier = Modifier.weight(1f),
+								) {
+									Column(
+										modifier = Modifier.padding(12.dp),
+										verticalArrangement = Arrangement.spacedBy(8.dp),
+									) {
+										Row(
+											modifier = Modifier.fillMaxWidth(),
+											horizontalArrangement = Arrangement.SpaceBetween,
+											verticalAlignment = Alignment.CenterVertically,
+										) {
+											Row(
+												horizontalArrangement = Arrangement.spacedBy(4.dp),
+												verticalAlignment = Alignment.CenterVertically,
+											) {
+												Box(
+													modifier = Modifier
+														.size(14.dp)
+														.clip(CircleShape)
+														.background(preset.previewBackground)
+														.border(
+															IosHairlineWidth,
+															MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+															CircleShape,
+														),
+												)
+												Box(
+													modifier = Modifier
+														.size(14.dp)
+														.clip(CircleShape)
+														.background(preset.previewContainer)
+														.border(
+															IosHairlineWidth,
+															MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+															CircleShape,
+														),
+												)
+												Box(
+													modifier = Modifier
+														.size(14.dp)
+														.clip(CircleShape)
+														.background(preset.previewAccent),
+												)
+											}
+											if (selected) {
+												Icon(
+													imageVector = Icons.Rounded.Check,
+													contentDescription = "已选中",
+													tint = MaterialTheme.colorScheme.primary,
+													modifier = Modifier.size(16.dp),
+												)
+											}
+										}
+										Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+											Text(
+												text = preset.title,
+												style = MaterialTheme.typography.bodyMedium,
+												fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+												color = MaterialTheme.colorScheme.onSurface,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis,
+											)
+											Text(
+												text = preset.subtitle,
+												style = MaterialTheme.typography.labelSmall,
+												color = MaterialTheme.colorScheme.onSurfaceVariant,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis,
+											)
+										}
+									}
+								}
+							}
+							if (rowPresets.size == 1) {
+								Spacer(modifier = Modifier.weight(1f))
+							}
+						}
+					}
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "深浅色模式")
+					IosGroupedCard {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(10.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(6.dp),
+							) {
+								listOf(
+									IosThemeMode.SYSTEM to "跟随系统",
+									IosThemeMode.DARK to "深色",
+									IosThemeMode.LIGHT to "浅色",
+								).forEach { (mode, label) ->
+									val isCurrent = isDynamicPreset && prefs.themeMode == mode
+									Surface(
+										onClick = {
+											if (!isDynamicPreset) {
+												settingsStore.setStudioThemePreset(MeloStudioPresets.DYNAMIC)
+											}
+											subsonicManager.updatePrefs { it.copy(themeMode = mode) }
+										},
+										shape = RoundedCornerShape(10.dp),
+										color = if (isCurrent) {
+											MaterialTheme.colorScheme.primary
+										} else {
+											MaterialTheme.colorScheme.surfaceContainerHigh
+										},
+										modifier = Modifier.weight(1f),
+									) {
+										Box(
+											modifier = Modifier.padding(vertical = 8.dp),
+											contentAlignment = Alignment.Center,
+										) {
+											Text(
+												text = label,
+												style = MaterialTheme.typography.labelMedium,
+												fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+												color = if (isCurrent) {
+													MaterialTheme.colorScheme.onPrimary
+												} else {
+													MaterialTheme.colorScheme.onSurfaceVariant
+												},
+											)
+										}
+									}
+								}
+							}
+							if (!isDynamicPreset && activeDescriptor != null) {
+								Text(
+									text = "当前预设「${activeDescriptor.title}」固定为${if (activeDescriptor.isDark) "深色" else "浅色"}；选择模式将切换至动态壁纸色",
+									style = MaterialTheme.typography.labelSmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									modifier = Modifier.padding(horizontal = 4.dp),
+								)
+							}
+						}
+					}
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "显示增强")
+					IosGroupedCard {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clickable {
+									subsonicManager.updatePrefs { it.copy(amoledBlack = !it.amoledBlack) }
+								}
+								.padding(horizontal = 16.dp, vertical = 12.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "AMOLED 纯黑",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium,
+									color = MaterialTheme.colorScheme.onSurface,
+								)
+								Text(
+									text = "深色模式下使用纯黑背景以降低 OLED 功耗",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Switch(
+								checked = prefs.amoledBlack,
+								onCheckedChange = { checked ->
+									subsonicManager.updatePrefs { it.copy(amoledBlack = checked) }
+								},
+								colors = SwitchDefaults.colors(
+									checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+									checkedTrackColor = MaterialTheme.colorScheme.primary,
+								),
+							)
 						}
 					}
 				}
 			}
 		}
 	}
+}
 
-	if (showAddDialog) {
-		AlertDialog(
-			onDismissRequest = { if (!saving) showAddDialog = false },
-			title = { Text(if (editTarget != null) "编辑 Navidrome 服务器" else "添加 Navidrome 服务器") },
-			text = {
+@Composable
+internal fun IosSettingsStorageSheet(
+	tempCacheBytes: Long,
+	offlineTrackCount: Int,
+	offlineTotalBytes: Long,
+	cacheClearHint: String?,
+	onRequestClearCache: () -> Unit,
+	onOpenPhoneDownloads: (() -> Unit)?,
+	hostNavBottom: Dp,
+	presented: Boolean,
+	onDismissRequest: () -> Unit,
+) {
+	if (!presented) return
+
+	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+	ModalBottomSheet(
+		onDismissRequest = onDismissRequest,
+		sheetState = sheetState,
+		containerColor = MaterialTheme.colorScheme.background,
+		contentColor = MaterialTheme.colorScheme.onSurface,
+		dragHandle = null,
+	) {
+		Column(modifier = Modifier.fillMaxWidth()) {
+			IosCleanTopBar(
+				title = "存储与缓存",
+				onBack = onDismissRequest,
+			)
+
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.verticalScroll(rememberScrollState())
+					.padding(horizontal = 16.dp)
+					.padding(top = 6.dp, bottom = maxOf(hostNavBottom, 16.dp) + 20.dp),
+				verticalArrangement = Arrangement.spacedBy(18.dp),
+			) {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					OutlinedTextField(
-						value = nameInput,
-						onValueChange = { nameInput = it },
-						label = { Text("别名（可选）") },
-						singleLine = true,
-						enabled = !saving,
-						shape = RoundedCornerShape(12.dp),
-					)
-					OutlinedTextField(
-						value = urlInput,
-						onValueChange = { urlInput = it },
-						label = { Text("服务器地址") },
-						placeholder = { Text("http://192.168.1.10:4533") },
-						singleLine = true,
-						enabled = !saving,
-						shape = RoundedCornerShape(12.dp),
-					)
-					OutlinedTextField(
-						value = userInput,
-						onValueChange = { userInput = it },
-						label = { Text("用户名") },
-						singleLine = true,
-						enabled = !saving,
-						shape = RoundedCornerShape(12.dp),
-					)
-					OutlinedTextField(
-						value = passInput,
-						onValueChange = { passInput = it },
-						label = { Text("密码") },
-						singleLine = true,
-						enabled = !saving,
-						shape = RoundedCornerShape(12.dp),
-					)
-					if (!saveError.isNullOrBlank()) {
-						Text(saveError.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-					}
-				}
-			},
-			confirmButton = {
-				TextButton(
-					onClick = {
-						if (urlInput.isNotBlank() && userInput.isNotBlank() && !saving) {
-							scope.launch {
-								saving = true
-								saveError = null
-								val result = onTestAndSave(
-									nameInput.ifBlank { "Navidrome" },
-									urlInput.trim(),
-									userInput.trim(),
-									passInput,
-									editTarget?.id,
+					IosSectionLabel(title = "临时缓存")
+					IosGroupedCard {
+						IosSettingsNavRow(
+							title = "临时缓存占用",
+							value = cacheClearHint ?: formatBytesHuman(tempCacheBytes),
+							onClick = onRequestClearCache,
+						)
+						IosHairlineDivider(startIndent = 16.dp)
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clickable(onClick = onRequestClearCache)
+								.padding(horizontal = 16.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							Icon(
+								imageVector = Icons.Rounded.Delete,
+								contentDescription = null,
+								tint = MaterialTheme.colorScheme.error,
+								modifier = Modifier.size(18.dp),
+							)
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "清理临时缓存",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium,
+									color = MaterialTheme.colorScheme.error,
 								)
-								saving = false
-								result.onSuccess {
-									showAddDialog = false
-								}.onFailure { err ->
-									saveError = err.message ?: "连接或验证失败"
-								}
+								Text(
+									text = "清理封面图与网络缓冲，不影响已离线保存的歌曲",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
 							}
 						}
-					},
-					enabled = !saving && urlInput.isNotBlank() && userInput.isNotBlank(),
-				) {
-					Text(if (saving) "测试中…" else "保存")
+					}
 				}
-			},
-			dismissButton = {
-				TextButton(onClick = { if (!saving) showAddDialog = false }, enabled = !saving) {
-					Text("取消")
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "离线曲库")
+					IosGroupedCard {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 13.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							Icon(
+								imageVector = Icons.Rounded.OfflinePin,
+								contentDescription = null,
+								tint = MaterialTheme.colorScheme.primary,
+								modifier = Modifier.size(18.dp),
+							)
+							Text(
+								text = "已离线曲目",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium,
+								color = MaterialTheme.colorScheme.onSurface,
+								modifier = Modifier.weight(1f),
+							)
+							Text(
+								text = "$offlineTrackCount 首 · ${formatBytesHuman(offlineTotalBytes)}",
+								style = MaterialTheme.typography.bodySmall.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						if (onOpenPhoneDownloads != null) {
+							IosHairlineDivider(startIndent = 16.dp)
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.clickable {
+										onDismissRequest()
+										onOpenPhoneDownloads()
+									}
+									.padding(horizontal = 16.dp, vertical = 13.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
+							) {
+								Icon(
+									imageVector = Icons.Rounded.Folder,
+									contentDescription = null,
+									tint = MaterialTheme.colorScheme.onSurfaceVariant,
+									modifier = Modifier.size(18.dp),
+								)
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp),
+								) {
+									Text(
+										text = "管理手机离线曲库",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Medium,
+										color = MaterialTheme.colorScheme.onSurface,
+									)
+									Text(
+										text = "查看下载任务、离线文件大小或批量清理",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+								}
+								Icon(
+									imageVector = Icons.Rounded.ChevronRight,
+									contentDescription = null,
+									tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+									modifier = Modifier.size(18.dp),
+								)
+							}
+						}
+					}
 				}
-			},
-		)
+			}
+		}
 	}
 }
 

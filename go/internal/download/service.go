@@ -918,6 +918,7 @@ func (s *Service) executeJob(dlID string) {
 		}); fbErr == nil {
 			if fbChosen, fbOK := pickResolvedMedia(fbList, "", spec.allowPreview); fbOK {
 				chosen, ok = fbChosen, true
+				resolvedList = fbList
 				err = nil
 			}
 		}
@@ -930,6 +931,8 @@ func (s *Service) executeJob(dlID string) {
 		s.finishError(tc, dl, spec, model.NewError(model.ErrNotFound, http.StatusNotFound, "未解析到可用的完整音频地址"))
 		return
 	}
+	candidates := buildResolvedCandidates(chosen, resolvedList, dl.QualityID, spec.allowPreview)
+	chosen = candidates[0]
 	s.log("info", dlID, fmt.Sprintf("解析下载音质：《%s》 · %s (%s)", trRec.Title, chosen.Variant.Label, chosen.Codec))
 
 	if s.checkPauseOrCancel(tc, dl, spec) {
@@ -949,11 +952,11 @@ func (s *Service) executeJob(dlID string) {
 		return
 	}
 
-	partPath := s.partPath(dlID)
+	var partPath string
 	var bytesWritten int64
 	var totalBytes *int64
 	var mime string
-	isHLS := strings.EqualFold(chosen.Variant.Protocol, "hls") || strings.Contains(strings.ToLower(chosen.URL), ".m3u8")
+	var isHLS bool
 
 	progressHook := func(done int64, total *int64, detail string) {
 		updated, casErr := s.store.CompareAndSetDownload(s.baseCtx, store.CASDownloadParams{
@@ -970,23 +973,77 @@ func (s *Service) executeJob(dlID string) {
 		}
 	}
 
-	if isHLS {
-		var hlsPath string
-		hlsPath, bytesWritten, err = downloadHLS(
-			runCtx, s.pool, s.runner, chosen, rc,
-			filepath.Join(s.stagingRoot, dlID), dlID,
-			s.opts.MaxAudioBytes, s.opts.TransferTimeout, progressHook,
-		)
-		if err == nil {
-			partPath = hlsPath
-			bt := bytesWritten
-			totalBytes = &bt
+	for idx, cand := range candidates {
+		if idx > 0 {
+			if s.checkPauseOrCancel(tc, dl, spec) {
+				return
+			}
+			var zero int64
+			candDetail := fmt.Sprintf("尝试备选下载地址 (%d/%d)", idx+1, len(candidates))
+			if updated, casErr := s.store.CompareAndSetDownload(s.baseCtx, store.CASDownloadParams{
+				ID:               dlID,
+				ExpectedRevision: dl.Revision,
+				AllowedStates:    []model.DownloadStatus{model.DownloadDownloading},
+				NewState:         model.DownloadDownloading,
+				BytesDone:        &zero,
+				BytesTotal:       cand.SizeBytes,
+				Detail:           &candDetail,
+			}); casErr == nil {
+				dl = updated
+			}
 		}
-	} else {
-		bytesWritten, totalBytes, mime, err = transferHTTP(
-			runCtx, s.pool, s.store, dl, chosen, rc,
-			partPath, s.opts.MaxAudioBytes, s.opts.TransferTimeout, progressHook,
-		)
+
+		chosen = cand
+		partPath = s.partPath(dlID)
+		bytesWritten = 0
+		totalBytes = nil
+		mime = ""
+		isHLS = strings.EqualFold(chosen.Variant.Protocol, "hls") || strings.Contains(strings.ToLower(chosen.URL), ".m3u8")
+
+		if isHLS {
+			var hlsPath string
+			hlsPath, bytesWritten, err = downloadHLS(
+				runCtx, s.pool, s.runner, chosen, rc,
+				filepath.Join(s.stagingRoot, dlID), dlID,
+				s.opts.MaxAudioBytes, s.opts.TransferTimeout, progressHook,
+			)
+			if err == nil {
+				partPath = hlsPath
+				bt := bytesWritten
+				totalBytes = &bt
+			}
+		} else {
+			bytesWritten, totalBytes, mime, err = transferHTTP(
+				runCtx, s.pool, s.store, dl, chosen, rc,
+				partPath, s.opts.MaxAudioBytes, s.opts.TransferTimeout, progressHook,
+			)
+		}
+		if err == nil {
+			break
+		}
+		if s.checkPauseOrCancel(tc, dl, spec) {
+			return
+		}
+		statusCode, canFallback := isCandidateFallbackError(err)
+		if !canFallback || idx == len(candidates)-1 {
+			break
+		}
+		if idx == 0 {
+			s.log("warning", dlID, fmt.Sprintf("首选下载地址返回 %d，尝试同次解析的其他候选地址", statusCode))
+		} else {
+			s.log("warning", dlID, fmt.Sprintf("候选下载地址返回 %d，尝试下一条候选地址", statusCode))
+		}
+		s.cleanupPartial(dlID)
+		if _, statErr := os.Stat(partPath); statErr == nil {
+			_ = os.Truncate(partPath, 0)
+		}
+		_ = s.store.WithTx(s.baseCtx, func(tx *sql.Tx) error {
+			if _, txErr := tx.ExecContext(s.baseCtx, `DELETE FROM transfer_checkpoints WHERE download_id = ?`, dlID); txErr != nil {
+				return txErr
+			}
+			_, txErr := tx.ExecContext(s.baseCtx, `UPDATE downloads SET bytes_total = NULL WHERE id = ?`, dlID)
+			return txErr
+		})
 	}
 	if err != nil {
 		s.finishError(tc, dl, spec, err)
@@ -1516,6 +1573,86 @@ func pickResolvedMedia(list []model.ResolvedMedia, qualityID string, allowPrevie
 		return rm, true
 	}
 	return model.ResolvedMedia{}, false
+}
+
+func resolvedCodec(rm model.ResolvedMedia) string {
+	c := strings.TrimSpace(rm.Codec)
+	if c == "" {
+		c = strings.TrimSpace(rm.Variant.Codec)
+	}
+	return strings.ToLower(c)
+}
+
+func isVariantMatch(rm model.ResolvedMedia, qualityID string) bool {
+	if qualityID == "" {
+		return false
+	}
+	return rm.VariantID == qualityID || rm.Variant.UpstreamID == qualityID || rm.Variant.VariantID == qualityID
+}
+
+func buildResolvedCandidates(chosen model.ResolvedMedia, list []model.ResolvedMedia, qualityID string, allowPreview bool) []model.ResolvedMedia {
+	candidates := []model.ResolvedMedia{chosen}
+	seen := make(map[string]bool, len(list)+1)
+	if u := strings.TrimSpace(chosen.URL); u != "" {
+		seen[u] = true
+	}
+	var sameVar, sameBoth, sameCodec, sameLossless, rest []model.ResolvedMedia
+	chosenCodec := resolvedCodec(chosen)
+	qid := strings.TrimSpace(qualityID)
+	for _, rm := range list {
+		u := strings.TrimSpace(rm.URL)
+		if u == "" || seen[u] {
+			continue
+		}
+		if (rm.PreviewOnly || rm.Variant.PreviewOnly) && !allowPreview {
+			continue
+		}
+		seen[u] = true
+		if qid == "" {
+			rest = append(rest, rm)
+			continue
+		}
+		rmCodec := resolvedCodec(rm)
+		matchCodec := chosenCodec != "" && rmCodec == chosenCodec
+		matchLossless := rm.Variant.Lossless == chosen.Variant.Lossless
+		switch {
+		case isVariantMatch(rm, qid):
+			sameVar = append(sameVar, rm)
+		case matchLossless && matchCodec:
+			sameBoth = append(sameBoth, rm)
+		case matchCodec:
+			sameCodec = append(sameCodec, rm)
+		case matchLossless:
+			sameLossless = append(sameLossless, rm)
+		default:
+			rest = append(rest, rm)
+		}
+	}
+	candidates = append(candidates, sameVar...)
+	candidates = append(candidates, sameBoth...)
+	candidates = append(candidates, sameCodec...)
+	candidates = append(candidates, sameLossless...)
+	candidates = append(candidates, rest...)
+	return candidates
+}
+
+func isCandidateFallbackError(err error) (int, bool) {
+	de, ok := model.AsDomainError(err)
+	if !ok {
+		return 0, false
+	}
+	switch de.Status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+		return de.Status, true
+	}
+	if de.Code == model.ErrAuthRequired {
+		status := de.Status
+		if status <= 0 {
+			status = http.StatusForbidden
+		}
+		return status, true
+	}
+	return 0, false
 }
 
 func computeDedupeKey(source, locator, qualityID, configRev string) string {

@@ -829,7 +829,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for k, v := range target.Headers {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
 			upReq.Header.Set(k, v)
+		}
+		if upReq.Header.Get("User-Agent") == "" {
+			upReq.Header.Set("User-Agent", provider.DefaultUserAgent)
 		}
 		if len(target.Cookies) > 0 {
 			upReq.Header.Set("Cookie", provider.FormatCookieHeader(target.Cookies))

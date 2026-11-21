@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,6 +90,7 @@ import androidx.lifecycle.compose.dropUnlessResumed
 import io.github.agonie0v0.melokeep.shared.MeloAvailableSource
 import io.github.agonie0v0.melokeep.shared.MeloQuality
 import io.github.agonie0v0.melokeep.shared.MeloQualityFilter
+import io.github.agonie0v0.melokeep.shared.MeloQualityFormatter
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
 import io.github.agonie0v0.melokeep.shared.MeloSearchUiState
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
@@ -1512,13 +1514,23 @@ private fun DiscoverTrackGroupCard(
 	val primaryQuality = remember(primary.id, primary.qualities, primary.playback) {
 		extractTrackQualityBadge(primary)
 	}
+	val primarySizeText = remember(
+		primary.id,
+		primary.sizeBytes,
+		primary.sizeLabel,
+		primary.duration,
+		primary.qualities,
+		primary.playback
+	) {
+		MeloQualityFormatter.resolveTrackSizeText(primary)
+	}
 	val primaryMetaText = remember(
 		primary.id,
 		primary.artist,
 		primary.album,
 		primary.durationMs,
 		primary.source,
-		primary.sizeLabel,
+		primarySizeText,
 		primaryQuality,
 		sourceLabels
 	) {
@@ -1532,7 +1544,7 @@ private fun DiscoverTrackGroupCard(
 				add(translateMeloSourceName(it, sourceLabels))
 			}
 			primaryQuality?.first?.takeIf { it.isNotBlank() }?.let(::add)
-			primary.sizeLabel?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
+			primarySizeText?.takeIf { it.isNotBlank() }?.let(::add)
 		}.joinToString(" · ").ifEmpty { "全网音源" }
 	}
 	val altSourcesText = remember(group.groupKey, group.alternatives, sourceLabels) {
@@ -1757,13 +1769,23 @@ private fun AlternativeTrackRow(
 	val qualityBadge = remember(track.id, track.qualities, track.playback) {
 		extractTrackQualityBadge(track)
 	}
+	val sizeText = remember(
+		track.id,
+		track.sizeBytes,
+		track.sizeLabel,
+		track.duration,
+		track.qualities,
+		track.playback
+	) {
+		MeloQualityFormatter.resolveTrackSizeText(track)
+	}
 	val sourceName = remember(track.source, sourceLabels) { translateMeloSourceName(track.source, sourceLabels) }
-	val inlineText = remember(track.id, track.album, track.sizeLabel, sourceName, qualityBadge) {
+	val inlineText = remember(track.id, track.album, sizeText, sourceName, qualityBadge) {
 		listOfNotNull(
 			sourceName.takeIf { it.isNotBlank() },
 			track.album.takeIf { it.isNotBlank() },
 			qualityBadge?.first?.takeIf { it.isNotBlank() },
-			track.sizeLabel?.takeIf { it.isNotBlank() }
+			sizeText?.takeIf { it.isNotBlank() }
 		).joinToString(" · ")
 	}
 	Row(
@@ -1988,91 +2010,121 @@ private fun TrackVersionsBottomSheet(
 							}
 						)
 					} else {
-						MeloGroupedCard {
-							qualities.forEachIndexed { index, quality ->
-								val displayLabel = quality.label.ifBlank {
-									listOfNotNull(
-										quality.codec.takeIf { it.isNotBlank() }?.uppercase(),
-										quality.bitrate?.let { "${it}k" }
-									).joinToString(" ").ifBlank { quality.id }
-								}
-								val subParts = buildList {
-									quality.codec.takeIf { it.isNotBlank() }?.uppercase()?.let(::add)
-									quality.bitrate?.let { add("$it kbps") }
-									quality.availability.takeIf { it.isNotBlank() }?.let(::add)
-									quality.evidence.takeIf { it.isNotBlank() }?.let(::add)
-								}
-								Row(
-									modifier = Modifier
-										.fillMaxWidth()
-										.clickable(enabled = submittingQualityId == null) {
-											submittingQualityId = quality.id
-											scope.launch {
-												val res = controller.enqueueDownload(detailedTrack, quality.id)
-												submittingQualityId = null
-												if (res.isSuccess) {
-													onDownloadSubmitted(detailedTrack.title, displayLabel)
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.verticalScroll(rememberScrollState())
+						) {
+							MeloGroupedCard {
+								qualities.forEachIndexed { index, quality ->
+									val presentation = remember(
+										quality,
+										detailedTrack.id,
+										detailedTrack.duration,
+										detailedTrack.sizeBytes,
+										detailedTrack.sizeLabel,
+										detailedTrack.qualities.size
+									) {
+										MeloQualityFormatter.formatQuality(quality, detailedTrack)
+									}
+									Row(
+										modifier = Modifier
+											.fillMaxWidth()
+											.clickable(enabled = submittingQualityId == null) {
+												submittingQualityId = quality.id
+												scope.launch {
+													val res = controller.enqueueDownload(detailedTrack, quality.id)
+													submittingQualityId = null
+													if (res.isSuccess) {
+														onDownloadSubmitted(detailedTrack.title, presentation.title)
+													}
 												}
 											}
-										}
-										.padding(horizontal = 14.dp, vertical = 12.dp),
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.spacedBy(10.dp)
-								) {
-									Column(
-										modifier = Modifier.weight(1f),
-										verticalArrangement = Arrangement.spacedBy(2.dp)
+											.padding(horizontal = 14.dp, vertical = 12.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(10.dp)
 									) {
-										Row(
-											verticalAlignment = Alignment.CenterVertically,
-											horizontalArrangement = Arrangement.spacedBy(6.dp)
+										Column(
+											modifier = Modifier.weight(1f),
+											verticalArrangement = Arrangement.spacedBy(3.dp)
 										) {
-											Text(
-												text = displayLabel,
-												style = MaterialTheme.typography.bodyMedium,
-												fontWeight = FontWeight.Medium,
-												color = MaterialTheme.colorScheme.onSurface
-											)
-											if (quality.lossless) {
-												Surface(
-													shape = RoundedCornerShape(6.dp),
-													color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-												) {
-													Text(
-														text = "无损",
-														style = MaterialTheme.typography.labelSmall,
-														color = MaterialTheme.colorScheme.primary,
-														modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+											FlowRow(
+												horizontalArrangement = Arrangement.spacedBy(6.dp),
+												verticalArrangement = Arrangement.spacedBy(4.dp)
+											) {
+												Text(
+													text = presentation.title,
+													style = MaterialTheme.typography.bodyMedium,
+													fontWeight = FontWeight.Medium,
+													color = MaterialTheme.colorScheme.onSurface,
+													modifier = Modifier.align(Alignment.CenterVertically)
+												)
+												if (presentation.isLossless) {
+													QualityBadgeChip(
+														label = "无损",
+														containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+														contentColor = MaterialTheme.colorScheme.primary,
+														modifier = Modifier.align(Alignment.CenterVertically)
+													)
+												}
+												if (presentation.isPreviewOnly) {
+													QualityBadgeChip(
+														label = "仅试听片段",
+														containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+														contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+														modifier = Modifier.align(Alignment.CenterVertically)
+													)
+												}
+												if (presentation.needsLogin) {
+													QualityBadgeChip(
+														label = "需账号权限",
+														containerColor = MaterialTheme.colorScheme.errorContainer,
+														contentColor = MaterialTheme.colorScheme.onErrorContainer,
+														modifier = Modifier.align(Alignment.CenterVertically)
 													)
 												}
 											}
+											presentation.bitrateText?.takeIf { it.isNotBlank() }?.let { bitrate ->
+												Text(
+													text = bitrate,
+													style = MaterialTheme.typography.bodySmall.tabularNums(),
+													color = MaterialTheme.colorScheme.onSurfaceVariant,
+													maxLines = 1,
+													overflow = TextOverflow.Ellipsis
+												)
+											}
 										}
-										if (subParts.isNotEmpty()) {
-											Text(
-												text = subParts.joinToString(" · "),
-												style = MaterialTheme.typography.bodySmall.tabularNums(),
-												color = MaterialTheme.colorScheme.onSurfaceVariant,
-												maxLines = 1,
-												overflow = TextOverflow.Ellipsis
-											)
+										Row(
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(8.dp)
+										) {
+											presentation.sizeText?.takeIf { it.isNotBlank() }?.let { sizeText ->
+												Text(
+													text = sizeText,
+													style = MaterialTheme.typography.labelMedium.tabularNums(),
+													color = MaterialTheme.colorScheme.onSurfaceVariant,
+													maxLines = 1,
+													softWrap = false
+												)
+											}
+											if (submittingQualityId == quality.id) {
+												CircularProgressIndicator(
+													modifier = Modifier.size(18.dp),
+													strokeWidth = 2.dp
+												)
+											} else {
+												Icon(
+													imageVector = Icons.Outlined.Download,
+													contentDescription = "下载",
+													tint = MaterialTheme.colorScheme.primary,
+													modifier = Modifier.size(19.dp)
+												)
+											}
 										}
 									}
-									if (submittingQualityId == quality.id) {
-										CircularProgressIndicator(
-											modifier = Modifier.size(18.dp),
-											strokeWidth = 2.dp
-										)
-									} else {
-										Icon(
-											imageVector = Icons.Outlined.Download,
-											contentDescription = "下载",
-											tint = MaterialTheme.colorScheme.primary,
-											modifier = Modifier.size(19.dp)
-										)
+									if (index < qualities.lastIndex) {
+										MeloHairlineDivider(startIndent = 14.dp)
 									}
-								}
-								if (index < qualities.lastIndex) {
-									MeloHairlineDivider(startIndent = 14.dp)
 								}
 							}
 						}
@@ -2080,6 +2132,29 @@ private fun TrackVersionsBottomSheet(
 				}
 			}
 		}
+	}
+}
+
+@Composable
+private fun QualityBadgeChip(
+	label: String,
+	containerColor: Color,
+	contentColor: Color,
+	modifier: Modifier = Modifier
+) {
+	Surface(
+		modifier = modifier,
+		shape = RoundedCornerShape(6.dp),
+		color = containerColor
+	) {
+		Text(
+			text = label,
+			style = MaterialTheme.typography.labelSmall,
+			color = contentColor,
+			maxLines = 1,
+			softWrap = false,
+			modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+		)
 	}
 }
 

@@ -135,7 +135,7 @@ import kotlinx.coroutines.launch
 internal enum class IosLibSourceMode(val label: String) {
 	NAVIDROME("Navidrome"),
 	LOCAL("Melokeep"),
-	DEVICE("手机本地"),
+	DEVICE("本地"),
 }
 
 internal enum class IosLibNavSubTab(val label: String) {

@@ -2,6 +2,8 @@ import type { SelfUpdateStatus, SystemUpdateInfo } from "./types";
 
 export const DOCKER_SOCK_COMPOSE_LINE =
   "- /var/run/docker.sock:/var/run/docker.sock";
+export const DOCKER_SOCK_RUN_FLAG =
+  "-v /var/run/docker.sock:/var/run/docker.sock";
 
 export const SELF_UPDATE_STAGE_LABELS: Record<string, string> = {
   idle: "准备更新",
@@ -13,7 +15,7 @@ export const SELF_UPDATE_STAGE_LABELS: Record<string, string> = {
 };
 
 export type SelfUpdateActionMode =
-  "hidden" | "primary" | "secondary" | "disabled_hint";
+  "hidden" | "primary" | "up_to_date" | "disabled_hint";
 
 export function getSelfUpdateActionMode(
   info: SystemUpdateInfo | null,
@@ -21,7 +23,7 @@ export function getSelfUpdateActionMode(
   const selfUpdate = info?.self_update;
   if (!selfUpdate) return "hidden";
   if (!selfUpdate.supported) return "disabled_hint";
-  return info?.has_update ? "primary" : "secondary";
+  return info?.has_update ? "primary" : "up_to_date";
 }
 
 export function formatSelfUpdateState(

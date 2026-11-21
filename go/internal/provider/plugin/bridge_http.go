@@ -31,7 +31,7 @@ const (
 	// MaxSingleHTTPTimeout caps per-request timeoutMs at 15 seconds.
 	MaxSingleHTTPTimeout = 15 * time.Second
 
-	defaultPluginUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+	defaultPluginUserAgent = provider.DefaultUserAgent
 )
 
 // ValidateAndNormalizeOrigins validates an allowed_origins list and returns canonicalized unique origins.

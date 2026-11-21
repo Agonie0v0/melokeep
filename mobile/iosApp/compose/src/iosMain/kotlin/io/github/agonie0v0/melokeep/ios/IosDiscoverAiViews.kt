@@ -124,6 +124,7 @@ import io.github.agonie0v0.melokeep.shared.MeloAiUiState
 import io.github.agonie0v0.melokeep.shared.MeloAvailableSource
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloQualityFilter
+import io.github.agonie0v0.melokeep.shared.MeloQualityFormatter
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
 import io.github.agonie0v0.melokeep.shared.MeloSearchUiState
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
@@ -1309,13 +1310,23 @@ private fun IosDiscoverTrackGroupRow(
 	val primaryQuality = remember(primary.id, primary.qualities, primary.playback) {
 		extractIosTrackQualityBadge(primary)?.first
 	}
+	val primarySizeText = remember(
+		primary.id,
+		primary.sizeBytes,
+		primary.sizeLabel,
+		primary.duration,
+		primary.qualities,
+		primary.playback,
+	) {
+		MeloQualityFormatter.resolveTrackSizeText(primary)
+	}
 	val primaryMetaText = remember(
 		primary.id,
 		primary.artist,
 		primary.album,
 		primary.duration,
 		primary.source,
-		primary.sizeLabel,
+		primarySizeText,
 		primaryQuality,
 		sourceLabels,
 	) {
@@ -1329,7 +1340,7 @@ private fun IosDiscoverTrackGroupRow(
 				add(translateIosSourceName(it, sourceLabels))
 			}
 			primaryQuality?.takeIf { it.isNotBlank() }?.let(::add)
-			primary.sizeLabel?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
+			primarySizeText?.takeIf { it.isNotBlank() }?.let(::add)
 		}.joinToString(" · ").ifEmpty { "全网音源" }
 	}
 	val altSourcesText = remember(group.groupKey, group.alternatives, sourceLabels) {
@@ -1572,12 +1583,22 @@ private fun IosDiscoverAlternativeTrackRow(
 	val qualityBadge = remember(track.id, track.qualities, track.playback) {
 		extractIosTrackQualityBadge(track)?.first
 	}
-	val inlineText = remember(track.id, track.source, sourceLabels, track.album, track.sizeLabel, qualityBadge) {
+	val trackSizeText = remember(
+		track.id,
+		track.sizeBytes,
+		track.sizeLabel,
+		track.duration,
+		track.qualities,
+		track.playback,
+	) {
+		MeloQualityFormatter.resolveTrackSizeText(track)
+	}
+	val inlineText = remember(track.id, track.source, sourceLabels, track.album, trackSizeText, qualityBadge) {
 		listOfNotNull(
 			translateIosSourceName(track.source, sourceLabels).takeIf { it.isNotBlank() },
 			track.album.takeIf { it.isNotBlank() },
 			qualityBadge?.takeIf { it.isNotBlank() },
-			track.sizeLabel?.takeIf { it.isNotBlank() },
+			trackSizeText?.takeIf { it.isNotBlank() },
 		).joinToString(" · ")
 	}
 	Row(
@@ -1938,18 +1959,20 @@ private fun IosDiscoverTrackQualitySheet(
 			} else if (track.qualities.isNotEmpty()) {
 				IosGroupedCard {
 					track.qualities.forEachIndexed { idx, q ->
-						val displayLabel = q.label.ifBlank {
-							listOfNotNull(
-								q.codec.takeIf { it.isNotBlank() }?.uppercase(),
-								q.bitrate?.let { "${it}k" },
-							).joinToString(" ").ifBlank { q.id }
+						val presentation = remember(
+							q,
+							track.duration,
+							track.sizeBytes,
+							track.sizeLabel,
+							track.qualities.size,
+						) {
+							MeloQualityFormatter.formatQuality(q, track)
 						}
-						val detailParts = listOfNotNull(
-							q.codec.takeIf { it.isNotBlank() }?.uppercase(),
-							q.bitrate?.let { "$it kbps" },
-							q.availability.takeIf { it.isNotBlank() },
-							q.evidence.takeIf { it.isNotBlank() },
-						).joinToString(" · ")
+						val badges = buildList {
+							if (presentation.isLossless) add("无损" to MaterialTheme.colorScheme.primary)
+							if (presentation.isPreviewOnly) add("仅试听片段" to MaterialTheme.colorScheme.tertiary)
+							if (presentation.needsLogin) add("需账号权限" to MaterialTheme.colorScheme.error)
+						}
 						Row(
 							modifier = Modifier
 								.fillMaxWidth()
@@ -1967,28 +1990,32 @@ private fun IosDiscoverTrackQualitySheet(
 									horizontalArrangement = Arrangement.spacedBy(6.dp),
 								) {
 									Text(
-										text = displayLabel,
+										text = presentation.title,
 										style = MaterialTheme.typography.bodyMedium,
 										fontWeight = FontWeight.Medium,
 										color = MaterialTheme.colorScheme.onSurface,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+										modifier = Modifier.weight(1f, fill = false),
 									)
-									if (q.lossless) {
+									badges.forEach { (badgeLabel, badgeColor) ->
 										Surface(
 											shape = RoundedCornerShape(6.dp),
-											color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+											color = badgeColor.copy(alpha = 0.12f),
 										) {
 											Text(
-												text = "无损",
+												text = badgeLabel,
 												style = MaterialTheme.typography.labelSmall,
-												color = MaterialTheme.colorScheme.primary,
+												color = badgeColor,
+												maxLines = 1,
 												modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
 											)
 										}
 									}
 								}
-								if (detailParts.isNotBlank()) {
+								presentation.bitrateText?.takeIf { it.isNotBlank() }?.let { bitrate ->
 									Text(
-										text = detailParts,
+										text = bitrate,
 										style = MaterialTheme.typography.bodySmall.tabularNums(),
 										color = MaterialTheme.colorScheme.onSurfaceVariant,
 										maxLines = 1,
@@ -1996,12 +2023,24 @@ private fun IosDiscoverTrackQualitySheet(
 									)
 								}
 							}
-							Icon(
-								imageVector = Icons.Outlined.CloudDownload,
-								contentDescription = "下载",
-								tint = MaterialTheme.colorScheme.primary,
-								modifier = Modifier.size(18.dp),
-							)
+							Row(
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								presentation.sizeText?.takeIf { it.isNotBlank() }?.let { sizeText ->
+									Text(
+										text = sizeText,
+										style = MaterialTheme.typography.labelSmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+								}
+								Icon(
+									imageVector = Icons.Outlined.CloudDownload,
+									contentDescription = "下载",
+									tint = MaterialTheme.colorScheme.primary,
+									modifier = Modifier.size(18.dp),
+								)
+							}
 						}
 						if (idx < track.qualities.lastIndex) {
 							IosHairlineDivider(startIndent = 14.dp)

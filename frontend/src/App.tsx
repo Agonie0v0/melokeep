@@ -41,7 +41,12 @@ import {
 import { ApiError, api } from "./api";
 import { formatLibraryRefreshNotice } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
-import { selectResults } from "./results";
+import {
+  formatFileSizeBytes,
+  formatFriendlyQuality,
+  resolveTrackDisplaySize,
+  selectResults,
+} from "./results";
 import { parseLrc, clock, type LyricLine } from "./lyrics";
 import {
   DEFAULT_PLAYER_PREFS,
@@ -100,12 +105,6 @@ function loadInitialLyricsOffsetMs(): number {
     return 0;
   }
 }
-const bytes = (n: number) =>
-  n < 1024
-    ? `${n} B`
-    : n < 1048576
-      ? `${(n / 1024).toFixed(1)} KB`
-      : `${(n / 1048576).toFixed(1)} MB`;
 const playbackSignature = (list: Track[], fromQueue: boolean) =>
   `${fromQueue ? "q" : "l"}:${list.map((t) => t.id).join("\0")}`;
 function buildShuffledTracks(
@@ -1428,20 +1427,38 @@ export function App() {
       setNotice(`已自动跳过 ${skippedCount} 首已在本地/Navidrome 的曲目`);
     }
     items = downloadable;
+    const canProbeSize = items.length <= 8;
+    const needsVersionResolve = (t: Track) => !t.qualities.length;
+    const needsSizeProbe = (t: Track) =>
+      canProbeSize &&
+      t.qualities.length > 0 &&
+      t.qualities.every(
+        (q) =>
+          (typeof q.size_bytes !== "number" || q.size_bytes <= 0) &&
+          !q.size_label?.trim(),
+      ) &&
+      !t.qualities.some((q) => q.evidence === "engine");
     try {
-      if (items.some((t) => !t.qualities.length))
+      if (items.some(needsVersionResolve)) {
         setNotice("正在确认可下载音质…");
+      } else if (items.some(needsSizeProbe) && skippedCount === 0) {
+        setNotice("正在获取音质文件大小…");
+      }
       const prepared: Track[] = [];
       for (let offset = 0; offset < items.length; offset += 4) {
         prepared.push(
           ...(await Promise.all(
-            items
-              .slice(offset, offset + 4)
-              .map((t) =>
-                t.qualities.length
-                  ? t
-                  : api<Track>(`/tracks/${t.id}/versions`, "POST"),
-              ),
+            items.slice(offset, offset + 4).map((t) => {
+              if (needsVersionResolve(t)) {
+                return api<Track>(`/tracks/${t.id}/versions`, "POST");
+              }
+              if (needsSizeProbe(t)) {
+                return api<Track>(`/tracks/${t.id}/versions`, "POST")
+                  .then((next) => (next.qualities.length ? next : t))
+                  .catch(() => t);
+              }
+              return t;
+            }),
           )),
         );
       }
@@ -2207,11 +2224,11 @@ export function App() {
           <tbody>
             {display.map((track, index) => {
               const primaryQuality = track.qualities[0];
+              const primaryFriendly = primaryQuality
+                ? formatFriendlyQuality(primaryQuality, track)
+                : null;
               const extraCount = Math.max(0, track.qualities.length - 1);
-              const sizeText =
-                track.size_bytes != null
-                  ? bytes(track.size_bytes)
-                  : track.size_label || "—";
+              const sizeText = resolveTrackDisplaySize(track);
               return (
                 <tr
                   key={`${track.id}:${index}`}
@@ -2301,22 +2318,41 @@ export function App() {
                         className="quality"
                         aria-label={`选择 ${track.title} 下载版本`}
                         title={
-                          track.qualities.map((q) => q.label).join(" / ") ||
-                          "点击查看可用音质"
+                          track.qualities.length
+                            ? track.qualities
+                                .map(
+                                  (q) => formatFriendlyQuality(q, track).title,
+                                )
+                                .join(" / ")
+                            : "点击查看可用音质"
                         }
                         onClick={() => chooseDownload([track])}
                       >
-                        {primaryQuality ? (
+                        {primaryQuality && primaryFriendly ? (
                           <>
                             <span
-                              className={`quality-inline ${primaryQuality.lossless ? "is-lossless" : ""}`}
+                              className={`quality-inline ${primaryFriendly.isLossless ? "is-lossless" : ""}`}
                               title={
                                 primaryQuality.evidence === "engine"
-                                  ? "原音源解析器返回的实际版本"
-                                  : `${primaryQuality.availability === "login_required" ? "需要登录 · " : ""}音源标注，下载前验证`
+                                  ? [
+                                      primaryFriendly.title,
+                                      primaryFriendly.subtitle,
+                                      "已确认可用版本",
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")
+                                  : [
+                                      primaryFriendly.title,
+                                      primaryFriendly.subtitle,
+                                      primaryFriendly.needsLogin
+                                        ? "需要账号权限"
+                                        : "点击选择并确认下载音质",
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")
                               }
                             >
-                              {primaryQuality.label}
+                              {primaryFriendly.title}
                             </span>
                             {extraCount > 0 && (
                               <span className="quality-more">
@@ -3195,7 +3231,7 @@ export function App() {
                           {job.download_source &&
                             ` · ${sources.find((source) => source.id === job.download_source)?.label || job.download_source}`}
                           {job.total_bytes || job.bytes
-                            ? ` · ${bytes(job.bytes)}${job.total_bytes ? ` / ${bytes(job.total_bytes)}` : ""}`
+                            ? ` · ${formatFileSizeBytes(job.bytes)}${job.total_bytes ? ` / ${formatFileSizeBytes(job.total_bytes)}` : ""}`
                             : ""}
                           {job.detail && ` · ${job.detail}`}
                         </small>
@@ -3707,28 +3743,54 @@ export function App() {
                   {track.title} · {track.artist}
                 </legend>
                 {track.qualities.length ? (
-                  track.qualities.map((q) => (
-                    <label className="version-option" key={q.id}>
-                      <input
-                        type="radio"
-                        name={track.id}
-                        value={q.id}
-                        checked={qualities[track.id] === q.id}
-                        onChange={() =>
-                          setQualities((previous) => ({
-                            ...previous,
-                            [track.id]: q.id,
-                          }))
-                        }
-                      />
-                      <span>
-                        {q.label}
-                        {q.availability === "login_required" && (
-                          <small>需要账号权限</small>
-                        )}
-                      </span>
-                    </label>
-                  ))
+                  track.qualities.map((q) => {
+                    const friendly = formatFriendlyQuality(q, track);
+                    return (
+                      <label className="version-option" key={q.id}>
+                        <input
+                          type="radio"
+                          name={track.id}
+                          value={q.id}
+                          checked={qualities[track.id] === q.id}
+                          onChange={() =>
+                            setQualities((previous) => ({
+                              ...previous,
+                              [track.id]: q.id,
+                            }))
+                          }
+                        />
+                        <span className="version-option-main">
+                          <span className="version-option-title">
+                            {friendly.title}
+                          </span>
+                          {friendly.bitrateText && (
+                            <span className="version-option-bitrate">
+                              {friendly.bitrateText}
+                            </span>
+                          )}
+                          {friendly.badges.map((badge) => (
+                            <small
+                              key={badge}
+                              className={`version-option-badge ${
+                                badge === "仅试听片段"
+                                  ? "is-preview"
+                                  : "is-login"
+                              }`}
+                            >
+                              {badge}
+                            </small>
+                          ))}
+                        </span>
+                        <span
+                          className={`version-option-size ${
+                            friendly.sizeText ? "" : "is-unknown"
+                          }`}
+                        >
+                          {friendly.sizeText || "—"}
+                        </span>
+                      </label>
+                    );
+                  })
                 ) : (
                   <p>音源未提供音质信息，请选择其他曲目或音源。</p>
                 )}

@@ -6,8 +6,11 @@
 
 package paige.navic.melokeep
 
+import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -39,98 +43,89 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import coil3.ImageLoader
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
 import paige.navic.di.LocalNavStack
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.playback.EqualizerManager
 import paige.navic.domain.manager.playback.StreamCacheManager
 import paige.navic.domain.manager.runtime.PreferenceManager
-import paige.navic.domain.manager.runtime.StorageManager
 import paige.navic.domain.manager.session.SessionManager
 import paige.navic.domain.manager.session.SessionState
+import paige.navic.domain.manager.session.SyncManager
 import paige.navic.domain.model.settings.BottomBarCollapseMode
-import paige.navic.domain.model.settings.BottomBarVisibilityMode
 import paige.navic.domain.model.settings.CoverArtShape
 import paige.navic.domain.model.settings.EqualizerMode
+import paige.navic.domain.model.settings.OfflineMode
 import paige.navic.domain.model.settings.ReplayGainMode
 import paige.navic.domain.model.settings.StreamingQuality
+import paige.navic.domain.model.settings.ThemeMode
+import paige.navic.domain.model.settings.UpdateCheckFrequency
+import paige.navic.ui.component.sheet.ChangelogViewModel
+import paige.navic.ui.component.sheet.UpdateCheckFeedback
 import paige.navic.ui.icons.Icons
+import paige.navic.ui.icons.filled.BottomNavigation
+import paige.navic.ui.icons.filled.Headphones
+import paige.navic.ui.icons.filled.Palette
 import paige.navic.ui.icons.outlined.ChevronForward
+import paige.navic.ui.icons.outlined.Info
+import paige.navic.ui.icons.outlined.Lyrics
+import paige.navic.ui.icons.outlined.Refresh
+import paige.navic.ui.icons.outlined.Statistics
 import paige.navic.ui.navigation.Screen
-import paige.navic.ui.theme.positive
+import paige.navic.ui.theme.MeloStudioPresets
 import paige.navic.ui.theme.tabularNums
 import paige.navic.util.toFileSize
 import kotlin.math.roundToInt
 
 // =============================================================================
-// 1. 统一设置首页（Apple Notes / Linear 极简分组）
+// 1. 统一设置首页与共享 Profile Hub 主体
 // =============================================================================
 
 @Composable
 fun MeloStudioSettingsHomeScreen(
 	onBack: (() -> Unit)? = null
 ) {
-	val preferenceManager = koinInject<PreferenceManager>()
-	val sessionManager = koinInject<SessionManager>()
-	val meloSettingsStore = koinInject<MeloSettingsStore>()
-	val equalizerManager = koinInject<EqualizerManager>()
-	val streamCacheManager = koinInject<StreamCacheManager>()
-	val storageManager = koinInject<StorageManager>()
-	val imageLoader = koinInject<ImageLoader>()
 	val backStack = LocalNavStack.current
-	val snackBarState = LocalSnackBarState.current
-	val scope = rememberCoroutineScope()
-
-	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
-	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
-	val eqConfig by equalizerManager.config.collectAsStateWithLifecycle()
-
-	var currentSheet by rememberSaveable { mutableStateOf<String?>(null) }
-	var streamCacheBytes by remember { mutableLongStateOf(0L) }
-	var imageCacheBytes by remember { mutableLongStateOf(0L) }
-	var cacheSizeLoaded by remember { mutableStateOf(false) }
-	var clearingCache by remember { mutableStateOf(false) }
-
-	LaunchedEffect(currentSheet) {
-		val (streamSize, imgSize) = withContext(Dispatchers.IO) {
-			streamCacheManager.size to (imageLoader.diskCache?.size ?: 0L)
-		}
-		streamCacheBytes = streamSize
-		imageCacheBytes = imgSize
-		cacheSizeLoaded = true
-	}
-
 	val resolvedBack = SettingsRememberBackAction(onBack)
 	val openOnboarding = dropUnlessResumed {
 		if (backStack.lastOrNull() != Screen.MeloOnboarding) {
 			backStack.add(Screen.MeloOnboarding)
 		}
 	}
-	val openMeloSources = dropUnlessResumed {
-		if (backStack.lastOrNull() != Screen.Settings.MeloKeep) {
-			backStack.add(Screen.Settings.MeloKeep)
+	val openPhoneDownloads = dropUnlessResumed {
+		if (backStack.lastOrNull() != Screen.PhoneDownloads) {
+			backStack.add(Screen.PhoneDownloads)
 		}
 	}
 
@@ -145,307 +140,1062 @@ fun MeloStudioSettingsHomeScreen(
 			)
 		}
 	) { innerPadding ->
-		LazyColumn(
+		MeloProfileHubBody(
 			modifier = Modifier
 				.fillMaxSize()
 				.padding(innerPadding)
 				.background(MaterialTheme.colorScheme.background),
-			contentPadding = PaddingValues(
-				start = 16.dp,
-				end = 16.dp,
-				top = 8.dp,
-				bottom = 28.dp
-			),
-			verticalArrangement = Arrangement.spacedBy(20.dp)
-		) {
-			// 1. 界面
-			item(key = "section-ui", contentType = "settings-section") {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "界面")
-					MeloGroupedCard {
-						SettingsToggleRow(
-							title = "下滑隐藏底栏",
-							checked = preferenceManager.bottomBarCollapseMode == BottomBarCollapseMode.OnScroll,
-							onCheckedChange = { enabled ->
-								preferenceManager.bottomBarCollapseMode = if (enabled) {
-									BottomBarCollapseMode.OnScroll
-								} else {
-									BottomBarCollapseMode.Never
-								}
-							}
-						)
+			bottomContentPadding = 28.dp,
+			onOpenOnboarding = openOnboarding,
+			onOpenPhoneDownloads = openPhoneDownloads
+		)
+	}
+}
 
-						MeloHairlineDivider(startIndent = 16.dp)
+@Composable
+internal fun MeloProfileHubBody(
+	modifier: Modifier = Modifier,
+	bottomContentPadding: Dp,
+	onOpenOnboarding: () -> Unit,
+	onOpenPhoneDownloads: (() -> Unit)? = null
+) {
+	val meloSettingsStore = koinInject<MeloSettingsStore>()
+	val sessionManager = koinInject<SessionManager>()
+	val syncManager = koinInject<SyncManager>()
+	val equalizerManager = koinInject<EqualizerManager>()
+	val streamCacheManager = koinInject<StreamCacheManager>()
+	val imageLoader = koinInject<ImageLoader>()
+	val preferenceManager = koinInject<PreferenceManager>()
+	val backStack = LocalNavStack.current
+	val snackBarState = LocalSnackBarState.current
+	val context = LocalContext.current
+	val lifecycleOwner = LocalLifecycleOwner.current
 
-						Column(
-							modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-							verticalArrangement = Arrangement.spacedBy(8.dp)
-						) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.SpaceBetween,
-								verticalAlignment = Alignment.CenterVertically
-							) {
-								Text(
-									text = "封面圆角",
-									style = MaterialTheme.typography.bodyMedium,
-									fontWeight = FontWeight.Medium
-								)
-								Text(
-									text = SettingsCoverShapeLabel(preferenceManager.coverArtShape),
-									style = MaterialTheme.typography.bodySmall,
-									color = MaterialTheme.colorScheme.onSurfaceVariant
-								)
-							}
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(6.dp)
-							) {
-								CoverArtShape.entries.forEach { shape ->
-									SettingsChoicePill(
-										label = SettingsCoverShapeLabel(shape),
-										selected = preferenceManager.coverArtShape == shape,
-										onClick = { preferenceManager.coverArtShape = shape },
-										modifier = Modifier.weight(1f)
-									)
-								}
-							}
-						}
+	val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+	val changelogViewModel = if (activityOwner != null) {
+		koinViewModel<ChangelogViewModel>(viewModelStoreOwner = activityOwner)
+	} else {
+		koinViewModel<ChangelogViewModel>()
+	}
 
-						MeloHairlineDivider(startIndent = 16.dp)
+	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
+	val studioPreset by meloSettingsStore.studioThemePreset.collectAsStateWithLifecycle()
+	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
+	val syncState by syncManager.syncState.collectAsStateWithLifecycle()
+	val eqConfig by equalizerManager.config.collectAsStateWithLifecycle()
+	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
+	val availableRelease by changelogViewModel.release.collectAsStateWithLifecycle()
+	val appVersionName = rememberMeloVersionName()
+	val positiveColor = rememberThemePositiveColor()
 
-						SettingsToggleRow(
-							title = "二级页显示播放栏",
-							checked = preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens,
-							onCheckedChange = { showAll ->
-								preferenceManager.bottomBarVisibilityMode = if (showAll) {
-									BottomBarVisibilityMode.AllScreens
-								} else {
-									BottomBarVisibilityMode.Default
-								}
-							}
-						)
-					}
-				}
+	var streamCacheBytes by remember { mutableLongStateOf(0L) }
+	var imageCacheBytes by remember { mutableLongStateOf(0L) }
+	var cacheSizeLoaded by remember { mutableStateOf(false) }
+	var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+
+	var currentSheet by rememberSaveable { mutableStateOf<String?>(null) }
+	var initialServerTab by rememberSaveable { mutableIntStateOf(0) }
+
+	DisposableEffect(lifecycleOwner) {
+		val observer = LifecycleEventObserver { _, event ->
+			if (event == Lifecycle.Event.ON_RESUME) {
+				hasOverlayPermission = Settings.canDrawOverlays(context)
 			}
-
-			// 2. 歌词与播放页（合并原重复偏移卡片与二级歌词入口）
-			item(key = "section-lyrics", contentType = "settings-section") {
-				val fontSizeLabel = "${preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f).roundToInt()}sp"
-				val offsetMs = preferenceManager.playerLyricsOffsetMs
-				val offsetLabel = when {
-					offsetMs > 0 -> "+${offsetMs}ms"
-					offsetMs < 0 -> "${offsetMs}ms"
-					else -> "0ms"
-				}
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "歌词与播放页")
-					MeloGroupedCard {
-						SettingsNavRow(
-							title = "歌词与播放页",
-							value = "$fontSizeLabel · 偏移 $offsetLabel",
-							onClick = { currentSheet = "lyrics" }
-						)
-					}
-				}
-			}
-
-			// 3. 音频
-			item(key = "section-audio", contentType = "settings-section") {
-				val wifiTag = SettingsQualityShortTag(preferenceManager.streamingQualityWifi)
-				val cellTag = SettingsQualityShortTag(preferenceManager.streamingQualityCellular)
-				val eqSummary = when (eqConfig.mode) {
-					EqualizerMode.BuiltIn -> "内置 EQ"
-					EqualizerMode.External -> "系统音效"
-					EqualizerMode.Disabled -> "关闭"
-				}
-				val rgSummary = when (preferenceManager.replayGainMode) {
-					ReplayGainMode.Off -> null
-					ReplayGainMode.Track -> "单曲增益"
-					ReplayGainMode.Album -> "专辑增益"
-					ReplayGainMode.Dynamic -> "动态增益"
-				}
-				val eqValue = listOfNotNull(eqSummary, rgSummary).joinToString(" · ")
-
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "音频")
-					MeloGroupedCard {
-						SettingsToggleRow(
-							title = "无缝播放",
-							checked = preferenceManager.gaplessPlayback,
-							onCheckedChange = { preferenceManager.gaplessPlayback = it }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "流媒体与离线音质",
-							value = "Wi-Fi $wifiTag · 移动 $cellTag",
-							onClick = { currentSheet = "audio" }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "均衡器与增益",
-							value = eqValue,
-							onClick = { currentSheet = "equalizer" }
-						)
-					}
-				}
-			}
-
-			// 4. 服务
-			item(key = "section-services", contentType = "settings-section") {
-				val navidromeConnected = sessionState !is SessionState.Unauthenticated
-				val navidromeStatus = when (sessionState) {
-					is SessionState.Authenticated -> "已连接"
-					is SessionState.Restoring -> "连接中"
-					SessionState.Unauthenticated -> "未连接"
-				}
-
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "服务")
-					MeloGroupedCard {
-						SettingsNavRow(
-							title = meloConfig.effectiveName,
-							value = if (meloConfig.isAuthenticated) "已连接" else "未连接",
-							statusConnected = meloConfig.isAuthenticated,
-							onClick = { currentSheet = "melokeep" }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = preferenceManager.navidromeServerName.trim().ifBlank { "Navidrome" },
-							value = navidromeStatus,
-							statusConnected = navidromeConnected,
-							onClick = { currentSheet = "connection" }
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "连接向导",
-							onClick = openOnboarding
-						)
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "音源与代理",
-							onClick = openMeloSources
-						)
-					}
-				}
-			}
-
-			// 5. 存储与同步
-			item(key = "section-storage", contentType = "settings-section") {
-				val totalCacheBytes = streamCacheBytes + imageCacheBytes
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					MeloSectionLabel(title = "存储与同步")
-					MeloGroupedCard {
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(horizontal = 16.dp, vertical = 12.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(10.dp)
-						) {
-							Text(
-								text = "临时缓存",
-								style = MaterialTheme.typography.bodyMedium,
-								fontWeight = FontWeight.Medium,
-								modifier = Modifier.weight(1f)
-							)
-							Text(
-								text = if (cacheSizeLoaded) totalCacheBytes.toFileSize() else "…",
-								style = MaterialTheme.typography.bodySmall.tabularNums(),
-								color = MaterialTheme.colorScheme.onSurfaceVariant
-							)
-							if (totalCacheBytes > 0L) {
-								Text(
-									text = if (clearingCache) "清理中" else "清理",
-									style = MaterialTheme.typography.labelMedium,
-									color = MaterialTheme.colorScheme.primary,
-									modifier = Modifier
-										.clip(RoundedCornerShape(6.dp))
-										.clickable(enabled = !clearingCache) {
-											clearingCache = true
-											scope.launch {
-												withContext(Dispatchers.IO) {
-													streamCacheManager.clear()
-													imageLoader.memoryCache?.clear()
-													imageLoader.diskCache?.clear()
-													storageManager.clearCoverArts()
-												}
-												streamCacheBytes = 0L
-												imageCacheBytes = 0L
-												clearingCache = false
-												snackBarState.currentSnackbarData?.dismiss()
-												snackBarState.showSnackbar("已清理临时缓存")
-											}
-										}
-										.padding(horizontal = 6.dp, vertical = 3.dp)
-								)
-							}
-						}
-
-						MeloHairlineDivider(startIndent = 16.dp)
-
-						SettingsNavRow(
-							title = "离线模式与索引同步",
-							onClick = { currentSheet = "storage" }
-						)
-					}
-				}
-			}
-
-			// 6. 极简版本尾注
-			item(key = "section-version", contentType = "settings-version") {
-				val appVersionName = rememberMeloVersionName()
-				Text(
-					text = "MeloKeep v$appVersionName",
-					style = MaterialTheme.typography.labelSmall.tabularNums(),
-					color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-					textAlign = TextAlign.Center,
-					modifier = Modifier
-						.fillMaxWidth()
-						.padding(top = 4.dp)
-				)
-			}
+		}
+		lifecycleOwner.lifecycle.addObserver(observer)
+		onDispose {
+			lifecycleOwner.lifecycle.removeObserver(observer)
 		}
 	}
 
-	MeloKeepConnectionSheet(
-		presented = currentSheet == "melokeep",
+	// 兼容旧配置为 ManualOnly 的用户：当自动检查开启时自动归一回 Daily
+	LaunchedEffect(preferenceManager.checkForUpdates, preferenceManager.updateCheckFrequency) {
+		if (preferenceManager.checkForUpdates &&
+			preferenceManager.updateCheckFrequency == UpdateCheckFrequency.ManualOnly
+		) {
+			preferenceManager.updateCheckFrequency = UpdateCheckFrequency.Daily
+		}
+	}
+
+	LaunchedEffect(currentSheet) {
+		val (stream, image) = withContext(Dispatchers.IO) {
+			streamCacheManager.size to (imageLoader.diskCache?.size ?: 0L)
+		}
+		streamCacheBytes = stream
+		imageCacheBytes = image
+		cacheSizeLoaded = true
+	}
+
+	LaunchedEffect(checkFeedback) {
+		when (val fb = checkFeedback) {
+			is UpdateCheckFeedback.UpToDate -> {
+				snackBarState.currentSnackbarData?.dismiss()
+				snackBarState.showSnackbar("当前已是最新版本 (v$appVersionName)")
+			}
+			is UpdateCheckFeedback.Error -> {
+				snackBarState.currentSnackbarData?.dismiss()
+				snackBarState.showSnackbar(fb.message)
+			}
+			else -> {}
+		}
+	}
+
+	val tempCacheBytes = streamCacheBytes + imageCacheBytes
+	val cacheDisplayText = if (cacheSizeLoaded) tempCacheBytes.toFileSize() else "…"
+	val updateTag = (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag
+		?: availableRelease?.tagName?.takeIf { it.isNotBlank() }
+	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
+	val normalizedNewTag = updateTag?.let { "v" + it.trim().removePrefix("v").removePrefix("V") }
+
+	val navidromeConnected = sessionState !is SessionState.Unauthenticated
+	val navidromeStatusText = when (sessionState) {
+		is SessionState.Authenticated -> "已连接"
+		is SessionState.Restoring -> "连接中"
+		SessionState.Unauthenticated -> "未连接"
+	}
+	val navidromeDisplayName = preferenceManager.navidromeServerName.trim().ifBlank { "Navidrome" }
+
+	// 功能域底托柔和色调
+	val serviceContainer = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)
+	val serviceTint = MaterialTheme.colorScheme.primary
+	val audioContainer = positiveColor.copy(alpha = 0.13f)
+	val audioTint = positiveColor
+	val appearanceContainer = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)
+	val appearanceTint = MaterialTheme.colorScheme.tertiary
+	val systemContainer = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.11f)
+	val systemTint = MaterialTheme.colorScheme.onSurfaceVariant
+
+	LazyColumn(
+		modifier = modifier,
+		contentPadding = PaddingValues(
+			start = 16.dp,
+			end = 16.dp,
+			top = 8.dp,
+			bottom = bottomContentPadding
+		),
+		verticalArrangement = Arrangement.spacedBy(20.dp)
+	) {
+		// 顶部双服务状态总览卡
+		item(key = "hub-overview", contentType = "hub-overview") {
+			HubServicesOverviewCard(
+				meloName = meloConfig.effectiveName,
+				meloConnected = meloConfig.isAuthenticated,
+				navidromeName = navidromeDisplayName,
+				navidromeConnected = navidromeConnected,
+				navidromeRestoring = sessionState is SessionState.Restoring,
+				navidromeStatusText = navidromeStatusText,
+				cacheText = cacheDisplayText,
+				appVersionName = appVersionName,
+				hasNewVersion = !isChecking && normalizedNewTag != null,
+				positiveColor = positiveColor,
+				onOpenOnboarding = onOpenOnboarding,
+				onOpenMeloKeep = {
+					initialServerTab = 0
+					currentSheet = "servers"
+				},
+				onOpenNavidrome = {
+					initialServerTab = 1
+					currentSheet = "servers"
+				},
+				onOpenVersion = { currentSheet = "version" }
+			)
+		}
+
+		// 1. 服务与同步
+		item(key = "hub-services-sync", contentType = "hub-group") {
+			val meloShort = if (meloConfig.isAuthenticated) "MeloKeep 已连" else "MeloKeep 未连"
+			val naviShort = when (sessionState) {
+				is SessionState.Authenticated -> "Navidrome 已连"
+				is SessionState.Restoring -> "Navidrome 连接中"
+				SessionState.Unauthenticated -> "Navidrome 未连"
+			}
+			val connectionSummary = when {
+				meloConfig.isAuthenticated && sessionState is SessionState.Authenticated -> "MeloKeep · Navidrome 已连接"
+				else -> "$meloShort · $naviShort"
+			}
+			val offlineLabel = when (preferenceManager.offlineMode) {
+				OfflineMode.Auto -> "在线模式"
+				OfflineMode.Forced -> "离线模式"
+				OfflineMode.NoWiFi -> "仅 Wi-Fi"
+			}
+			val syncLabel = when {
+				syncState.isSyncing -> "同步中"
+				preferenceManager.lastFullSyncTime > 0L -> "已索引"
+				else -> "待同步"
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "服务与同步")
+				MeloGroupedCard {
+					HubSettingsRow(
+						icon = MeloIcons.Cloud,
+						iconTint = serviceTint,
+						iconContainerColor = serviceContainer,
+						title = "服务器连接",
+						value = connectionSummary,
+						onClick = {
+							initialServerTab = if (meloConfig.isAuthenticated || !navidromeConnected) 0 else 1
+							currentSheet = "servers"
+						}
+					)
+					MeloHairlineDivider(startIndent = 58.dp)
+					HubSettingsRow(
+						icon = Icons.Outlined.Refresh,
+						iconTint = serviceTint,
+						iconContainerColor = serviceContainer,
+						title = "曲库与同步",
+						value = "$offlineLabel · $syncLabel",
+						onClick = { currentSheet = "sync" }
+					)
+					if (meloConfig.isAuthenticated) {
+						MeloHairlineDivider(startIndent = 58.dp)
+						HubSettingsRow(
+							icon = MeloIcons.Bolt,
+							iconTint = serviceTint,
+							iconContainerColor = serviceContainer,
+							title = "音源与代理",
+							value = "服务端与音源配置",
+							onClick = {
+								if (backStack.lastOrNull() != Screen.Settings.MeloKeep) {
+									backStack.add(Screen.Settings.MeloKeep)
+								}
+							}
+						)
+					}
+				}
+			}
+		}
+
+		// 2. 播放与音效
+		item(key = "hub-audio-effects", contentType = "hub-group") {
+			val wifiTag = SettingsQualityShortTag(preferenceManager.streamingQualityWifi)
+			val gaplessTag = if (preferenceManager.gaplessPlayback) "无缝开" else "无缝关"
+			val rgSummary = when (preferenceManager.replayGainMode) {
+				ReplayGainMode.Off -> null
+				ReplayGainMode.Track -> "单曲增益"
+				ReplayGainMode.Album -> "专辑增益"
+				ReplayGainMode.Dynamic -> "动态增益"
+			}
+			val eqSummary = when (eqConfig.mode) {
+				EqualizerMode.BuiltIn -> "内置 EQ"
+				EqualizerMode.External -> "系统音效"
+				EqualizerMode.Disabled -> null
+			}
+			val soundSummary = listOfNotNull(rgSummary, eqSummary)
+				.joinToString(" · ")
+				.ifBlank { "已关闭" }
+
+			val fontSizeLabel = "${preferenceManager.lyricsFontSizeSp.coerceIn(18f, 40f).roundToInt()}sp"
+			val desktopLyricsActive = preferenceManager.desktopLyricsEnabled && hasOverlayPermission
+			val offsetMs = preferenceManager.playerLyricsOffsetMs
+			val offsetLabel = when {
+				offsetMs > 0 -> "+${offsetMs}ms"
+				offsetMs < 0 -> "${offsetMs}ms"
+				else -> "0ms"
+			}
+			val lyricsSummary = if (desktopLyricsActive) {
+				"桌面歌词已开 · $fontSizeLabel"
+			} else {
+				"$fontSizeLabel · 偏移 $offsetLabel"
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "播放与音效")
+				MeloGroupedCard {
+					HubSettingsRow(
+						icon = Icons.Filled.Headphones,
+						iconTint = audioTint,
+						iconContainerColor = audioContainer,
+						title = "音质与播放",
+						value = "Wi-Fi $wifiTag · $gaplessTag",
+						onClick = { currentSheet = "playback" }
+					)
+					MeloHairlineDivider(startIndent = 58.dp)
+					HubSettingsRow(
+						icon = Icons.Outlined.Statistics,
+						iconTint = audioTint,
+						iconContainerColor = audioContainer,
+						title = "音效与增益",
+						value = soundSummary,
+						onClick = { currentSheet = "sound" }
+					)
+					MeloHairlineDivider(startIndent = 58.dp)
+					HubSettingsRow(
+						icon = Icons.Outlined.Lyrics,
+						iconTint = serviceTint,
+						iconContainerColor = serviceContainer,
+						title = "歌词与桌面歌词",
+						value = lyricsSummary,
+						onClick = { currentSheet = "lyrics" }
+					)
+				}
+			}
+		}
+
+		// 3. 外观与交互
+		item(key = "hub-appearance", contentType = "hub-group") {
+			val presetDescriptor = remember(studioPreset) {
+				MeloStudioPresets.all.firstOrNull { it.id == studioPreset }
+					?: MeloStudioPresets.all.first()
+			}
+			val presetShortName = compactHubPresetLabel(presetDescriptor)
+			val themeModeLabel = when (preferenceManager.themeMode) {
+				ThemeMode.System -> "跟随系统"
+				ThemeMode.Dark -> "深色"
+				ThemeMode.Light -> "浅色"
+			}
+			val themeSummary = if (studioPreset == MeloStudioPresets.DYNAMIC) {
+				"$presetShortName · $themeModeLabel"
+			} else {
+				presetShortName
+			}
+			val interfaceSummary = if (preferenceManager.bottomBarCollapseMode == BottomBarCollapseMode.OnScroll) {
+				"下滑隐藏底栏"
+			} else {
+				"底栏常驻"
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "外观与交互")
+				MeloGroupedCard {
+					HubSettingsRow(
+						icon = Icons.Filled.Palette,
+						iconTint = appearanceTint,
+						iconContainerColor = appearanceContainer,
+						title = "主题与外观",
+						value = themeSummary,
+						accentDotColor = presetDescriptor.previewAccent,
+						onClick = { currentSheet = "theme" }
+					)
+					MeloHairlineDivider(startIndent = 58.dp)
+					HubSettingsRow(
+						icon = Icons.Filled.BottomNavigation,
+						iconTint = appearanceTint,
+						iconContainerColor = appearanceContainer,
+						title = "界面与播放页",
+						value = interfaceSummary,
+						onClick = { currentSheet = "interface" }
+					)
+				}
+			}
+		}
+
+		// 4. 存储与系统
+		item(key = "hub-storage-system", contentType = "hub-group") {
+			val versionSummary = when {
+				isChecking -> "检查中…"
+				normalizedNewTag != null -> "发现 $normalizedNewTag"
+				else -> "当前 v$appVersionName"
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(title = "存储与系统")
+				MeloGroupedCard {
+					HubSettingsRow(
+						icon = MeloIcons.Folder,
+						iconTint = systemTint,
+						iconContainerColor = systemContainer,
+						title = "存储与缓存",
+						value = "缓存 $cacheDisplayText",
+						onClick = { currentSheet = "storage" }
+					)
+					MeloHairlineDivider(startIndent = 58.dp)
+					HubSettingsRow(
+						icon = Icons.Outlined.Info,
+						iconTint = systemTint,
+						iconContainerColor = systemContainer,
+						title = "版本与更新",
+						value = versionSummary,
+						badgeDotColor = if (!isChecking && normalizedNewTag != null) {
+							MaterialTheme.colorScheme.error
+						} else {
+							null
+						},
+						valueHighlight = !isChecking && normalizedNewTag != null,
+						onClick = { currentSheet = "version" }
+					)
+				}
+			}
+		}
+
+		// 底部版本尾注
+		item(key = "hub-version-footer", contentType = "hub-version") {
+			Text(
+				text = "MeloKeep v$appVersionName",
+				style = MaterialTheme.typography.labelSmall.tabularNums(),
+				color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+				textAlign = TextAlign.Center,
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(top = 4.dp, bottom = 8.dp)
+			)
+		}
+	}
+
+	MeloServerConnectionsSheet(
+		presented = currentSheet == "servers",
+		initialTab = initialServerTab,
 		onDismissRequest = { currentSheet = null }
 	)
-	MeloNavidromeConnectionSheet(
-		presented = currentSheet == "connection",
+	MeloLibrarySyncSheet(
+		presented = currentSheet == "sync",
 		onDismissRequest = { currentSheet = null }
 	)
-	MeloLyricsAndStageSheet(
+	MeloPlaybackAndQualitySheet(
+		presented = currentSheet == "playback",
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloSoundAndGainSheet(
+		presented = currentSheet == "sound",
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloLyricsSettingsSheet(
 		presented = currentSheet == "lyrics",
 		onDismissRequest = { currentSheet = null }
 	)
-	MeloAudioEngineSheet(
-		presented = currentSheet == "audio",
+	MeloThemeAppearanceSheet(
+		presented = currentSheet == "theme",
 		onDismissRequest = { currentSheet = null }
 	)
-	MeloEqualizerSheet(
-		presented = currentSheet == "equalizer",
+	MeloInterfaceGesturesSheet(
+		presented = currentSheet == "interface",
 		onDismissRequest = { currentSheet = null }
 	)
-	MeloStorageAndAboutSheet(
+	MeloStorageCacheSheet(
 		presented = currentSheet == "storage",
+		onOpenPhoneDownloads = onOpenPhoneDownloads,
+		onCacheCleared = {
+			streamCacheBytes = 0L
+			imageCacheBytes = 0L
+		},
+		onDismissRequest = { currentSheet = null }
+	)
+	MeloVersionUpdateSheet(
+		presented = currentSheet == "version",
 		onDismissRequest = { currentSheet = null }
 	)
 }
 
+@Composable
+private fun HubServicesOverviewCard(
+	meloName: String,
+	meloConnected: Boolean,
+	navidromeName: String,
+	navidromeConnected: Boolean,
+	navidromeRestoring: Boolean,
+	navidromeStatusText: String,
+	cacheText: String,
+	appVersionName: String,
+	hasNewVersion: Boolean,
+	positiveColor: Color,
+	onOpenOnboarding: () -> Unit,
+	onOpenMeloKeep: () -> Unit,
+	onOpenNavidrome: () -> Unit,
+	onOpenVersion: () -> Unit
+) {
+	MeloGroupedCard {
+		Column(modifier = Modifier.fillMaxWidth()) {
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp, vertical = 14.dp),
+				verticalArrangement = Arrangement.spacedBy(12.dp)
+			) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically
+				) {
+					Text(
+						text = "连接与状态",
+						style = MaterialTheme.typography.titleSmall,
+						fontWeight = FontWeight.SemiBold,
+						color = MaterialTheme.colorScheme.onSurface
+					)
+					Row(
+						modifier = Modifier
+							.clip(RoundedCornerShape(8.dp))
+							.clickable(onClick = onOpenOnboarding)
+							.padding(horizontal = 6.dp, vertical = 3.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(2.dp)
+					) {
+						Text(
+							text = "连接向导",
+							style = MaterialTheme.typography.labelMedium,
+							fontWeight = FontWeight.Medium,
+							color = MaterialTheme.colorScheme.primary
+						)
+						Icon(
+							imageVector = Icons.Outlined.ChevronForward,
+							contentDescription = null,
+							tint = MaterialTheme.colorScheme.primary,
+							modifier = Modifier.size(14.dp)
+						)
+					}
+				}
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					HubServiceStatusPill(
+						title = meloName,
+						statusText = if (meloConnected) "已连接" else "未连接",
+						dotColor = if (meloConnected) {
+							positiveColor
+						} else {
+							MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+						},
+						highlighted = meloConnected,
+						positiveColor = positiveColor,
+						onClick = onOpenMeloKeep,
+						modifier = Modifier.weight(1f)
+					)
+
+					HubServiceStatusPill(
+						title = navidromeName,
+						statusText = navidromeStatusText,
+						dotColor = when {
+							navidromeRestoring -> MaterialTheme.colorScheme.primary
+							navidromeConnected -> positiveColor
+							else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+						},
+						highlighted = navidromeConnected && !navidromeRestoring,
+						positiveColor = positiveColor,
+						onClick = onOpenNavidrome,
+						modifier = Modifier.weight(1f)
+					)
+				}
+			}
+
+			MeloHairlineDivider()
+
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.clickable(onClick = onOpenVersion)
+					.padding(horizontal = 16.dp, vertical = 10.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween
+			) {
+				Text(
+					text = "缓存 $cacheText · 当前 v$appVersionName",
+					style = MaterialTheme.typography.labelMedium.tabularNums(),
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+					modifier = Modifier.weight(1f)
+				)
+				if (hasNewVersion) {
+					Spacer(modifier = Modifier.width(8.dp))
+					Row(
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(5.dp)
+					) {
+						Box(
+							modifier = Modifier
+								.size(6.dp)
+								.clip(CircleShape)
+								.background(MaterialTheme.colorScheme.error)
+						)
+						Text(
+							text = "发现新版本",
+							style = MaterialTheme.typography.labelMedium,
+							fontWeight = FontWeight.SemiBold,
+							color = MaterialTheme.colorScheme.primary
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun HubServiceStatusPill(
+	title: String,
+	statusText: String,
+	dotColor: Color,
+	highlighted: Boolean,
+	positiveColor: Color,
+	onClick: () -> Unit,
+	modifier: Modifier = Modifier
+) {
+	Surface(
+		onClick = onClick,
+		shape = RoundedCornerShape(12.dp),
+		color = if (highlighted) {
+			positiveColor.copy(alpha = 0.08f)
+		} else {
+			MaterialTheme.colorScheme.surfaceContainerHigh
+		},
+		border = BorderStroke(
+			width = MeloHairlineWidth,
+			color = if (highlighted) {
+				positiveColor.copy(alpha = 0.34f)
+			} else {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+			}
+		),
+		modifier = modifier
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 12.dp, vertical = 10.dp),
+			verticalArrangement = Arrangement.spacedBy(4.dp)
+		) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.SemiBold,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(6.dp)
+			) {
+				Box(
+					modifier = Modifier
+						.size(7.dp)
+						.clip(CircleShape)
+						.background(dotColor)
+				)
+				Text(
+					text = statusText,
+					style = MaterialTheme.typography.labelSmall,
+					color = if (highlighted) positiveColor else MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis
+				)
+			}
+		}
+	}
+}
+
+@Composable
+internal fun HubSettingsRow(
+	icon: ImageVector,
+	iconTint: Color,
+	iconContainerColor: Color,
+	title: String,
+	onClick: () -> Unit,
+	subtitle: String? = null,
+	value: String? = null,
+	accentDotColor: Color? = null,
+	badgeDotColor: Color? = null,
+	valueHighlight: Boolean = false
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clickable(onClick = onClick)
+			.padding(horizontal = 14.dp, vertical = 12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp)
+	) {
+		Box(
+			modifier = Modifier
+				.size(32.dp)
+				.clip(RoundedCornerShape(9.dp))
+				.background(iconContainerColor),
+			contentAlignment = Alignment.Center
+		) {
+			Icon(
+				imageVector = icon,
+				contentDescription = null,
+				tint = iconTint,
+				modifier = Modifier.size(18.dp)
+			)
+		}
+
+		Column(
+			modifier = Modifier.weight(1f),
+			verticalArrangement = Arrangement.spacedBy(2.dp)
+		) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Medium,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			if (!subtitle.isNullOrBlank()) {
+				Text(
+					text = subtitle,
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis
+				)
+			}
+		}
+
+		Row(
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(6.dp)
+		) {
+			if (badgeDotColor != null) {
+				Box(
+					modifier = Modifier
+						.size(7.dp)
+						.clip(CircleShape)
+						.background(badgeDotColor)
+				)
+			}
+			if (!value.isNullOrBlank()) {
+				Text(
+					text = value,
+					style = MaterialTheme.typography.bodySmall.tabularNums(),
+					fontWeight = if (valueHighlight) FontWeight.SemiBold else FontWeight.Normal,
+					color = if (valueHighlight) {
+						MaterialTheme.colorScheme.primary
+					} else {
+						MaterialTheme.colorScheme.onSurfaceVariant
+					},
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+					modifier = Modifier.widthIn(max = 152.dp)
+				)
+			}
+			if (accentDotColor != null) {
+				Box(
+					modifier = Modifier
+						.size(10.dp)
+						.clip(CircleShape)
+						.background(accentDotColor)
+						.border(
+							width = MeloHairlineWidth,
+							color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+							shape = CircleShape
+						)
+				)
+			}
+			Icon(
+				imageVector = Icons.Outlined.ChevronForward,
+				contentDescription = null,
+				tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+				modifier = Modifier.size(17.dp)
+			)
+		}
+	}
+}
+
+private fun compactHubPresetLabel(descriptor: MeloStudioPresets.Descriptor): String = when (descriptor.id) {
+	MeloStudioPresets.OBSIDIAN -> "曜石黑"
+	MeloStudioPresets.VINYL_GOLD -> "流金黑"
+	MeloStudioPresets.PURE_LIGHT -> "纯净白"
+	MeloStudioPresets.DYNAMIC -> "跟随封面"
+	else -> descriptor.title
+}
+
 // =============================================================================
-// 2. 子面板 Screen & Sheet 外壳（100% 保留既有公开函数签名）
+// 2. 新层级二级 Sheet 集合
+// =============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloServerConnectionsSheet(
+	presented: Boolean,
+	initialTab: Int = 0,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	val meloSettingsStore = koinInject<MeloSettingsStore>()
+	val sessionManager = koinInject<SessionManager>()
+	val preferenceManager = koinInject<PreferenceManager>()
+	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
+	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
+	val positiveColor = rememberThemePositiveColor()
+
+	var selectedTab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
+	val navidromeConnected = sessionState !is SessionState.Unauthenticated
+	val navidromeLabel = preferenceManager.navidromeServerName.trim().ifBlank { "Navidrome" }
+
+	SettingsSheetShell(
+		title = "服务器连接",
+		onDismissRequest = onDismissRequest,
+		imePadding = true
+	) {
+		Surface(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 16.dp, vertical = 6.dp),
+			shape = RoundedCornerShape(12.dp),
+			color = MaterialTheme.colorScheme.surfaceContainer,
+			border = BorderStroke(
+				width = MeloHairlineWidth,
+				color = MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
+			)
+		) {
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(4.dp),
+				horizontalArrangement = Arrangement.spacedBy(6.dp)
+			) {
+				ServerTabSegmentPill(
+					label = meloConfig.effectiveName,
+					connected = meloConfig.isAuthenticated,
+					selected = selectedTab == 0,
+					positiveColor = positiveColor,
+					onClick = { selectedTab = 0 },
+					modifier = Modifier.weight(1f)
+				)
+				ServerTabSegmentPill(
+					label = navidromeLabel,
+					connected = navidromeConnected,
+					selected = selectedTab == 1,
+					positiveColor = positiveColor,
+					onClick = { selectedTab = 1 },
+					modifier = Modifier.weight(1f)
+				)
+			}
+		}
+
+		if (selectedTab == 0) {
+			SettingsMeloKeepConnectionPanel(
+				modifier = Modifier
+					.fillMaxWidth()
+					.weight(1f, fill = false),
+				nestedInSheet = true
+			)
+		} else {
+			SettingsNavidromeConnectionPanel(
+				modifier = Modifier
+					.fillMaxWidth()
+					.weight(1f, fill = false),
+				nestedInSheet = true
+			)
+		}
+	}
+}
+
+@Composable
+private fun ServerTabSegmentPill(
+	label: String,
+	connected: Boolean,
+	selected: Boolean,
+	positiveColor: Color,
+	onClick: () -> Unit,
+	modifier: Modifier = Modifier
+) {
+	Surface(
+		onClick = onClick,
+		shape = RoundedCornerShape(9.dp),
+		color = if (selected) {
+			MaterialTheme.colorScheme.primary
+		} else {
+			Color.Transparent
+		},
+		modifier = modifier
+	) {
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 10.dp, vertical = 8.dp),
+			horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+			verticalAlignment = Alignment.CenterVertically
+		) {
+			Box(
+				modifier = Modifier
+					.size(6.dp)
+					.clip(CircleShape)
+					.background(
+						when {
+							selected && connected -> MaterialTheme.colorScheme.onPrimary
+							selected -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.45f)
+							connected -> positiveColor
+							else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+						}
+					)
+			)
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelLarge,
+				fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+				color = if (selected) {
+					MaterialTheme.colorScheme.onPrimary
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+		}
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloLibrarySyncSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "曲库与同步",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsLibrarySyncPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloPlaybackAndQualitySheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "音质与播放",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsPlaybackAndQualityPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloSoundAndGainSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "音效与增益",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsSoundAndGainPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloLyricsSettingsSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "歌词与桌面歌词",
+		onDismissRequest = onDismissRequest,
+		imePadding = true
+	) {
+		SettingsLyricsSettingsPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloThemeAppearanceSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "主题与外观",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsThemeAppearancePanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloInterfaceGesturesSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "界面与播放页",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsInterfaceGesturesPanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloStorageCacheSheet(
+	presented: Boolean,
+	onOpenPhoneDownloads: (() -> Unit)? = null,
+	onCacheCleared: () -> Unit = {},
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	SettingsSheetShell(
+		title = "存储与缓存",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsStorageCachePanel(
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true,
+			onOpenPhoneDownloads = onOpenPhoneDownloads?.let { action ->
+				{
+					onDismissRequest()
+					action()
+				}
+			},
+			onCacheCleared = onCacheCleared
+		)
+	}
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MeloVersionUpdateSheet(
+	presented: Boolean,
+	onDismissRequest: () -> Unit
+) {
+	if (!presented) return
+	val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+	val changelogViewModel = if (activityOwner != null) {
+		koinViewModel<ChangelogViewModel>(viewModelStoreOwner = activityOwner)
+	} else {
+		koinViewModel<ChangelogViewModel>()
+	}
+	val appVersionName = rememberMeloVersionName()
+
+	SettingsSheetShell(
+		title = "版本与更新",
+		onDismissRequest = onDismissRequest
+	) {
+		SettingsVersionUpdatePanel(
+			changelogViewModel = changelogViewModel,
+			appVersionName = appVersionName,
+			modifier = Modifier.fillMaxWidth(),
+			nestedInSheet = true
+		)
+	}
+}
+
+// =============================================================================
+// 3. 向后兼容子面板 Screen & Sheet 外壳（100% 保留既有公开函数签名）
 // =============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -500,8 +1250,9 @@ fun MeloNavidromeConnectionSheet(
 @Composable
 fun MeloLyricsAndStageScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "歌词与播放页",
-		onBack = onBack
+		title = "歌词与桌面歌词",
+		onBack = onBack,
+		imePadding = true
 	) { modifier ->
 		SettingsLyricsAndStagePanel(modifier = modifier)
 	}
@@ -513,22 +1264,16 @@ fun MeloLyricsAndStageSheet(
 	presented: Boolean,
 	onDismissRequest: () -> Unit
 ) {
-	if (!presented) return
-	SettingsSheetShell(
-		title = "歌词与播放页",
+	MeloLyricsSettingsSheet(
+		presented = presented,
 		onDismissRequest = onDismissRequest
-	) {
-		SettingsLyricsAndStagePanel(
-			modifier = Modifier.fillMaxWidth(),
-			nestedInSheet = true
-		)
-	}
+	)
 }
 
 @Composable
 fun MeloAudioEngineScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "音质与增益",
+		title = "音质与播放",
 		onBack = onBack
 	) { modifier ->
 		SettingsAudioEnginePanel(modifier = modifier)
@@ -541,22 +1286,16 @@ fun MeloAudioEngineSheet(
 	presented: Boolean,
 	onDismissRequest: () -> Unit
 ) {
-	if (!presented) return
-	SettingsSheetShell(
-		title = "音质与增益",
+	MeloPlaybackAndQualitySheet(
+		presented = presented,
 		onDismissRequest = onDismissRequest
-	) {
-		SettingsAudioEnginePanel(
-			modifier = Modifier.fillMaxWidth(),
-			nestedInSheet = true
-		)
-	}
+	)
 }
 
 @Composable
 fun MeloStorageAndAboutScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "离线模式与索引同步",
+		title = "曲库与同步",
 		onBack = onBack
 	) { modifier ->
 		SettingsStorageAndAboutPanel(modifier = modifier)
@@ -569,25 +1308,19 @@ fun MeloStorageAndAboutSheet(
 	presented: Boolean,
 	onDismissRequest: () -> Unit
 ) {
-	if (!presented) return
-	SettingsSheetShell(
-		title = "离线模式与索引同步",
+	MeloLibrarySyncSheet(
+		presented = presented,
 		onDismissRequest = onDismissRequest
-	) {
-		SettingsStorageAndAboutPanel(
-			modifier = Modifier.fillMaxWidth(),
-			nestedInSheet = true
-		)
-	}
+	)
 }
 
 @Composable
 fun MeloEqualizerScreen(onBack: (() -> Unit)? = null) {
 	SettingsScreenShell(
-		title = "均衡器",
+		title = "音效与增益",
 		onBack = onBack
 	) { modifier ->
-		SettingsEqualizerPanel(modifier = modifier)
+		SettingsSoundAndGainPanel(modifier = modifier)
 	}
 }
 
@@ -597,20 +1330,14 @@ fun MeloEqualizerSheet(
 	presented: Boolean,
 	onDismissRequest: () -> Unit
 ) {
-	if (!presented) return
-	SettingsSheetShell(
-		title = "均衡器",
+	MeloSoundAndGainSheet(
+		presented = presented,
 		onDismissRequest = onDismissRequest
-	) {
-		SettingsEqualizerPanel(
-			modifier = Modifier.fillMaxWidth(),
-			nestedInSheet = true
-		)
-	}
+	)
 }
 
 // =============================================================================
-// 3. 跨设置文件共享辅助组件（统一 Settings 前缀防命名冲突）
+// 4. 跨设置文件共享辅助组件（统一 Settings 前缀防命名冲突）
 // =============================================================================
 
 @Composable
@@ -647,7 +1374,7 @@ private fun SettingsSheetShell(
 	title: String,
 	onDismissRequest: () -> Unit,
 	imePadding: Boolean = false,
-	content: @Composable () -> Unit
+	content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 	ModalBottomSheet(
@@ -688,28 +1415,48 @@ internal fun SettingsRememberBackAction(onBack: (() -> Unit)?): (() -> Unit)? {
 internal fun SettingsToggleRow(
 	title: String,
 	checked: Boolean,
-	onCheckedChange: (Boolean) -> Unit
+	onCheckedChange: (Boolean) -> Unit,
+	subtitle: String? = null,
+	enabled: Boolean = true
 ) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.clickable { onCheckedChange(!checked) }
+			.clickable(enabled = enabled) { onCheckedChange(!checked) }
 			.padding(horizontal = 16.dp, vertical = 10.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.SpaceBetween
 	) {
-		Text(
-			text = title,
-			style = MaterialTheme.typography.bodyMedium,
-			fontWeight = FontWeight.Medium,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.weight(1f)
-		)
+		Column(
+			modifier = Modifier.weight(1f),
+			verticalArrangement = Arrangement.spacedBy(2.dp)
+		) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Medium,
+				color = if (enabled) {
+					MaterialTheme.colorScheme.onSurface
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			if (!subtitle.isNullOrBlank()) {
+				Text(
+					text = subtitle,
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 2,
+					overflow = TextOverflow.Ellipsis
+				)
+			}
+		}
 		Spacer(modifier = Modifier.width(12.dp))
 		Switch(
 			checked = checked,
+			enabled = enabled,
 			onCheckedChange = onCheckedChange,
 			colors = SwitchDefaults.colors(
 				checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
@@ -726,6 +1473,7 @@ internal fun SettingsNavRow(
 	statusConnected: Boolean? = null,
 	onClick: () -> Unit
 ) {
+	val positiveColor = rememberThemePositiveColor()
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -740,7 +1488,7 @@ internal fun SettingsNavRow(
 					.size(7.dp)
 					.clip(CircleShape)
 					.background(
-						if (statusConnected) MaterialTheme.colorScheme.positive
+						if (statusConnected) positiveColor
 						else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
 					)
 			)

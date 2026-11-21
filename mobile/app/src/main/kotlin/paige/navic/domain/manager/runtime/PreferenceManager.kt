@@ -214,4 +214,12 @@ class PreferenceManager(
 	var dangerousSslNoopEnabled by preference(false)
 	var alternateServerAddresses by jsonPreference<List<String>>(emptyList())
 	var navidromeServerName by preference("")
+
+	// device local music scan & sort settings
+	var deviceMusicExcludedFolders by jsonPreference<Set<String>>(emptySet())
+	var deviceMusicSafTreeUris by jsonPreference<Set<String>>(emptySet())
+	var deviceMusicMinDurationSec by preference(60)
+	var deviceMusicMinSizeKb by preference(0)
+	var deviceMusicHiddenIds by jsonPreference<Set<String>>(emptySet())
+	var deviceMusicSortOrder by preference("title")
 }

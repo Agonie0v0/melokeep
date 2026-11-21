@@ -16,6 +16,9 @@ import (
 )
 
 const (
+	// DefaultUserAgent mimics a modern desktop Chrome browser so audio CDNs do not reject Go's default UA.
+	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
 	maxID3ProbeBytes     = 1024 * 1024 // 1 MiB cap matching native_engine.probe_audio
 	maxAudioProbeTimeout = 8 * time.Second
 )
@@ -106,12 +109,12 @@ func (a *TransportAdapter) DoBytes(ctx context.Context, engineName string, metho
 			return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "构造请求失败", err)
 		}
 		for k, v := range mergedHeaders {
-			if v != "" {
+			if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
 				req.Header.Set(k, v)
 			}
 		}
 		if req.Header.Get("User-Agent") == "" {
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36")
+			req.Header.Set("User-Agent", DefaultUserAgent)
 		}
 		if len(mergedCookies) > 0 && req.Header.Get("Cookie") == "" {
 			req.Header.Set("Cookie", FormatCookieHeader(mergedCookies))
@@ -234,12 +237,12 @@ func (a *TransportAdapter) ProbeAudioWithAllowedOrigins(ctx context.Context, eng
 		return ProbeResult{}, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效音频地址", err)
 	}
 	for k, v := range headers {
-		if v != "" {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
 			req.Header.Set(k, v)
 		}
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36")
+		req.Header.Set("User-Agent", DefaultUserAgent)
 	}
 	if includePlatformAuth {
 		merged := make(map[string]string, len(cfgCookies)+len(cookies))

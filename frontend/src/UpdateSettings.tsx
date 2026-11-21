@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpCircle,
   Check,
+  CircleAlert,
   Copy,
   ExternalLink,
   GitCommitHorizontal,
   RefreshCw,
 } from "lucide-react";
 import { AIMarkdown } from "./AIMarkdown";
+import { Modal } from "./components";
 import {
   applySystemUpdate,
   checkSystemHealth,
@@ -16,6 +18,7 @@ import {
 import type { SelfUpdateStatus, SystemUpdateInfo } from "./types";
 import {
   DOCKER_SOCK_COMPOSE_LINE,
+  DOCKER_SOCK_RUN_FLAG,
   formatSelfUpdateState,
   getSelfUpdateActionMode,
 } from "./update-utils";
@@ -66,6 +69,51 @@ function safeExternalHref(raw?: string | null): string | null {
   }
 }
 
+function DockerSockSnippets({
+  prefix,
+  copiedKey,
+  onCopy,
+}: {
+  prefix: string;
+  copiedKey: string;
+  onCopy: (key: string, value: string) => void;
+}) {
+  const rows = [
+    {
+      key: `${prefix}-compose`,
+      label: "docker-compose.yml（volumes）",
+      value: DOCKER_SOCK_COMPOSE_LINE,
+      buttonText: "复制挂载行",
+    },
+    {
+      key: `${prefix}-run`,
+      label: "docker run 参数",
+      value: DOCKER_SOCK_RUN_FLAG,
+      buttonText: "复制参数",
+    },
+  ];
+  return (
+    <div className="update-sock-rows">
+      {rows.map((row) => (
+        <div className="update-command-row" key={row.key}>
+          <div className="update-sock-snippet">
+            <span className="update-sock-label">{row.label}</span>
+            <code>{row.value}</code>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onCopy(row.key, row.value)}
+          >
+            {copiedKey === row.key ? <Check /> : <Copy />}
+            {copiedKey === row.key ? "已复制" : row.buttonText}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function UpdateSettings({
   info,
   checking,
@@ -77,15 +125,26 @@ export function UpdateSettings({
   error: string;
   onCheck: (force: boolean) => Promise<void>;
 }) {
-  const [copied, setCopied] = useState(false);
-  const [sockCopied, setSockCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState("");
+  const copyTimerRef = useRef<number | undefined>(undefined);
+  const topCardRef = useRef<HTMLElement>(null);
   const [selfUpdate, setSelfUpdate] = useState<SelfUpdateStatus | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<
+    "update" | "force_pull" | null
+  >(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [healthPhase, setHealthPhase] = useState<
     "idle" | "waiting_restart" | "ready_reloading" | "timeout"
   >("idle");
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== undefined) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!info && !checking) {
@@ -198,11 +257,14 @@ export function UpdateSettings({
 
   const dockerCommand = "docker compose pull && docker compose up -d";
 
-  async function copyText(value: string, onSuccess: (state: boolean) => void) {
+  async function copyText(key: string, value: string) {
     try {
       await navigator.clipboard.writeText(value);
-      onSuccess(true);
-      window.setTimeout(() => onSuccess(false), 2000);
+      setCopiedKey(key);
+      if (copyTimerRef.current !== undefined) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedKey(""), 2000);
     } catch {
       /* Clipboard may be unavailable in insecure HTTP contexts. */
     }
@@ -210,9 +272,16 @@ export function UpdateSettings({
 
   async function startSelfUpdate() {
     if (applyBusy || selfState.isRunning || healthPhase !== "idle") return;
+    const fromBottom = confirmMode === "force_pull";
     setApplyBusy(true);
     setActionError("");
-    setConfirmOpen(false);
+    setConfirmMode(null);
+    if (fromBottom) {
+      topCardRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
     try {
       const next = await applySystemUpdate();
       setSelfUpdate(next);
@@ -234,7 +303,7 @@ export function UpdateSettings({
 
   return (
     <div className="settings-form update-settings">
-      <section className="settings-section">
+      <section ref={topCardRef} className="settings-section">
         <div className="update-header">
           <div>
             <h2>
@@ -253,37 +322,9 @@ export function UpdateSettings({
             </h2>
           </div>
           <div className="update-header-actions">
-            {actionMode === "primary" && !updatingNow && (
-              <button
-                type="button"
-                className="primary"
-                disabled={checking || applyBusy}
-                onClick={() => {
-                  setActionError("");
-                  setConfirmOpen(true);
-                }}
-              >
-                <ArrowUpCircle aria-hidden="true" />
-                立即更新
-              </button>
-            )}
-            {actionMode === "secondary" && !updatingNow && (
-              <button
-                type="button"
-                className="secondary"
-                disabled={checking || applyBusy}
-                onClick={() => {
-                  setActionError("");
-                  setConfirmOpen(true);
-                }}
-              >
-                <ArrowUpCircle aria-hidden="true" />
-                拉取最新镜像并重启
-              </button>
-            )}
             <button
               type="button"
-              className={actionMode === "primary" ? "secondary" : "primary"}
+              className={info?.has_update ? "secondary" : "primary"}
               disabled={checking || updatingNow}
               onClick={() => void onCheck(true)}
             >
@@ -328,6 +369,30 @@ export function UpdateSettings({
           </div>
         </dl>
 
+        {current?.in_container && actionMode === "disabled_hint" && (
+          <div className="update-sock-callout" role="note">
+            <div className="update-sock-callout-head">
+              <CircleAlert aria-hidden="true" />
+              <strong>
+                {effectiveSelfUpdate?.mode === "docker_socket"
+                  ? "Web 一键更新暂不可用（docker.sock 访问异常）"
+                  : "未挂载 /var/run/docker.sock，暂不支持 Web 一键更新"}
+              </strong>
+            </div>
+            <p className="update-sock-callout-desc">
+              {effectiveSelfUpdate?.mode === "docker_socket" &&
+              effectiveSelfUpdate.reason
+                ? effectiveSelfUpdate.reason
+                : "当前容器未检测到宿主机 /var/run/docker.sock 挂载，因此无法通过网页直接拉取镜像并重启容器。请按下方任一方式添加挂载后重启容器："}
+            </p>
+            <DockerSockSnippets
+              prefix="callout"
+              copiedKey={copiedKey}
+              onCopy={(key, value) => void copyText(key, value)}
+            />
+          </div>
+        )}
+
         {issue && (
           <p className="update-alert" role="alert">
             {issue}
@@ -351,38 +416,6 @@ export function UpdateSettings({
           <p className="update-alert" role="alert">
             等待新版本就绪超时（超过 120 秒），请手动刷新页面或检查容器日志。
           </p>
-        )}
-
-        {confirmOpen && !updatingNow && (
-          <div
-            className="update-confirm-box"
-            role="region"
-            aria-label="确认更新"
-          >
-            <p>
-              更新期间服务将短暂重启约 5–10 秒，挂载的 <code>/music</code> 与{" "}
-              <code>/data</code> 数据会完整保留。
-            </p>
-            <div className="update-confirm-actions">
-              <button
-                type="button"
-                className="secondary"
-                disabled={applyBusy}
-                onClick={() => setConfirmOpen(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={applyBusy}
-                onClick={() => void startSelfUpdate()}
-              >
-                <ArrowUpCircle aria-hidden="true" />
-                {applyBusy ? "正在提交…" : "确认更新"}
-              </button>
-            </div>
-          </div>
         )}
 
         {(selfState.showProgress ||
@@ -434,12 +467,6 @@ export function UpdateSettings({
           </div>
         )}
 
-        {actionMode === "disabled_hint" && effectiveSelfUpdate?.reason && (
-          <p className="update-hint" role="note">
-            Web 一键更新未启用：{effectiveSelfUpdate.reason}
-          </p>
-        )}
-
         {info && !issue && info.has_update && info.latest && (
           <div className="update-summary" role="status">
             <div>
@@ -460,7 +487,7 @@ export function UpdateSettings({
                   disabled={checking || applyBusy}
                   onClick={() => {
                     setActionError("");
-                    setConfirmOpen(true);
+                    setConfirmMode("update");
                   }}
                 >
                   <ArrowUpCircle aria-hidden="true" />
@@ -550,34 +577,46 @@ export function UpdateSettings({
               <button
                 type="button"
                 className="secondary"
-                onClick={() => void copyText(dockerCommand, setCopied)}
+                onClick={() => void copyText("docker-cmd", dockerCommand)}
               >
-                {copied ? <Check /> : <Copy />}
-                {copied ? "已复制" : "复制命令"}
+                {copiedKey === "docker-cmd" ? <Check /> : <Copy />}
+                {copiedKey === "docker-cmd" ? "已复制" : "复制命令"}
               </button>
             </div>
             {actionMode === "disabled_hint" && (
-              <details className="library-advanced update-sock-guide">
-                <summary>如何开启 Web 单容器一键更新？</summary>
+              <div className="update-sock-guide">
+                <strong>开启 Web 单容器一键更新</strong>
                 <p>
                   只需在宿主机 <code>docker-compose.yml</code> 的{" "}
-                  <code>volumes:</code> 下增加一行挂载并重启容器，即可在 Web
+                  <code>volumes:</code> 下增加挂载行，或在{" "}
+                  <code>docker run</code> 中传入挂载参数并重启容器，即可在 Web
                   端一键拉取最新镜像并平滑更新：
                 </p>
-                <div className="update-command-row">
-                  <code>{DOCKER_SOCK_COMPOSE_LINE}</code>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() =>
-                      void copyText(DOCKER_SOCK_COMPOSE_LINE, setSockCopied)
-                    }
-                  >
-                    {sockCopied ? <Check /> : <Copy />}
-                    {sockCopied ? "已复制" : "复制挂载配置"}
-                  </button>
-                </div>
-              </details>
+                <DockerSockSnippets
+                  prefix="guide"
+                  copiedKey={copiedKey}
+                  onCopy={(key, value) => void copyText(key, value)}
+                />
+              </div>
+            )}
+            {actionMode === "up_to_date" && (
+              <div className="update-force-row">
+                <span>
+                  当前已是最新版本；如需刷新当前标签镜像或重建容器，可手动重新拉取并重启。
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={checking || updatingNow}
+                  onClick={() => {
+                    setActionError("");
+                    setConfirmMode("force_pull");
+                  }}
+                >
+                  <ArrowUpCircle aria-hidden="true" />
+                  强制重新拉取当前镜像并重启
+                </button>
+              </div>
             )}
           </>
         ) : (
@@ -588,6 +627,47 @@ export function UpdateSettings({
           </p>
         )}
       </section>
+
+      {confirmMode && !updatingNow && (
+        <Modal
+          title={
+            confirmMode === "force_pull"
+              ? "确认重新拉取当前镜像并重启"
+              : "确认更新系统"
+          }
+          close={applyBusy ? undefined : () => setConfirmMode(null)}
+        >
+          <p className="update-confirm-copy">
+            {confirmMode === "force_pull"
+              ? "将重新拉取当前镜像标签并重建容器。重启期间服务将短暂中断约 5–10 秒，挂载的 "
+              : "更新期间服务将短暂重启约 5–10 秒，挂载的 "}
+            <code>/music</code> 与 <code>/data</code> 数据会完整保留。
+          </p>
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={applyBusy}
+              onClick={() => setConfirmMode(null)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={applyBusy}
+              onClick={() => void startSelfUpdate()}
+            >
+              <ArrowUpCircle aria-hidden="true" />
+              {applyBusy
+                ? "正在提交…"
+                : confirmMode === "force_pull"
+                  ? "确认拉取并重启"
+                  : "确认更新"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

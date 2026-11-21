@@ -6,6 +6,8 @@ export interface Quality {
   lossless: boolean;
   availability: string;
   evidence: string;
+  size_bytes?: number | null;
+  size_label?: string | null;
 }
 export interface Track {
   playlist_index?: number;

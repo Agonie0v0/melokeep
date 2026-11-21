@@ -799,3 +799,311 @@ func TestToDTOPreservesSizeMetadataAndVariantFallback(t *testing.T) {
 		t.Fatalf("expected SizeBytes=%d fallback from variant, got %v", varSz, dto2.Track.SizeBytes)
 	}
 }
+
+func TestDownloadRejectsGoDefaultUAAndUsesBrowserUA(t *testing.T) {
+	payload := sampleMP3Bytes(t)
+	coverBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	var audioUA, audioReferer, emptyHdr, coverUA atomic.Value
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := r.Header.Get("User-Agent")
+		if ua == "" || strings.Contains(ua, "Go-http-client") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.URL.Path == "/cover.jpg" {
+			coverUA.Store(ua)
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Content-Length", strconv.Itoa(len(coverBytes)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(coverBytes)
+			return
+		}
+		audioUA.Store(ua)
+		audioReferer.Store(r.Header.Get("Referer"))
+		if vals := r.Header.Values("X-Empty"); len(vals) > 0 {
+			emptyHdr.Store(strings.Join(vals, ","))
+		} else {
+			emptyHdr.Store("")
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	prov := &stubProvider{
+		id: "AudiusMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			return []model.ResolvedMedia{{
+				VariantID: "mp3_320",
+				Variant:   track.Variants[0],
+				URL:       srv.URL + "/audio.mp3",
+				Codec:     "mp3",
+				Headers: map[string]string{
+					"User-Agent": "   ",
+					"X-Empty":    "",
+					"Referer":    "https://music.163.com/",
+				},
+			}}, nil
+		},
+	}
+
+	st, svc, _, _ := setupDownloadEnv(t, prov, nil)
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	snap := config.NewSnapshot(config.DefaultRuntimeConfig(), config.DefaultResourceBudgets())
+
+	br320 := 320
+	metaJSON := fmt.Sprintf(`{"cover":%q}`, srv.URL+"/cover.jpg")
+	trackID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		Source:       "AudiusMusicClient",
+		Locator:      "ua-check-1",
+		RootSource:   "StubMusicClient",
+		Title:        "UASong",
+		Artist:       "ArtistUA",
+		Album:        "AlbumUA",
+		DurationMS:   120000,
+		MetadataJSON: metaJSON,
+	}, []model.MediaVariant{{VariantID: "ua_mp3_320", UpstreamID: "mp3_320", Label: "320kbps MP3", Codec: "mp3", Bitrate: &br320, Availability: "full"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubID := "pub-ua-check-1"
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: pubID, Kind: "candidate", TargetID: trackID, Source: "AudiusMusicClient", SourceID: "ua-check-1",
+	}, "ua_mp3_320"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{PublicID: pubID, QualityID: "mp3_320"})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	done := waitForStatus(t, svc, res.Download.ID, model.DownloadComplete, 5*time.Second)
+	if done.File == nil {
+		t.Fatalf("expected downloaded file token, got nil")
+	}
+	if got, _ := audioUA.Load().(string); got != provider.DefaultUserAgent {
+		t.Fatalf("expected audio User-Agent %q, got %q", provider.DefaultUserAgent, got)
+	}
+	if got, _ := audioReferer.Load().(string); got != "https://music.163.com/" {
+		t.Fatalf("expected Referer preserved, got %q", got)
+	}
+	if got, _ := emptyHdr.Load().(string); got != "" {
+		t.Fatalf("expected empty X-Empty header skipped, got %q", got)
+	}
+	if got, _ := coverUA.Load().(string); got != provider.DefaultUserAgent {
+		t.Fatalf("expected cover User-Agent %q, got %q", provider.DefaultUserAgent, got)
+	}
+
+	// Verify downloadHLS also injects DefaultUserAgent and preserves 403 status as ErrAuthRequired.
+	hlsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") != provider.DefaultUserAgent {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if len(r.Header.Values("X-Blank")) > 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer hlsSrv.Close()
+	_, _, hlsErr := downloadHLS(
+		ctx, svc.pool, svc.runner,
+		model.ResolvedMedia{
+			URL:     hlsSrv.URL + "/index.m3u8",
+			Headers: map[string]string{"User-Agent": "", "X-Blank": "  "},
+		},
+		provider.RequestContext{Config: snap},
+		filepath.Join(t.TempDir(), "hls"),
+		"hls-ua-test",
+		10<<20,
+		5*time.Second,
+		nil,
+	)
+	de, ok := model.AsDomainError(hlsErr)
+	if !ok || de.Status != http.StatusForbidden || de.Code != model.ErrAuthRequired {
+		t.Fatalf("expected HLS 403 ErrAuthRequired after sending DefaultUserAgent, got %v", hlsErr)
+	}
+}
+
+func TestDownloadFallbackToNextCandidateOn403AndUpdatesBytesTotal(t *testing.T) {
+	flacPayload := sampleMP3Bytes(t)
+	mp3Payload := sampleWAVBytes()
+	var hitOrder []string
+	var hitMu sync.Mutex
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitMu.Lock()
+		hitOrder = append(hitOrder, r.URL.Path)
+		hitMu.Unlock()
+		switch r.URL.Path {
+		case "/primary-403.flac":
+			w.WriteHeader(http.StatusForbidden)
+		case "/primary-404.flac":
+			w.WriteHeader(http.StatusNotFound)
+		case "/alt-410.flac":
+			w.WriteHeader(http.StatusGone)
+		case "/fallback-mp3.mp3":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			w.Header().Set("Content-Length", strconv.Itoa(len(mp3Payload)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(mp3Payload)
+		case "/fallback-flac.flac":
+			w.Header().Set("Content-Type", "audio/flac")
+			w.Header().Set("Content-Length", strconv.Itoa(len(flacPayload)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(flacPayload)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var logMu sync.Mutex
+	var logs []string
+	var scenario atomic.Int32
+	primarySize := int64(999999)
+	flacFallbackSize := int64(len(flacPayload))
+	mp3FallbackSize := int64(len(mp3Payload))
+
+	prov := &stubProvider{
+		id: "AudiusMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			switch scenario.Load() {
+			case 0:
+				return []model.ResolvedMedia{
+					{
+						VariantID: "flac_sq",
+						Variant:   model.MediaVariant{VariantID: "flac_sq", Label: "FLAC", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/primary-403.flac",
+						Codec:     "flac",
+						SizeBytes: &primarySize,
+					},
+					{
+						VariantID: "mp3_320",
+						Variant:   model.MediaVariant{VariantID: "mp3_320", Label: "MP3", Codec: "mp3", Lossless: false},
+						URL:       srv.URL + "/fallback-mp3.mp3",
+						Codec:     "mp3",
+						SizeBytes: &mp3FallbackSize,
+					},
+					{
+						VariantID: "flac_alt",
+						Variant:   model.MediaVariant{VariantID: "flac_alt", Label: "FLAC Alt", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/fallback-flac.flac",
+						Codec:     "flac",
+						SizeBytes: &flacFallbackSize,
+					},
+				}, nil
+			case 1:
+				return []model.ResolvedMedia{
+					{
+						VariantID: "flac_sq",
+						Variant:   model.MediaVariant{VariantID: "flac_sq", Label: "FLAC", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/primary-404.flac",
+						Codec:     "flac",
+						SizeBytes: &primarySize,
+					},
+					{
+						VariantID: "flac_alt_410",
+						Variant:   model.MediaVariant{VariantID: "flac_alt_410", Label: "FLAC 410", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/alt-410.flac",
+						Codec:     "flac",
+					},
+					{
+						VariantID: "mp3_320",
+						Variant:   model.MediaVariant{VariantID: "mp3_320", Label: "MP3", Codec: "mp3", Lossless: false},
+						URL:       srv.URL + "/fallback-mp3.mp3",
+						Codec:     "mp3",
+						SizeBytes: &mp3FallbackSize,
+					},
+				}, nil
+			default:
+				return []model.ResolvedMedia{
+					{
+						VariantID: "flac_sq",
+						Variant:   model.MediaVariant{VariantID: "flac_sq", Label: "FLAC", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/primary-403.flac",
+						Codec:     "flac",
+					},
+					{
+						VariantID: "flac_alt",
+						Variant:   model.MediaVariant{VariantID: "flac_alt", Label: "FLAC Alt", Codec: "flac", Lossless: true},
+						URL:       srv.URL + "/alt-410.flac",
+						Codec:     "flac",
+					},
+				}, nil
+			}
+		},
+	}
+
+	st, svc, _, _ := setupDownloadEnv(t, prov, func(o *Options) {
+		o.MaxAttempts = 1
+		o.Logger = func(level, message, category, taskID string) {
+			logMu.Lock()
+			logs = append(logs, level+":"+message)
+			logMu.Unlock()
+		}
+	})
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	snap := config.NewSnapshot(config.DefaultRuntimeConfig(), config.DefaultResourceBudgets())
+
+	// Case 1: primary FLAC returns 403 -> prioritizes same Lossless/Codec FLAC fallback over MP3.
+	pub1 := seedTrack(t, st, "AudiusMusicClient", "fb-403", "FallbackSong", "ArtistFB")
+	res1, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{PublicID: pub1, QualityID: "flac_sq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done1 := waitForStatus(t, svc, res1.Download.ID, model.DownloadComplete, 5*time.Second)
+	if done1.TotalBytes == nil || *done1.TotalBytes != flacFallbackSize {
+		t.Fatalf("expected TotalBytes=%d from fallback FLAC, got %v", flacFallbackSize, done1.TotalBytes)
+	}
+	hitMu.Lock()
+	gotHits1 := append([]string(nil), hitOrder...)
+	hitOrder = nil
+	hitMu.Unlock()
+	if len(gotHits1) != 2 || gotHits1[0] != "/primary-403.flac" || gotHits1[1] != "/fallback-flac.flac" {
+		t.Fatalf("expected fallback order [/primary-403.flac /fallback-flac.flac], got %v", gotHits1)
+	}
+	logMu.Lock()
+	joinedLogs := strings.Join(logs, "\n")
+	logMu.Unlock()
+	if !strings.Contains(joinedLogs, "warning:首选下载地址返回 403，尝试同次解析的其他候选地址") {
+		t.Fatalf("expected 403 fallback warning log, got:\n%s", joinedLogs)
+	}
+
+	// Case 2: 404 -> 410 -> 200 across multiple candidates.
+	scenario.Store(1)
+	pub2 := seedTrack(t, st, "AudiusMusicClient", "fb-404-410", "Fallback404Song", "ArtistFB")
+	res2, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{PublicID: pub2, QualityID: "flac_sq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done2 := waitForStatus(t, svc, res2.Download.ID, model.DownloadComplete, 5*time.Second)
+	if done2.TotalBytes == nil || *done2.TotalBytes != mp3FallbackSize {
+		t.Fatalf("expected TotalBytes=%d from third candidate, got %v", mp3FallbackSize, done2.TotalBytes)
+	}
+	hitMu.Lock()
+	gotHits2 := append([]string(nil), hitOrder...)
+	hitOrder = nil
+	hitMu.Unlock()
+	if len(gotHits2) != 3 || gotHits2[0] != "/primary-404.flac" || gotHits2[1] != "/alt-410.flac" || gotHits2[2] != "/fallback-mp3.mp3" {
+		t.Fatalf("expected 404->410->200 hit order, got %v", gotHits2)
+	}
+
+	// Case 3: all candidates fail -> finishError transitions task to failed when MaxAttempts=1.
+	scenario.Store(2)
+	pub3 := seedTrack(t, st, "AudiusMusicClient", "fb-all-fail", "AllFailSong", "ArtistFB")
+	res3, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{PublicID: pub3, QualityID: "flac_sq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done3 := waitForStatus(t, svc, res3.Download.ID, model.DownloadFailed, 5*time.Second)
+	if done3.File != nil {
+		t.Fatalf("expected no file on total failure, got %v", done3.File)
+	}
+}

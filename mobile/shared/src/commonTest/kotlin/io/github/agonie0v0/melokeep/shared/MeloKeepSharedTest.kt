@@ -2355,6 +2355,256 @@ class MeloKeepSharedTest {
 
 		httpClient.close()
 	}
+
+	@Test
+	fun qualityDeserializesSizeFieldsAndFormatsFriendlyPresentations() {
+		// 1. Deserialize MeloQuality with and without size_bytes / size_label
+		val trackWithSizesJson = """
+			{
+			  "id": "trk-size-1",
+			  "title": "Mountain Echo",
+			  "artist": "Open Lab",
+			  "duration": 240.0,
+			  "size_bytes": 33973862,
+			  "size_label": "32.4 MB",
+			  "qualities": [
+			    {
+			      "id": "q-flac",
+			      "label": "FLAC 无损 verified",
+			      "codec": "flac",
+			      "bitrate": 980,
+			      "lossless": true,
+			      "availability": "verified",
+			      "evidence": "probed_audio",
+			      "size_bytes": 33973862,
+			      "size_label": "32.4 MB"
+			    },
+			    {
+			      "id": "q-mp3-legacy",
+			      "label": "320k MP3",
+			      "codec": "mp3",
+			      "bitrate": 320,
+			      "lossless": false,
+			      "availability": "candidate",
+			      "evidence": "declared"
+			    }
+			  ],
+			  "playback": {"state": "ready"}
+			}
+		""".trimIndent()
+		val decodedTrack = meloJson.decodeFromString<MeloTrack>(trackWithSizesJson)
+		assertEquals(2, decodedTrack.qualities.size)
+		assertEquals(33973862L, decodedTrack.qualities[0].sizeBytes)
+		assertEquals("32.4 MB", decodedTrack.qualities[0].sizeLabel)
+		assertNull(decodedTrack.qualities[1].sizeBytes)
+		assertNull(decodedTrack.qualities[1].sizeLabel)
+
+		// 2. formatBytes integer rounding across B / KB / MB / GB
+		assertEquals("0 B", MeloQualityFormatter.formatBytes(-10L))
+		assertEquals("0 B", MeloQualityFormatter.formatBytes(0L))
+		assertEquals("512 B", MeloQualityFormatter.formatBytes(512L))
+		assertEquals("1 KB", MeloQualityFormatter.formatBytes(1024L))
+		assertEquals("2 KB", MeloQualityFormatter.formatBytes(1536L))
+		assertEquals("512 KB", MeloQualityFormatter.formatBytes(512L * 1024L))
+		assertEquals("1.0 MB", MeloQualityFormatter.formatBytes(1024L * 1024L))
+		assertEquals("32.4 MB", MeloQualityFormatter.formatBytes(33_973_862L))
+		assertEquals("1.00 GB", MeloQualityFormatter.formatBytes(1024L * 1024L * 1024L))
+		assertEquals("1.23 GB", MeloQualityFormatter.formatBytes(1_320_702_443L))
+		assertEquals("2.00 GB", MeloQualityFormatter.formatBytes(2L * 1024L * 1024L * 1024L - 1L))
+
+		// 3. Size resolution & estimation ("约 XX MB")
+		val qFlacPres = MeloQualityFormatter.formatQuality(decodedTrack.qualities[0], decodedTrack)
+		assertEquals("无损音质 · FLAC", qFlacPres.title)
+		assertEquals("980 kbps", qFlacPres.bitrateText)
+		assertEquals("32.4 MB", qFlacPres.sizeText)
+		assertEquals("980 kbps · 32.4 MB", qFlacPres.subtitle)
+		assertTrue(qFlacPres.isLossless)
+
+		// Multi-quality track: second quality lacks explicit size -> must estimate from duration & bitrate, NOT track.sizeBytes
+		val qMp3Pres = MeloQualityFormatter.formatQuality(decodedTrack.qualities[1], decodedTrack)
+		assertEquals("极高音质 · MP3", qMp3Pres.title)
+		assertEquals("320 kbps", qMp3Pres.bitrateText)
+		assertEquals("约 9.2 MB", qMp3Pres.sizeText)
+		assertEquals("320 kbps · 约 9.2 MB", qMp3Pres.subtitle)
+		assertFalse(qMp3Pres.isLossless)
+
+		// Single-quality track falls back to track.sizeBytes / track.sizeLabel
+		val singleQualityTrack = MeloTrack(
+			id = "trk-single",
+			duration = 200.0,
+			sizeBytes = 12_582_912L,
+			qualities = listOf(MeloQuality(id = "q-single", label = "MP3", codec = "mp3", bitrate = 320)),
+		)
+		assertEquals(
+			"12.0 MB",
+			MeloQualityFormatter.resolveQualitySizeText(singleQualityTrack.qualities.single(), singleQualityTrack),
+		)
+		val singleLabelTrack = MeloTrack(
+			id = "trk-single-label",
+			duration = 200.0,
+			sizeLabel = "  18.5 MB  ",
+			qualities = listOf(MeloQuality(id = "q-lbl", label = "FLAC", codec = "flac", lossless = true)),
+		)
+		assertEquals(
+			"18.5 MB",
+			MeloQualityFormatter.resolveQualitySizeText(singleLabelTrack.qualities.single(), singleLabelTrack),
+		)
+
+		// Lossless track without bitrate defaults to 950 kbps for track & quality size estimation
+		val losslessEstTrack = MeloTrack(
+			id = "trk-lossless-est",
+			duration = 240.0,
+			qualities = listOf(
+				MeloQuality(id = "q-l", label = "FLAC", codec = "flac", lossless = true),
+				MeloQuality(id = "q-m", label = "128k", codec = "mp3", bitrate = 128),
+			),
+		)
+		assertEquals("约 27.2 MB", MeloQualityFormatter.resolveTrackSizeText(losslessEstTrack))
+		assertEquals(
+			"约 27.2 MB",
+			MeloQualityFormatter.resolveQualitySizeText(losslessEstTrack.qualities[0], losslessEstTrack),
+		)
+		assertEquals("32.4 MB", MeloQualityFormatter.resolveTrackSizeText(decodedTrack))
+		assertNull(MeloQualityFormatter.resolveTrackSizeText(MeloTrack(id = "trk-empty", duration = 0.0)))
+
+		// 4. All quality tiers, preview/login flags, codec extraction from label, and internal-word exclusion
+		val internalWords = listOf(
+			"verified",
+			"candidate",
+			"resolved",
+			"full",
+			"probed_audio",
+			"declared",
+			"engine",
+			"probe",
+			"catalog_claim",
+		)
+		val baseTrack = MeloTrack(id = "trk-tiers", duration = 240.0)
+
+		val masterQ = MeloQuality(
+			id = "q-master",
+			label = "臻品母带 Spatial verified",
+			codec = "",
+			bitrate = 2400,
+			lossless = true,
+			availability = "verified",
+			evidence = "probed_audio",
+			sizeLabel = " 85.0 MB ",
+		)
+		val masterPres = MeloQualityFormatter.formatQuality(masterQ, baseTrack)
+		assertEquals("超清母带", masterPres.title)
+		assertEquals("2400 kbps · 85.0 MB", masterPres.subtitle)
+		assertTrue(masterPres.isLossless)
+
+		val hiResQ = MeloQuality(
+			id = "q-hires",
+			label = "Hi-Res 24bit probed_audio",
+			codec = "",
+			bitrate = 1412,
+			lossless = false,
+			availability = "candidate",
+			evidence = "catalog_claim",
+		)
+		val hiResPres = MeloQualityFormatter.formatQuality(hiResQ, baseTrack)
+		assertEquals("高解析无损", hiResPres.title)
+		assertTrue(hiResPres.isLossless)
+
+		val wavQ = MeloQuality(
+			id = "q-wav",
+			label = "WAV 无损 resolved engine",
+			codec = "",
+			bitrate = null,
+			lossless = false,
+			availability = "preview_only",
+			evidence = "probe",
+		)
+		val wavPres = MeloQualityFormatter.formatQuality(wavQ, baseTrack)
+		assertEquals("无损音质 · WAV", wavPres.title)
+		assertTrue(wavPres.isLossless)
+		assertTrue(wavPres.isPreviewOnly)
+		assertFalse(wavPres.needsLogin)
+
+		val highQ = MeloQuality(
+			id = "q-high",
+			label = "192k AAC 试听",
+			codec = "",
+			bitrate = 192,
+			lossless = false,
+			availability = "login_required",
+			evidence = "declared",
+		)
+		val highPres = MeloQualityFormatter.formatQuality(highQ, baseTrack)
+		assertEquals("较高音质 · AAC", highPres.title)
+		assertEquals("192 kbps · 约 5.5 MB", highPres.subtitle)
+		assertFalse(highPres.isLossless)
+		assertTrue(highPres.isPreviewOnly)
+		assertTrue(highPres.needsLogin)
+
+		val stdQ = MeloQuality(
+			id = "q-std",
+			label = "标准 OGG",
+			codec = "",
+			bitrate = 128,
+			lossless = false,
+			availability = "full",
+			evidence = "engine",
+		)
+		val stdPres = MeloQualityFormatter.formatQuality(stdQ, baseTrack)
+		assertEquals("标准音质 · OGG", stdPres.title)
+		assertEquals("128 kbps · 约 3.7 MB", stdPres.subtitle)
+
+		val dirtyOnlyQ = MeloQuality(
+			id = "q-dirty",
+			label = "verified · probed_audio · declared · candidate · engine · resolved · full · probe · catalog_claim",
+			codec = "verified",
+			bitrate = null,
+			lossless = false,
+			availability = "verified",
+			evidence = "catalog_claim",
+		)
+		val dirtyPres = MeloQualityFormatter.formatQuality(dirtyOnlyQ, baseTrack)
+		assertEquals("标准音质", dirtyPres.title)
+		assertEquals("", dirtyPres.subtitle)
+
+		val customLabelQ = MeloQuality(
+			id = "q-custom",
+			label = "官方臻选 (verified)",
+			codec = "mp3",
+			bitrate = null,
+			lossless = false,
+		)
+		val customPres = MeloQualityFormatter.formatQuality(customLabelQ, baseTrack)
+		assertEquals("官方臻选 · MP3", customPres.title)
+
+		val codecOnlyFallbackQ = MeloQuality(
+			id = "q-codec-dup",
+			label = "MP3",
+			codec = "mp3",
+			bitrate = null,
+			lossless = false,
+		)
+		assertEquals("标准音质 · MP3", MeloQualityFormatter.formatQuality(codecOnlyFallbackQ, baseTrack).title)
+
+		val allPresentations = listOf(
+			qFlacPres,
+			qMp3Pres,
+			masterPres,
+			hiResPres,
+			wavPres,
+			highPres,
+			stdPres,
+			dirtyPres,
+			customPres,
+		)
+		for (pres in allPresentations) {
+			val titleLower = pres.title.lowercase()
+			val subLower = pres.subtitle.lowercase()
+			for (word in internalWords) {
+				assertFalse(word in titleLower, "Internal word '$word' leaked into title: '${pres.title}'")
+				assertFalse(word in subLower, "Internal word '$word' leaked into subtitle: '${pres.subtitle}'")
+			}
+		}
+	}
 }
 
 class MeloSourceLabelRegistryTest {

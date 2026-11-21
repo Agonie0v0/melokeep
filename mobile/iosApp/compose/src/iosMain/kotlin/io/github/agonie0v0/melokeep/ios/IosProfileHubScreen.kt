@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,19 +27,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,7 +72,7 @@ import io.github.agonie0v0.melokeep.shared.MeloStudioController
 import kotlinx.coroutines.CancellationException
 
 // =============================================================================
-// 第四 Tab「我的」：极简 Apple Notes / Linear 分组工作台
+// 第四 Tab「我的」：双服务状态总览 + 4 大分组工作台
 // =============================================================================
 
 @Composable
@@ -85,27 +85,33 @@ fun IosHubProfileRoute(
 	onOpenOnboarding: () -> Unit,
 	@Suppress("UNUSED_PARAMETER") onOpenSleepTimer: () -> Unit = {},
 	bottomPadding: PaddingValues = PaddingValues(0.dp),
-	@Suppress("UNUSED_PARAMETER") onOpenPhoneDownloads: (() -> Unit)? = null,
+	onOpenPhoneDownloads: (() -> Unit)? = null,
 ) {
 	val settingsState by settingsController.state.collectAsState()
 	val studioPreset by settingsStore.studioThemePreset.collectAsState()
 	val libState by subsonicManager.state.collectAsState()
 	val prefs by subsonicManager.prefs.collectAsState()
+	val offlineState by audioPlayer.offlineState.collectAsState()
 
 	val platformContext = LocalPlatformContext.current
 	val imageLoader = remember(platformContext) { SingletonImageLoader.get(platformContext) }
 	val hostNavBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 	val meloCfg = settingsState.serverConfig
 	val activeServer = libState.activeServer
+	val meloConnected = meloCfg.isAuthenticated
+	val navidromeConnected = activeServer != null
 	val appVersion = remember { IosSettingsResolveAppVersion() }
 	val displayCurrentVersion = remember(appVersion) {
 		normalizeIosVersionLabel(appVersion, fallback = "1.0.0")
 	}
 
-	var showMeloSheet by rememberSaveable { mutableStateOf(false) }
-	var showNavidromeSheet by rememberSaveable { mutableStateOf(false) }
+	var showServerSheet by rememberSaveable { mutableStateOf(false) }
+	var serverSheetInitialTab by rememberSaveable { mutableIntStateOf(0) }
+	var showSourcesSheet by rememberSaveable { mutableStateOf(false) }
 	var showAudioEngineSheet by rememberSaveable { mutableStateOf(false) }
 	var showLyricsSheet by rememberSaveable { mutableStateOf(false) }
+	var showThemeSheet by rememberSaveable { mutableStateOf(false) }
+	var showStorageSheet by rememberSaveable { mutableStateOf(false) }
 	var confirmClearCacheOpen by rememberSaveable { mutableStateOf(false) }
 	var cacheRefreshTick by remember { mutableIntStateOf(0) }
 	var cacheClearHint by remember { mutableStateOf<String?>(null) }
@@ -133,6 +139,12 @@ fun IosHubProfileRoute(
 		}
 	}
 
+	LaunchedEffect(meloConnected) {
+		if (meloConnected && settingsState.engineConfig == null && !settingsState.loadingConfig) {
+			settingsController.loadConfig()
+		}
+	}
+
 	Column(
 		modifier = Modifier
 			.fillMaxSize()
@@ -152,47 +164,189 @@ fun IosHubProfileRoute(
 			),
 			verticalArrangement = Arrangement.spacedBy(20.dp),
 		) {
-			// 1. 服务与连接（只展示名称与连接状态，不在主列表暴露域名/端口/用户名）
-			item(key = "ios-hub-services", contentType = "hub-services") {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(
-						title = "服务与连接",
-						trailing = {
+			// 顶部双服务状态总览卡
+			item(key = "ios-hub-overview", contentType = "hub-overview") {
+				val connectedCount = (if (meloConnected) 1 else 0) + (if (navidromeConnected) 1 else 0)
+				val statusBadgeText = when (connectedCount) {
+					2 -> "双服务在线"
+					1 -> "单服务在线"
+					else -> "尚未连接"
+				}
+				val meloTitle = meloCfg.effectiveName.ifBlank { "MeloKeep" }
+				val navidromeTitle = activeServer?.name?.trim()?.ifBlank { "Navidrome" } ?: "Navidrome"
+
+				IosGroupedCard {
+					Column(modifier = Modifier.fillMaxWidth()) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Row(
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								Text(
+									text = "服务状态",
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = FontWeight.SemiBold,
+									color = MaterialTheme.colorScheme.onSurface,
+								)
+								Surface(
+									shape = CircleShape,
+									color = if (connectedCount > 0) {
+										MaterialTheme.colorScheme.meloPositive.copy(alpha = 0.14f)
+									} else {
+										MaterialTheme.colorScheme.surfaceContainerHigh
+									},
+								) {
+									Text(
+										text = statusBadgeText,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.Medium,
+										color = if (connectedCount > 0) {
+											MaterialTheme.colorScheme.meloPositive
+										} else {
+											MaterialTheme.colorScheme.onSurfaceVariant
+										},
+										modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+									)
+								}
+							}
+
+							Surface(
+								onClick = onOpenOnboarding,
+								shape = CircleShape,
+								color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+							) {
+								Text(
+									text = "连接向导",
+									style = MaterialTheme.typography.labelMedium,
+									fontWeight = FontWeight.Medium,
+									color = MaterialTheme.colorScheme.primary,
+									modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+								)
+							}
+						}
+
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
+						) {
+							IosHubOverviewServiceCapsule(
+								title = meloTitle,
+								statusLabel = if (meloConnected) "已连接" else "未连接",
+								connected = meloConnected,
+								onClick = {
+									serverSheetInitialTab = 0
+									showServerSheet = true
+								},
+								modifier = Modifier.weight(1f),
+							)
+							IosHubOverviewServiceCapsule(
+								title = navidromeTitle,
+								statusLabel = if (navidromeConnected) "已连接" else "未连接",
+								connected = navidromeConnected,
+								onClick = {
+									serverSheetInitialTab = 1
+									showServerSheet = true
+								},
+								modifier = Modifier.weight(1f),
+							)
+						}
+
+						IosHairlineDivider()
+
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp, vertical = 10.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
 							Text(
-								text = "连接向导",
-								style = MaterialTheme.typography.labelMedium,
-								fontWeight = FontWeight.Medium,
-								color = MaterialTheme.colorScheme.primary,
+								text = "缓存 ${cacheClearHint ?: formatBytesHuman(tempCacheBytes)}",
+								style = MaterialTheme.typography.labelMedium.tabularNums(),
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
 								modifier = Modifier
 									.clip(RoundedCornerShape(6.dp))
-									.clickable(onClick = onOpenOnboarding)
+									.clickable {
+										cacheClearHint = null
+										showStorageSheet = true
+									}
 									.padding(horizontal = 4.dp, vertical = 2.dp),
 							)
-						},
-					)
 
-					IosGroupedCard {
-						IosHubServiceRow(
-							title = meloCfg.effectiveName,
-							detail = if (meloCfg.isAuthenticated) "已连接" else "未连接",
-							connected = meloCfg.isAuthenticated,
-							onClick = { showMeloSheet = true },
-						)
-
-						IosHairlineDivider(startIndent = 34.dp)
-
-						IosHubServiceRow(
-							title = activeServer?.name?.trim()?.ifBlank { "Navidrome" } ?: "Navidrome",
-							detail = if (activeServer != null) "已连接" else "未连接",
-							connected = activeServer != null,
-							onClick = { showNavidromeSheet = true },
-						)
+							Text(
+								text = if (hasNewVersion) "发现 $displayLatestTag" else "当前 $displayCurrentVersion",
+								style = MaterialTheme.typography.labelMedium.tabularNums(),
+								fontWeight = if (hasNewVersion) FontWeight.SemiBold else FontWeight.Normal,
+								color = if (hasNewVersion) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									MaterialTheme.colorScheme.onSurfaceVariant
+								},
+								modifier = Modifier
+									.clip(RoundedCornerShape(6.dp))
+									.clickable { showUpdateDialog = true }
+									.padding(horizontal = 4.dp, vertical = 2.dp),
+							)
+						}
 					}
 				}
 			}
 
-			// 2. 播放与音频
-			item(key = "ios-hub-audio", contentType = "hub-audio") {
+			// 分组 1：服务与同步
+			item(key = "ios-hub-group-services", contentType = "hub-group") {
+				val serverSummary = when {
+					meloConnected && navidromeConnected -> "双服务已连"
+					meloConnected -> "MeloKeep"
+					navidromeConnected -> "Navidrome"
+					else -> "未连接"
+				}
+				val engCfg = settingsState.engineConfig
+				val sourcesSummary = if (engCfg != null) {
+					val srcPart = "${engCfg.sources.size} 源"
+					val proxyPart = engCfg.proxyUrl.takeIf { it.isNotBlank() }?.let { "已配代理" }
+					listOfNotNull(srcPart, proxyPart).joinToString(" · ")
+				} else {
+					"加载中"
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "服务与同步")
+					IosGroupedCard {
+						IosHubActionRow(
+							icon = Icons.Rounded.Dns,
+							iconTint = MaterialTheme.colorScheme.primary,
+							title = "服务器连接",
+							value = serverSummary,
+							valueHighlight = meloConnected || navidromeConnected,
+							onClick = {
+								serverSheetInitialTab = if (!meloConnected && navidromeConnected) 1 else 0
+								showServerSheet = true
+							},
+						)
+						if (meloConnected) {
+							IosHairlineDivider(startIndent = 56.dp)
+							IosHubActionRow(
+								icon = Icons.Rounded.TravelExplore,
+								iconTint = MaterialTheme.colorScheme.secondary,
+								title = "音源与代理",
+								value = sourcesSummary,
+								onClick = { showSourcesSheet = true },
+							)
+						}
+					}
+				}
+			}
+
+			// 分组 2：播放与音效
+			item(key = "ios-hub-group-playback", contentType = "hub-group") {
 				val brTag = if (prefs.maxBitRate <= 0) "无损" else "${prefs.maxBitRate}k"
 				val rgTag = when (prefs.replayGainMode) {
 					ReplayGainMode.TRACK -> "单曲增益"
@@ -204,20 +358,19 @@ fun IosHubProfileRoute(
 					if (prefs.lyricsAlign == "start") "左对齐" else "居中"
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "播放与音频")
-
+					IosSectionLabel(title = "播放与音效")
 					IosGroupedCard {
 						IosHubActionRow(
 							icon = Icons.Rounded.HighQuality,
+							iconTint = MaterialTheme.colorScheme.primary,
 							title = "音质与增益",
 							value = audioValue,
 							onClick = { showAudioEngineSheet = true },
 						)
-
-						IosHairlineDivider(startIndent = 46.dp)
-
+						IosHairlineDivider(startIndent = 56.dp)
 						IosHubActionRow(
 							icon = Icons.Rounded.MusicNote,
+							iconTint = MaterialTheme.colorScheme.tertiary,
 							title = "歌词设置",
 							value = lyricsSummary,
 							onClick = { showLyricsSheet = true },
@@ -226,156 +379,74 @@ fun IosHubProfileRoute(
 				}
 			}
 
-			// 3. 外观与交互
-			item(key = "ios-hub-appearance", contentType = "hub-appearance") {
+			// 分组 3：外观与交互
+			item(key = "ios-hub-group-appearance", contentType = "hub-group") {
+				val presetDescriptor = remember(studioPreset) {
+					MeloStudioPresets.all.firstOrNull { it.id == studioPreset }
+				}
+				val presetLabel = presetDescriptor?.title ?: compactIosPresetLabel(studioPreset)
+				val modeTag = if (studioPreset == MeloStudioPresets.DYNAMIC) {
+					when (prefs.themeMode) {
+						IosThemeMode.SYSTEM -> "跟随系统"
+						IosThemeMode.DARK -> "深色"
+						IosThemeMode.LIGHT -> "浅色"
+					}
+				} else {
+					null
+				}
+				val amoledTag = if (prefs.amoledBlack) "纯黑" else null
+				val themeSummary = listOfNotNull(presetLabel, modeTag, amoledTag).joinToString(" · ")
+
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					IosSectionLabel(title = "外观与交互")
-
-					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-						MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								rowPresets.forEach { preset ->
-									val selected = studioPreset == preset.id
-									IosHubThemePresetChip(
-										label = compactIosPresetLabel(preset),
-										accentColor = preset.previewAccent,
-										selected = selected,
-										onClick = { settingsStore.setStudioThemePreset(preset.id) },
-										modifier = Modifier.weight(1f),
-									)
-								}
-								if (rowPresets.size == 1) {
-									Spacer(modifier = Modifier.weight(1f))
-								}
-							}
-						}
-
-						if (studioPreset == MeloStudioPresets.DYNAMIC) {
-							IosGroupedCard {
-								Row(
-									modifier = Modifier
-										.fillMaxWidth()
-										.padding(6.dp),
-									horizontalArrangement = Arrangement.spacedBy(6.dp),
-								) {
-									listOf(
-										IosThemeMode.SYSTEM to "跟随系统",
-										IosThemeMode.DARK to "深色",
-										IosThemeMode.LIGHT to "浅色",
-									).forEach { (mode, label) ->
-										val isCurrent = prefs.themeMode == mode
-										Surface(
-											onClick = { subsonicManager.updatePrefs { it.copy(themeMode = mode) } },
-											shape = RoundedCornerShape(10.dp),
-											color = if (isCurrent) {
-												MaterialTheme.colorScheme.primary
-											} else {
-												Color.Transparent
-											},
-											modifier = Modifier.weight(1f),
-										) {
-											Box(
-												modifier = Modifier.padding(vertical = 7.dp),
-												contentAlignment = Alignment.Center,
-											) {
-												Text(
-													text = label,
-													style = MaterialTheme.typography.labelMedium,
-													fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-													color = if (isCurrent) {
-														MaterialTheme.colorScheme.onPrimary
-													} else {
-														MaterialTheme.colorScheme.onSurfaceVariant
-													},
-												)
-											}
-										}
-									}
-								}
-							}
-						}
-
-						IosGroupedCard {
-							Row(
-								modifier = Modifier
-									.fillMaxWidth()
-									.clickable {
-										subsonicManager.updatePrefs { it.copy(amoledBlack = !it.amoledBlack) }
-									}
-									.padding(horizontal = 14.dp, vertical = 10.dp),
-								horizontalArrangement = Arrangement.SpaceBetween,
-								verticalAlignment = Alignment.CenterVertically,
-							) {
-								Column(
-									modifier = Modifier.weight(1f),
-									verticalArrangement = Arrangement.spacedBy(2.dp),
-								) {
-									Text(
-										text = "AMOLED 纯黑",
-										style = MaterialTheme.typography.bodyMedium,
-										fontWeight = FontWeight.Medium,
-										color = MaterialTheme.colorScheme.onSurface,
-									)
-									Text(
-										text = "深色模式下使用纯黑背景",
-										style = MaterialTheme.typography.bodySmall,
-										color = MaterialTheme.colorScheme.onSurfaceVariant,
-									)
-								}
-								Switch(
-									checked = prefs.amoledBlack,
-									onCheckedChange = { checked ->
-										subsonicManager.updatePrefs { it.copy(amoledBlack = checked) }
-									},
-									colors = SwitchDefaults.colors(
-										checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-										checkedTrackColor = MaterialTheme.colorScheme.primary,
-									),
-								)
-							}
-						}
-					}
-				}
-			}
-
-			// 4. 存储与离线
-			item(key = "ios-hub-storage", contentType = "hub-storage") {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "存储与离线")
-
 					IosGroupedCard {
 						IosHubActionRow(
-							icon = Icons.Rounded.Delete,
-							title = "临时缓存",
-							value = cacheClearHint ?: formatBytesHuman(tempCacheBytes),
-							valueHighlight = cacheClearHint != null,
-							onClick = {
-								cacheClearHint = null
-								confirmClearCacheOpen = true
-							},
+							icon = Icons.Rounded.AutoAwesome,
+							iconTint = presetDescriptor?.previewAccent ?: MaterialTheme.colorScheme.primary,
+							title = "主题与外观",
+							value = themeSummary,
+							badgeDotColor = presetDescriptor?.previewAccent,
+							onClick = { showThemeSheet = true },
 						)
 					}
 				}
 			}
 
-			// 5. 更新与关于
-			item(key = "ios-hub-about", contentType = "hub-about") {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "更新与关于")
+			// 分组 4：存储与系统
+			item(key = "ios-hub-group-storage-system", contentType = "hub-group") {
+				val storageSummary = cacheClearHint ?: buildString {
+					append(formatBytesHuman(tempCacheBytes))
+					if (offlineState.offlineTracks.isNotEmpty()) {
+						append(" · ${offlineState.offlineTracks.size} 首离线")
+					}
+				}
 
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "存储与系统")
 					IosGroupedCard {
 						IosHubActionRow(
-							icon = Icons.Rounded.Refresh,
-							title = "检查更新",
-							value = if (hasNewVersion) {
-								"发现 $displayLatestTag"
-							} else {
-								"当前 $displayCurrentVersion"
+							icon = Icons.Rounded.Folder,
+							iconTint = MaterialTheme.colorScheme.secondary,
+							title = "存储与缓存",
+							value = storageSummary,
+							valueHighlight = cacheClearHint != null,
+							onClick = {
+								cacheClearHint = null
+								showStorageSheet = true
 							},
+						)
+						IosHairlineDivider(startIndent = 56.dp)
+						IosHubActionRow(
+							icon = Icons.Rounded.Refresh,
+							iconTint = if (hasNewVersion) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.onSurfaceVariant
+							},
+							title = "版本与更新",
+							value = if (hasNewVersion) "发现 $displayLatestTag" else "当前 $displayCurrentVersion",
 							valueHighlight = hasNewVersion,
+							badgeDotColor = if (hasNewVersion) MaterialTheme.colorScheme.primary else null,
 							onClick = { showUpdateDialog = true },
 						)
 					}
@@ -395,6 +466,68 @@ fun IosHubProfileRoute(
 			}
 		}
 	}
+
+	// 弹层与确认窗体系
+	if (showServerSheet) {
+		IosSettingsServerConnectionsSheet(
+			initialTab = serverSheetInitialTab,
+			settingsState = settingsState,
+			settingsController = settingsController,
+			servers = libState.servers,
+			activeServerId = libState.activeServerId,
+			hostNavBottom = hostNavBottom,
+			onSwitchServer = { id -> subsonicManager.switchServer(id) },
+			onRemoveServer = { id -> subsonicManager.removeServer(id) },
+			onTestAndSaveNavidrome = { name, url, user, pass, editId ->
+				subsonicManager.testAndSaveServer(name, url, user, pass, editId)
+			},
+			onDismiss = { showServerSheet = false },
+		)
+	}
+
+	IosSettingsSourcesProxySheet(
+		settingsController = settingsController,
+		settingsState = settingsState,
+		presented = showSourcesSheet && meloConnected,
+		onDismissRequest = { showSourcesSheet = false },
+	)
+
+	IosSettingsAudioEngineSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = showAudioEngineSheet,
+		onDismissRequest = { showAudioEngineSheet = false },
+	)
+
+	IosSettingsLyricsSheet(
+		audioPlayer = audioPlayer,
+		subsonicManager = subsonicManager,
+		presented = showLyricsSheet,
+		onDismissRequest = { showLyricsSheet = false },
+	)
+
+	IosSettingsThemeAppearanceSheet(
+		settingsStore = settingsStore,
+		subsonicManager = subsonicManager,
+		hostNavBottom = hostNavBottom,
+		presented = showThemeSheet,
+		onDismissRequest = { showThemeSheet = false },
+	)
+
+	IosSettingsStorageSheet(
+		tempCacheBytes = tempCacheBytes,
+		offlineTrackCount = offlineState.offlineTracks.size,
+		offlineTotalBytes = offlineState.totalOfflineBytes,
+		cacheClearHint = cacheClearHint,
+		onRequestClearCache = {
+			cacheClearHint = null
+			confirmClearCacheOpen = true
+		},
+		onOpenPhoneDownloads = onOpenPhoneDownloads,
+		hostNavBottom = hostNavBottom,
+		presented = showStorageSheet,
+		onDismissRequest = { showStorageSheet = false },
+	)
 
 	if (confirmClearCacheOpen) {
 		AlertDialog(
@@ -431,84 +564,39 @@ fun IosHubProfileRoute(
 			currentVersion = appVersion,
 			initialRelease = latestRelease,
 			onReleaseLoaded = { fetched -> latestRelease = fetched },
-			onShowNotice = { msg -> cacheClearHint = null; subsonicManager.clearMessages() },
+			onShowNotice = { cacheClearHint = null; subsonicManager.clearMessages() },
 			onDismiss = { showUpdateDialog = false },
 		)
 	}
-
-	// 呼出弹层体系
-	if (showMeloSheet) {
-		IosSettingsMeloConnectionSheet(
-			settingsState = settingsState,
-			settingsController = settingsController,
-			hostNavBottom = hostNavBottom,
-			onDismiss = { showMeloSheet = false },
-		)
-	}
-
-	if (showNavidromeSheet) {
-		IosSettingsNavidromeServerSheet(
-			servers = libState.servers,
-			activeServerId = libState.activeServerId,
-			hostNavBottom = hostNavBottom,
-			onSwitchServer = { id ->
-				subsonicManager.switchServer(id)
-				showNavidromeSheet = false
-			},
-			onRemoveServer = { id -> subsonicManager.removeServer(id) },
-			onTestAndSave = { name, url, user, pass, editId ->
-				subsonicManager.testAndSaveServer(name, url, user, pass, editId)
-			},
-			onDismiss = { showNavidromeSheet = false },
-		)
-	}
-
-	IosAudioEngineSheet(
-		audioPlayer = audioPlayer,
-		subsonicManager = subsonicManager,
-		presented = showAudioEngineSheet,
-		onDismissRequest = { showAudioEngineSheet = false },
-	)
-
-	IosLyricsAndStageSheet(
-		audioPlayer = audioPlayer,
-		subsonicManager = subsonicManager,
-		presented = showLyricsSheet,
-		onDismissRequest = { showLyricsSheet = false },
-	)
 }
 
 @Composable
-private fun IosHubServiceRow(
+private fun IosHubOverviewServiceCapsule(
 	title: String,
-	detail: String,
+	statusLabel: String,
 	connected: Boolean,
 	onClick: () -> Unit,
+	modifier: Modifier = Modifier,
 ) {
-	Row(
-		modifier = Modifier
-			.fillMaxWidth()
-			.clickable(onClick = onClick)
-			.padding(horizontal = 14.dp, vertical = 13.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	Surface(
+		onClick = onClick,
+		shape = RoundedCornerShape(12.dp),
+		color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+		border = BorderStroke(
+			width = IosHairlineWidth,
+			color = if (connected) {
+				MaterialTheme.colorScheme.meloPositive.copy(alpha = 0.35f)
+			} else {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+			},
+		),
+		modifier = modifier,
 	) {
-		Box(
-			modifier = Modifier
-				.size(8.dp)
-				.clip(CircleShape)
-				.background(
-					if (connected) {
-						MaterialTheme.colorScheme.meloPositive
-					} else {
-						MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-					},
-				),
-		)
-
 		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(2.dp),
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 12.dp, vertical = 10.dp),
+			verticalArrangement = Arrangement.spacedBy(4.dp),
 		) {
 			Text(
 				text = title,
@@ -518,30 +606,46 @@ private fun IosHubServiceRow(
 				maxLines = 1,
 				overflow = TextOverflow.Ellipsis,
 			)
-			Text(
-				text = detail,
-				style = MaterialTheme.typography.bodySmall.tabularNums(),
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+			) {
+				Box(
+					modifier = Modifier
+						.size(7.dp)
+						.clip(CircleShape)
+						.background(
+							if (connected) {
+								MaterialTheme.colorScheme.meloPositive
+							} else {
+								MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+							},
+						),
+				)
+				Text(
+					text = statusLabel,
+					style = MaterialTheme.typography.labelSmall,
+					color = if (connected) {
+						MaterialTheme.colorScheme.meloPositive
+					} else {
+						MaterialTheme.colorScheme.onSurfaceVariant
+					},
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
 		}
-
-		Icon(
-			imageVector = Icons.Rounded.ChevronRight,
-			contentDescription = null,
-			tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-			modifier = Modifier.size(17.dp),
-		)
 	}
 }
 
 @Composable
 private fun IosHubActionRow(
 	icon: ImageVector,
+	iconTint: Color,
 	title: String,
 	value: String,
 	valueHighlight: Boolean = false,
+	badgeDotColor: Color? = null,
 	enabled: Boolean = true,
 	onClick: () -> Unit,
 ) {
@@ -549,16 +653,24 @@ private fun IosHubActionRow(
 		modifier = Modifier
 			.fillMaxWidth()
 			.clickable(enabled = enabled, onClick = onClick)
-			.padding(horizontal = 14.dp, vertical = 13.dp),
+			.padding(horizontal = 14.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
 	) {
-		Icon(
-			imageVector = icon,
-			contentDescription = null,
-			tint = MaterialTheme.colorScheme.onSurfaceVariant,
-			modifier = Modifier.size(20.dp),
-		)
+		Box(
+			modifier = Modifier
+				.size(30.dp)
+				.clip(RoundedCornerShape(8.dp))
+				.background(iconTint.copy(alpha = 0.14f)),
+			contentAlignment = Alignment.Center,
+		) {
+			Icon(
+				imageVector = icon,
+				contentDescription = null,
+				tint = iconTint,
+				modifier = Modifier.size(17.dp),
+			)
+		}
 
 		Text(
 			text = title,
@@ -569,6 +681,15 @@ private fun IosHubActionRow(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
+
+		if (badgeDotColor != null) {
+			Box(
+				modifier = Modifier
+					.size(8.dp)
+					.clip(CircleShape)
+					.background(badgeDotColor),
+			)
+		}
 
 		if (value.isNotBlank()) {
 			Text(
@@ -593,58 +714,10 @@ private fun IosHubActionRow(
 	}
 }
 
-@Composable
-private fun IosHubThemePresetChip(
-	label: String,
-	accentColor: Color,
-	selected: Boolean,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	Surface(
-		onClick = onClick,
-		shape = RoundedCornerShape(12.dp),
-		color = MaterialTheme.colorScheme.surfaceContainer,
-		border = BorderStroke(
-			width = if (selected) 1.25.dp else IosHairlineWidth,
-			color = if (selected) {
-				MaterialTheme.colorScheme.primary
-			} else {
-				MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-			},
-		),
-		modifier = modifier,
-	) {
-		Row(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(horizontal = 14.dp, vertical = 12.dp),
-			horizontalArrangement = Arrangement.SpaceBetween,
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			Text(
-				text = label,
-				style = MaterialTheme.typography.bodyMedium,
-				fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-				color = MaterialTheme.colorScheme.onSurface,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-				modifier = Modifier.weight(1f),
-			)
-			Box(
-				modifier = Modifier
-					.size(14.dp)
-					.clip(CircleShape)
-					.background(accentColor),
-			)
-		}
-	}
-}
-
-private fun compactIosPresetLabel(descriptor: MeloStudioPresets.Descriptor): String = when (descriptor.id) {
-	MeloStudioPresets.OBSIDIAN -> "曜石黑"
-	MeloStudioPresets.VINYL_GOLD -> "流金黑"
-	MeloStudioPresets.PURE_LIGHT -> "纯净白"
-	MeloStudioPresets.DYNAMIC -> "跟随封面"
-	else -> descriptor.title
+private fun compactIosPresetLabel(presetId: String): String = when (presetId) {
+	MeloStudioPresets.OBSIDIAN -> "曜石录音室"
+	MeloStudioPresets.VINYL_GOLD -> "流金黑胶"
+	MeloStudioPresets.PURE_LIGHT -> "纯净晨雾"
+	MeloStudioPresets.DYNAMIC -> "动态壁纸色"
+	else -> presetId
 }

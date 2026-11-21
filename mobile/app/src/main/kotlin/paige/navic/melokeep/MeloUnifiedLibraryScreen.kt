@@ -118,7 +118,7 @@ import paige.navic.ui.theme.tabularNums
 internal enum class LibrarySourceMode(val label: String) {
 	NAVIDROME("Navidrome"),
 	LOCAL("Melokeep"),
-	DEVICE("手机本地")
+	DEVICE("本地")
 }
 
 internal enum class LibraryLocalSubTab(val label: String) {
