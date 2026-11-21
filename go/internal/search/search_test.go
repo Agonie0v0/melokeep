@@ -504,10 +504,25 @@ func TestSingleflightSharingGraceTimersAndCache(t *testing.T) {
 func TestSlowSubscriberIsolationAndReconnect(t *testing.T) {
 	st := openTestStore(t)
 	const totalTracks = 25
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	startEmit := make(chan struct{})
+	var fastRead atomic.Int32
+	fastAdvanced := make(chan struct{}, 1)
+	fastDone := make(chan struct{})
+
 	audius := &mockProvider{
 		id:         "AudiusMusicClient",
 		engineName: "AudiusMusicClient",
-		searchFn: func(ctx context.Context, opts model.SearchOptions, emit func(model.ProviderTrack) error) (model.SearchSummary, error) {
+		searchFn: func(emitCtx context.Context, opts model.SearchOptions, emit func(model.ProviderTrack) error) (model.SearchSummary, error) {
+			select {
+			case <-startEmit:
+			case <-emitCtx.Done():
+				return model.SearchSummary{}, emitCtx.Err()
+			case <-ctx.Done():
+				return model.SearchSummary{}, ctx.Err()
+			}
 			for i := 0; i < totalTracks; i++ {
 				if err := emit(model.ProviderTrack{
 					PublicID: model.NewUUID(),
@@ -517,21 +532,30 @@ func TestSlowSubscriberIsolationAndReconnect(t *testing.T) {
 				}); err != nil {
 					return model.SearchSummary{}, err
 				}
-				time.Sleep(2 * time.Millisecond)
+				for fastRead.Load() < int32(i+1) {
+					select {
+					case <-fastAdvanced:
+					case <-fastDone:
+						return model.SearchSummary{}, errors.New("fast subscriber exited early")
+					case <-emitCtx.Done():
+						return model.SearchSummary{}, emitCtx.Err()
+					case <-ctx.Done():
+						return model.SearchSummary{}, ctx.Err()
+					}
+				}
 			}
 			return model.SearchSummary{Count: totalTracks}, nil
 		},
 	}
 	timings := search.DefaultTimings()
 	timings.BatchPersistInterval = 2 * time.Millisecond
-	timings.BatchPersistSize = 5
+	timings.BatchPersistSize = 1
 	svc := search.NewService(st, search.MapProviderLookup{"AudiusMusicClient": audius},
 		config.DefaultResourceBudgets(), search.WithTimings(timings), search.WithSubscriberBuffer(5))
 	defer svc.Close()
 
 	actor := auth.WebAdminActor("admin")
 	snap := testSnapshot()
-	ctx := context.Background()
 
 	jobID, err := svc.CreateSearch(ctx, actor, snap, search.CreateRequest{Keyword: "slow-test", Sources: []string{"AudiusMusicClient"}})
 	if err != nil {
@@ -542,8 +566,37 @@ func TestSlowSubscriberIsolationAndReconnect(t *testing.T) {
 	defer fastSub.Close()
 	defer slowSub.Close()
 
+	var fastEvs []search.Event
+	var fastErr error
+	go func() {
+		defer close(fastDone)
+		for {
+			ev, err := fastSub.Next(ctx)
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				fastErr = err
+				return
+			}
+			if ev.Keepalive {
+				continue
+			}
+			fastEvs = append(fastEvs, ev)
+			fastRead.Add(1)
+			select {
+			case fastAdvanced <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	close(startEmit)
+
 	// Fast subscriber drains all 25 tracks + source + done = 27 events without blocking.
-	fastEvs := readAllEvents(t, ctx, fastSub)
+	<-fastDone
+	if fastErr != nil {
+		t.Fatalf("fastSub.Next unexpected error: %v", fastErr)
+	}
 	if len(fastEvs) != totalTracks+2 {
 		t.Fatalf("fast subscriber expected %d events, got %d", totalTracks+2, len(fastEvs))
 	}

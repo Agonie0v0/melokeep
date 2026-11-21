@@ -188,15 +188,26 @@ func TestAcceptanceRestoreNewSidecarIdentityAuditAndCrashSafety(t *testing.T) {
 	}
 
 	// 1. If newly created sidecar was replaced externally (different inode even with same bytes), Restore MUST reject (409) and protect it.
-	if err := os.Remove(newLrcPath); err != nil {
+	origSidecarIdent, err := files.StatIdentity(newLrcPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(newLrcPath, []byte("[00:01]generated"), 0o644); err != nil {
+	replacementPath := newLrcPath + ".external"
+	if err := os.WriteFile(replacementPath, []byte("[00:01]generated"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Note: writing a brand new file gives a new inode (or if OS reused inode, test external content modification next).
+	if err := os.Rename(replacementPath, newLrcPath); err != nil {
+		t.Fatal(err)
+	}
+	newIdent, err := files.StatIdentity(newLrcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files.SameIdentity(origSidecarIdent, newIdent) {
+		t.Fatalf("expected atomic rename over live sidecar to assign a new identity: before=%+v after=%+v", origSidecarIdent, newIdent)
+	}
 	_, restConflictErr := coord.Restore(ctx, moveRes.OperationID)
-	// If OS didn't reuse the inode, Restore must return 409 because identity ownership does not match!
+	// Restore must return 409 because identity ownership does not match!
 	if restConflictErr == nil {
 		t.Fatalf("expected Restore to reject externally replaced sidecar with differing file identity")
 	}
