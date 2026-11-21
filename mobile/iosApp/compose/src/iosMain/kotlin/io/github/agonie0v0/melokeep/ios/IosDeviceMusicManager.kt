@@ -281,7 +281,7 @@ internal object IosDeviceMusicManager {
 				title = parsedTitle,
 				artist = parsedArtist,
 				album = folderDisplayName,
-				durationMs = 0L,
+				durationSec = 0.0,
 				fileExtension = ext,
 				sizeBytes = sizeBytes,
 				lossless = ext in IosLibLosslessExtensions,

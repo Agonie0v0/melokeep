@@ -212,13 +212,13 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
     secrets: inherit
 
-  publish:
-    name: 合并并发布多架构 manifest
-    needs: [prepare, build, mobile]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.build.result == 'success' && (needs.mobile.result == 'success' || needs.mobile.result == 'skipped') }}
+  publish-docker:
+    name: 合并并发布多架构镜像
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       packages: write
       attestations: write
       id-token: write
@@ -296,14 +296,21 @@ jobs:
             docker rm -f melokeep-smoke
           done
 
+  release:
+    name: 发布 GitHub Release
+    needs: [prepare, publish-docker, mobile]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.publish-docker.result == 'success' && needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != '' && (needs.mobile.result == 'success' || needs.mobile.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
       - name: 检出提交历史以生成更新日志
-        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != ''
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
       - name: 下载移动端安装包资产
-        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != '' && needs.mobile.result == 'success'
+        if: needs.mobile.result == 'success'
         uses: actions/download-artifact@v8
         with:
           pattern: MeloKeep-*
@@ -311,10 +318,9 @@ jobs:
           merge-multiple: true
 
       - name: 生成中文更新日志并发布 GitHub Release
-        if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.version != ''
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
           PREV_VERSION: ${{ needs.prepare.outputs.prev_version }}
           MOBILE_BUILT: ${{ needs.mobile.result == 'success' && 'true' || 'false' }}
@@ -411,8 +417,33 @@ jobs:
               asset_files+=("$f")
             done < <(find /tmp/release-assets -type f -print0 | sort -z)
           fi
+          target_args=()
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            target_args=(--verify-tag)
+          else
+            remote_branch_sha="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | awk 'NR==1 {print $1}')"
+            if [ "$remote_branch_sha" = "$GITHUB_SHA" ]; then
+              target_args=(--target "$GITHUB_REF_NAME")
+            else
+              target_args=(--target "$GITHUB_SHA")
+            fi
+          fi
+          set +e
           gh release create "$VERSION" ${asset_files[@]+"${asset_files[@]}"} \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
+            "${target_args[@]}" \
             --title "$VERSION" \
-            --notes-file /tmp/release-notes.md
+            --notes-file /tmp/release-notes.md 2>/tmp/gh-release-err.log
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            cat /tmp/gh-release-err.log >&2
+            if grep -q "Resource not accessible by integration" /tmp/gh-release-err.log; then
+              if [ "$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)" = "true" ]; then
+                gh release delete "$VERSION" --repo "$GITHUB_REPOSITORY" --yes >/dev/null 2>&1 || true
+              fi
+              echo "::warning::发布 GitHub Release ($VERSION) 因权限受限跳过（HTTP 403: Resource not accessible by integration）：默认 GITHUB_TOKEN 无法为包含 .github/workflows/* 变更的提交创建新 Tag，Docker 镜像已成功发布。请配置拥有 workflows 权限的 RELEASE_TOKEN Secret，或手动推送 Tag $VERSION 后重新运行 workflow。"
+              exit 0
+            fi
+            exit "$rc"
+          fi

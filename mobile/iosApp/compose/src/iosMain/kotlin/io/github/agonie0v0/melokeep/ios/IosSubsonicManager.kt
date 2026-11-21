@@ -79,6 +79,7 @@ data class IosTrackItem(
 	val playCount: Int = 0,
 	val userRating: Int? = null,
 	val trackNumber: Int? = null,
+	val sizeBytes: Long = 0L,
 ) {
 	val durationMs: Long
 		get() = (durationSec * 1000.0).roundToLong().coerceAtLeast(0L)
