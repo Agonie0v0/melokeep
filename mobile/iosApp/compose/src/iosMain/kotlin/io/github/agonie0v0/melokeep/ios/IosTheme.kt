@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
@@ -43,10 +44,13 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,13 +68,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import io.github.agonie0v0.melokeep.shared.MeloServerConfig
+import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloTrack
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.encodeURLQueryComponent
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -87,12 +102,19 @@ import kotlin.math.roundToInt
 val MeloBottomChromeClearance = 152.dp
 
 /**
- * MeloKeep Studio 高定主题预设标识与元数据。
+ * MeloKeep Studio 高定主题预设标识与元数据（与 Web `themes.css` / Android 同步，共 9 套）。
  */
 object MeloStudioPresets {
 	const val OBSIDIAN = "obsidian"
 	const val VINYL_GOLD = "vinyl-gold"
+	const val MIDNIGHT_AURORA = "midnight-aurora"
+	const val CYBER_AMETHYST = "cyber-amethyst"
+
 	const val PURE_LIGHT = "pure-light"
+	const val WARM_VINYL = "warm-vinyl"
+	const val NORDIC_FROST = "nordic-frost"
+	const val ROSE_MIST = "rose-mist"
+
 	const val DYNAMIC = "dynamic"
 
 	data class Descriptor(
@@ -105,13 +127,13 @@ object MeloStudioPresets {
 		val isDark: Boolean,
 	)
 
-	val all = listOf(
+	val darkPresets = listOf(
 		Descriptor(
 			id = OBSIDIAN,
 			title = "曜石录音室",
 			subtitle = "深空炭黑 · 电光冰蓝",
 			previewBackground = Color(0xFF090B10),
-			previewContainer = Color(0xFF121620),
+			previewContainer = Color(0xFF12151E),
 			previewAccent = Color(0xFF60A5FA),
 			isDark = true,
 		),
@@ -119,20 +141,71 @@ object MeloStudioPresets {
 			id = VINYL_GOLD,
 			title = "流金黑胶",
 			subtitle = "纯黑母带 · 香槟流金",
-			previewBackground = Color(0xFF050507),
-			previewContainer = Color(0xFF111115),
+			previewBackground = Color(0xFF060608),
+			previewContainer = Color(0xFF121216),
 			previewAccent = Color(0xFFEAB308),
 			isDark = true,
 		),
 		Descriptor(
+			id = MIDNIGHT_AURORA,
+			title = "午夜极光",
+			subtitle = "深海玄青 · 翡翠极光",
+			previewBackground = Color(0xFF061114),
+			previewContainer = Color(0xFF0C1B1F),
+			previewAccent = Color(0xFF10B981),
+			isDark = true,
+		),
+		Descriptor(
+			id = CYBER_AMETHYST,
+			title = "暗紫霓虹",
+			subtitle = "深空紫夜 · 霓虹紫晶",
+			previewBackground = Color(0xFF0B0816),
+			previewContainer = Color(0xFF141026),
+			previewAccent = Color(0xFFA78BFA),
+			isDark = true,
+		),
+	)
+
+	val lightPresets = listOf(
+		Descriptor(
 			id = PURE_LIGHT,
 			title = "纯净晨雾",
 			subtitle = "雾白画布 · 晴空湛蓝",
-			previewBackground = Color(0xFFF3F5F9),
+			previewBackground = Color(0xFFF4F6FA),
 			previewContainer = Color(0xFFFFFFFF),
 			previewAccent = Color(0xFF2563EB),
 			isDark = false,
 		),
+		Descriptor(
+			id = WARM_VINYL,
+			title = "暖调黑胶纸",
+			subtitle = "米白信纸 · 焦糖琥珀",
+			previewBackground = Color(0xFFF5EFE6),
+			previewContainer = Color(0xFFFFFCF7),
+			previewAccent = Color(0xFFC2591B),
+			isDark = false,
+		),
+		Descriptor(
+			id = NORDIC_FROST,
+			title = "北欧冰川",
+			subtitle = "冷冽冰蓝 · 极地湖青",
+			previewBackground = Color(0xFFEDF4F7),
+			previewContainer = Color(0xFFFAFDFF),
+			previewAccent = Color(0xFF0284C7),
+			isDark = false,
+		),
+		Descriptor(
+			id = ROSE_MIST,
+			title = "雾樱漫音",
+			subtitle = "樱粉晨霜 · 绯红玫瑰",
+			previewBackground = Color(0xFFF9F1F4),
+			previewContainer = Color(0xFFFFFBFC),
+			previewAccent = Color(0xFFDB2777),
+			isDark = false,
+		),
+	)
+
+	val dynamicPresets = listOf(
 		Descriptor(
 			id = DYNAMIC,
 			title = "动态壁纸色",
@@ -143,6 +216,11 @@ object MeloStudioPresets {
 			isDark = true,
 		),
 	)
+
+	val all = darkPresets + lightPresets + dynamicPresets
+
+	fun isLightPreset(id: String): Boolean =
+		id == PURE_LIGHT || id == WARM_VINYL || id == NORDIC_FROST || id == ROSE_MIST
 }
 
 val ObsidianStudioColorScheme: ColorScheme = darkColorScheme(
@@ -255,6 +333,220 @@ val PureLightStudioColorScheme: ColorScheme = lightColorScheme(
 	inverseOnSurface = Color(0xFFF8FAFC),
 	inversePrimary = Color(0xFF93C5FD),
 )
+
+val MidnightAuroraStudioColorScheme: ColorScheme = darkColorScheme(
+	primary = Color(0xFF10B981),
+	onPrimary = Color(0xFF032218),
+	primaryContainer = Color(0xFF0D3D30),
+	onPrimaryContainer = Color(0xFFA7F3D0),
+	secondary = Color(0xFF34D399),
+	onSecondary = Color(0xFF042419),
+	secondaryContainer = Color(0xFF112E34),
+	onSecondaryContainer = Color(0xFFD1FAE5),
+	tertiary = Color(0xFF38BDF8),
+	onTertiary = Color(0xFF05202E),
+	tertiaryContainer = Color(0xFF123243),
+	onTertiaryContainer = Color(0xFFBAE6FD),
+	background = Color(0xFF061114),
+	onBackground = Color(0xFFECFDF5),
+	surface = Color(0xFF061114),
+	onSurface = Color(0xFFECFDF5),
+	surfaceVariant = Color(0xFF13282E),
+	onSurfaceVariant = Color(0xFF86A9A2),
+	surfaceDim = Color(0xFF040B0D),
+	surfaceBright = Color(0xFF1B363D),
+	surfaceContainerLowest = Color(0xFF040B0D),
+	surfaceContainerLow = Color(0xFF09161A),
+	surfaceContainer = Color(0xFF0C1B1F),
+	surfaceContainerHigh = Color(0xFF13282E),
+	surfaceContainerHighest = Color(0xFF1B363D),
+	outline = Color(0xFF284F56),
+	outlineVariant = Color(0xFF173439),
+	error = Color(0xFFFB7185),
+	onError = Color(0xFF3A0712),
+	errorContainer = Color(0xFF4C111E),
+	onErrorContainer = Color(0xFFFFE4E6),
+	inverseSurface = Color(0xFFECFDF5),
+	inverseOnSurface = Color(0xFF061114),
+	inversePrimary = Color(0xFF047857),
+)
+
+val CyberAmethystStudioColorScheme: ColorScheme = darkColorScheme(
+	primary = Color(0xFFA78BFA),
+	onPrimary = Color(0xFF1B0E3D),
+	primaryContainer = Color(0xFF332263),
+	onPrimaryContainer = Color(0xFFEDE9FE),
+	secondary = Color(0xFFC4B5FD),
+	onSecondary = Color(0xFF22134A),
+	secondaryContainer = Color(0xFF241D40),
+	onSecondaryContainer = Color(0xFFEDE9FE),
+	tertiary = Color(0xFFF472B6),
+	onTertiary = Color(0xFF3D0924),
+	tertiaryContainer = Color(0xFF4D1535),
+	onTertiaryContainer = Color(0xFFFCE7F3),
+	background = Color(0xFF0B0816),
+	onBackground = Color(0xFFF5F3FF),
+	surface = Color(0xFF0B0816),
+	onSurface = Color(0xFFF5F3FF),
+	surfaceVariant = Color(0xFF1E1836),
+	onSurfaceVariant = Color(0xFFA197C2),
+	surfaceDim = Color(0xFF070510),
+	surfaceBright = Color(0xFF2A2249),
+	surfaceContainerLowest = Color(0xFF070510),
+	surfaceContainerLow = Color(0xFF100C1E),
+	surfaceContainer = Color(0xFF141026),
+	surfaceContainerHigh = Color(0xFF1E1836),
+	surfaceContainerHighest = Color(0xFF2A2249),
+	outline = Color(0xFF40366B),
+	outlineVariant = Color(0xFF292246),
+	error = Color(0xFFFB7185),
+	onError = Color(0xFF3A0712),
+	errorContainer = Color(0xFF4C111E),
+	onErrorContainer = Color(0xFFFFE4E6),
+	inverseSurface = Color(0xFFF5F3FF),
+	inverseOnSurface = Color(0xFF0B0816),
+	inversePrimary = Color(0xFF6D28D9),
+)
+
+val WarmVinylStudioColorScheme: ColorScheme = lightColorScheme(
+	primary = Color(0xFFC2591B),
+	onPrimary = Color(0xFFFFFFFF),
+	primaryContainer = Color(0xFFFCE4D4),
+	onPrimaryContainer = Color(0xFF5E2204),
+	secondary = Color(0xFF8C5A3C),
+	onSecondary = Color(0xFFFFFFFF),
+	secondaryContainer = Color(0xFFF2E2D4),
+	onSecondaryContainer = Color(0xFF3E2212),
+	tertiary = Color(0xFFB45309),
+	onTertiary = Color(0xFFFFFFFF),
+	tertiaryContainer = Color(0xFFFEF3C7),
+	onTertiaryContainer = Color(0xFF692D04),
+	background = Color(0xFFF5EFE6),
+	onBackground = Color(0xFF292018),
+	surface = Color(0xFFF5EFE6),
+	onSurface = Color(0xFF292018),
+	surfaceVariant = Color(0xFFEDE4D6),
+	onSurfaceVariant = Color(0xFF6E5D4F),
+	surfaceDim = Color(0xFFE5D9C6),
+	surfaceBright = Color(0xFFFFFCF7),
+	surfaceContainerLowest = Color(0xFFFFFFFF),
+	surfaceContainerLow = Color(0xFFFAF5EE),
+	surfaceContainer = Color(0xFFFFFCF7),
+	surfaceContainerHigh = Color(0xFFEDE4D6),
+	surfaceContainerHighest = Color(0xFFE5D9C6),
+	outline = Color(0xFFD2C3AF),
+	outlineVariant = Color(0xFFE4D8C8),
+	error = Color(0xFFC81E1E),
+	onError = Color(0xFFFFFFFF),
+	errorContainer = Color(0xFFFEE2E2),
+	onErrorContainer = Color(0xFF7F1D1D),
+	inverseSurface = Color(0xFF292018),
+	inverseOnSurface = Color(0xFFFAF5EE),
+	inversePrimary = Color(0xFFF59E6C),
+)
+
+val NordicFrostStudioColorScheme: ColorScheme = lightColorScheme(
+	primary = Color(0xFF0284C7),
+	onPrimary = Color(0xFFFFFFFF),
+	primaryContainer = Color(0xFFD6EFFC),
+	onPrimaryContainer = Color(0xFF074063),
+	secondary = Color(0xFF2563EB),
+	onSecondary = Color(0xFFFFFFFF),
+	secondaryContainer = Color(0xFFDBEAFE),
+	onSecondaryContainer = Color(0xFF1E3A8A),
+	tertiary = Color(0xFF047857),
+	onTertiary = Color(0xFFFFFFFF),
+	tertiaryContainer = Color(0xFFD1FAE5),
+	onTertiaryContainer = Color(0xFF064E3B),
+	background = Color(0xFFEDF4F7),
+	onBackground = Color(0xFF0C1E2C),
+	surface = Color(0xFFEDF4F7),
+	onSurface = Color(0xFF0C1E2C),
+	surfaceVariant = Color(0xFFE1EDF3),
+	onSurfaceVariant = Color(0xFF4B677D),
+	surfaceDim = Color(0xFFD5E6EF),
+	surfaceBright = Color(0xFFFAFDFF),
+	surfaceContainerLowest = Color(0xFFFFFFFF),
+	surfaceContainerLow = Color(0xFFF3F9FC),
+	surfaceContainer = Color(0xFFFAFDFF),
+	surfaceContainerHigh = Color(0xFFE1EDF3),
+	surfaceContainerHighest = Color(0xFFD5E6EF),
+	outline = Color(0xFFB7CFDC),
+	outlineVariant = Color(0xFFCFE0EA),
+	error = Color(0xFFDC2626),
+	onError = Color(0xFFFFFFFF),
+	errorContainer = Color(0xFFFEE2E2),
+	onErrorContainer = Color(0xFF7F1D1D),
+	inverseSurface = Color(0xFF0C1E2C),
+	inverseOnSurface = Color(0xFFF3F9FC),
+	inversePrimary = Color(0xFF7DD3FC),
+)
+
+val RoseMistStudioColorScheme: ColorScheme = lightColorScheme(
+	primary = Color(0xFFDB2777),
+	onPrimary = Color(0xFFFFFFFF),
+	primaryContainer = Color(0xFFFCE0ED),
+	onPrimaryContainer = Color(0xFF70103D),
+	secondary = Color(0xFFA855F7),
+	onSecondary = Color(0xFFFFFFFF),
+	secondaryContainer = Color(0xFFF3E8FF),
+	onSecondaryContainer = Color(0xFF4C1D95),
+	tertiary = Color(0xFFC2410C),
+	onTertiary = Color(0xFFFFFFFF),
+	tertiaryContainer = Color(0xFFFFEDD5),
+	onTertiaryContainer = Color(0xFF7C2D12),
+	background = Color(0xFFF9F1F4),
+	onBackground = Color(0xFF2A121E),
+	surface = Color(0xFFF9F1F4),
+	onSurface = Color(0xFF2A121E),
+	surfaceVariant = Color(0xFFF3E4EB),
+	onSurfaceVariant = Color(0xFF765164),
+	surfaceDim = Color(0xFFEBD6E0),
+	surfaceBright = Color(0xFFFFFBFC),
+	surfaceContainerLowest = Color(0xFFFFFFFF),
+	surfaceContainerLow = Color(0xFFFCF6F8),
+	surfaceContainer = Color(0xFFFFFBFC),
+	surfaceContainerHigh = Color(0xFFF3E4EB),
+	surfaceContainerHighest = Color(0xFFEBD6E0),
+	outline = Color(0xFFDCBFC9),
+	outlineVariant = Color(0xFFECD7E0),
+	error = Color(0xFFDC2626),
+	onError = Color(0xFFFFFFFF),
+	errorContainer = Color(0xFFFEE2E2),
+	onErrorContainer = Color(0xFF7F1D1D),
+	inverseSurface = Color(0xFF2A121E),
+	inverseOnSurface = Color(0xFFFCF6F8),
+	inversePrimary = Color(0xFFF9A8D4),
+)
+
+internal fun resolveStaticStudioColorScheme(
+	id: String,
+	amoled: Boolean = false,
+): ColorScheme? {
+	val base = when (id) {
+		MeloStudioPresets.OBSIDIAN -> ObsidianStudioColorScheme
+		MeloStudioPresets.VINYL_GOLD -> VinylGoldStudioColorScheme
+		MeloStudioPresets.MIDNIGHT_AURORA -> MidnightAuroraStudioColorScheme
+		MeloStudioPresets.CYBER_AMETHYST -> CyberAmethystStudioColorScheme
+		MeloStudioPresets.PURE_LIGHT -> PureLightStudioColorScheme
+		MeloStudioPresets.WARM_VINYL -> WarmVinylStudioColorScheme
+		MeloStudioPresets.NORDIC_FROST -> NordicFrostStudioColorScheme
+		MeloStudioPresets.ROSE_MIST -> RoseMistStudioColorScheme
+		else -> null
+	} ?: return null
+
+	return if (amoled && base.isMeloDark) {
+		base.copy(
+			background = Color.Black,
+			surface = Color.Black,
+			surfaceDim = Color.Black,
+			surfaceContainerLowest = Color.Black,
+			surfaceContainerLow = Color(0xFF060608),
+		)
+	} else {
+		base
+	}
+}
 
 private val ColorScheme.isMeloDark: Boolean
 	get() = background.luminance() < 0.5f
@@ -503,21 +795,18 @@ fun MeloKeepIosTheme(
 		IosThemeMode.LIGHT -> false
 	}
 	val scheme = remember(studioPreset, seedColor, isDark, amoledBlack, forceDark) {
-		val base = when (studioPreset) {
-			MeloStudioPresets.OBSIDIAN -> ObsidianStudioColorScheme
-			MeloStudioPresets.VINYL_GOLD -> VinylGoldStudioColorScheme
-			MeloStudioPresets.PURE_LIGHT -> if (forceDark) ObsidianStudioColorScheme else PureLightStudioColorScheme
-			MeloStudioPresets.DYNAMIC -> buildMeloColorScheme(seedColor, isDark, amoledBlack)
-			else -> ObsidianStudioColorScheme
-		}
-		if (amoledBlack && base.isMeloDark && studioPreset != MeloStudioPresets.DYNAMIC) {
-			base.copy(
-				background = Color.Black,
-				surface = Color.Black,
-				surfaceContainerLowest = Color.Black,
-			)
+		if (studioPreset == MeloStudioPresets.DYNAMIC) {
+			buildMeloColorScheme(seedColor, isDark, amoledBlack)
 		} else {
-			base
+			val staticScheme = resolveStaticStudioColorScheme(studioPreset, amoledBlack)
+			when {
+				staticScheme == null -> resolveStaticStudioColorScheme(MeloStudioPresets.OBSIDIAN, amoledBlack)
+					?: ObsidianStudioColorScheme
+				forceDark && !staticScheme.isMeloDark ->
+					resolveStaticStudioColorScheme(MeloStudioPresets.OBSIDIAN, amoledBlack)
+						?: ObsidianStudioColorScheme
+				else -> staticScheme
+			}
 		}
 	}
 	MaterialTheme(
@@ -659,6 +948,210 @@ fun CoverArtBox(
 					contentDescription = contentDescription,
 					contentScale = ContentScale.Crop,
 					modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(cornerRadius)),
+				)
+			}
+		}
+	}
+}
+
+private const val LASTFM_DEFAULT_ARTIST_STAR_HASH = "2a96cbd8b46e442fc41c2b86b821562f"
+
+private val IOS_ARTIST_PLACEHOLDER_NAMES = setOf(
+	"未知歌手",
+	"unknown artist",
+	"various artists",
+	"群星",
+)
+
+internal fun sanitizeIosArtistImageUrl(raw: String?): String? {
+	val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+	if (trimmed.contains(LASTFM_DEFAULT_ARTIST_STAR_HASH, ignoreCase = true)) return null
+	return trimmed
+}
+
+val LocalIosMeloSettingsStore = staticCompositionLocalOf<MeloSettingsStore?> { null }
+
+private data class IosArtistAvatarCandidate(
+	val url: String,
+	val cacheKey: String?,
+	val attachMeloHeaders: Boolean,
+)
+
+/**
+ * 统一歌手头像组件：
+ * 1. 优先尝试 Navidrome `artistImageUrl` / `coverUrl`（当 [preferMeloAvatar] 为 true 时优先 MeloKeep `/api/artists/avatar`）；
+ * 2. 主源缺失、为 Last.fm 默认占位或 Coil 加载失败时，若配置了 MeloKeep 服务则自动切换 `/api/artists/avatar?name=...`（附 `Authorization` / `media_token`）；
+ * 3. 无可用图片时显示主题色首字或人像圆形占位，杜绝大面积空白圈。
+ */
+@Composable
+fun IosArtistAvatar(
+	artistName: String,
+	coverUrl: String? = null,
+	artistImageUrl: String? = null,
+	size: Dp = 44.dp,
+	modifier: Modifier = Modifier,
+	shape: Shape = CircleShape,
+	border: BorderStroke? = BorderStroke(
+		width = IosHairlineWidth,
+		color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
+	),
+	contentDescription: String? = artistName,
+	preferMeloAvatar: Boolean = false,
+	settingsStore: MeloSettingsStore? = LocalIosMeloSettingsStore.current,
+) {
+	val emptyConfigFlow = remember { MutableStateFlow(MeloServerConfig()) }
+	val meloConfig by (settingsStore?.config ?: emptyConfigFlow).collectAsState()
+	val platformContext = LocalPlatformContext.current
+	val trimmedName = remember(artistName) { artistName.trim() }
+
+	val candidates = remember(trimmedName, coverUrl, artistImageUrl, preferMeloAvatar, meloConfig) {
+		val cleanBase = meloConfig.baseUrl.trim().trimEnd('/')
+		val meloReady = meloConfig.isAuthenticated ||
+			(meloConfig.isConfigured && meloConfig.mediaToken.isNotBlank())
+
+		fun buildPrimaryCandidate(raw: String?, prefix: String): IosArtistAvatarCandidate? {
+			val sanitized = sanitizeIosArtistImageUrl(raw) ?: return null
+			val isRelativeApi = sanitized.startsWith("/api/", ignoreCase = true) ||
+				sanitized.startsWith("/downloads/", ignoreCase = true) ||
+				sanitized.startsWith("api/", ignoreCase = true) ||
+				sanitized.startsWith("downloads/", ignoreCase = true)
+			val isOwnMelo = isRelativeApi ||
+				(cleanBase.isNotEmpty() && sanitized.startsWith(cleanBase, ignoreCase = true))
+			val resolved = if (isOwnMelo) {
+				if (!meloReady) return null
+				iosStudioResolveMediaUrl(sanitized, meloConfig) ?: return null
+			} else {
+				sanitized
+			}
+			val cacheKey = if (isOwnMelo) {
+				"$prefix:${resolved.substringBefore("?media_token=").substringBefore("&media_token=")}"
+			} else {
+				null
+			}
+			return IosArtistAvatarCandidate(
+				url = resolved,
+				cacheKey = cacheKey,
+				attachMeloHeaders = isOwnMelo,
+			)
+		}
+
+		val externalCandidate = buildPrimaryCandidate(artistImageUrl, "artist_img")
+		val coverCandidate = buildPrimaryCandidate(coverUrl, "melo_cover")
+
+		val meloAvatarCandidate = if (
+			meloReady &&
+			cleanBase.isNotEmpty() &&
+			trimmedName.isNotEmpty() &&
+			trimmedName.lowercase() !in IOS_ARTIST_PLACEHOLDER_NAMES
+		) {
+			val avatarPath = "$cleanBase/api/artists/avatar?name=${trimmedName.encodeURLQueryComponent()}"
+			val resolved = iosStudioResolveMediaUrl(avatarPath, meloConfig) ?: avatarPath
+			IosArtistAvatarCandidate(
+				url = resolved,
+				cacheKey = "melo_artist_avatar:${trimmedName.lowercase()}",
+				attachMeloHeaders = true,
+			)
+		} else {
+			null
+		}
+
+		val ordered = if (preferMeloAvatar) {
+			listOfNotNull(externalCandidate, meloAvatarCandidate, coverCandidate)
+		} else {
+			listOfNotNull(externalCandidate, coverCandidate, meloAvatarCandidate)
+		}
+		ordered.distinctBy { it.url }
+	}
+
+	var candidateIndex by remember(candidates) { mutableIntStateOf(0) }
+	var allFailed by remember(candidates) { mutableStateOf(candidates.isEmpty()) }
+	var imageLoaded by remember(candidates) { mutableStateOf(false) }
+
+	val activeCandidate = if (!allFailed) candidates.getOrNull(candidateIndex) else null
+	val request = remember(activeCandidate, meloConfig.bearerToken, platformContext) {
+		activeCandidate?.let { candidate ->
+			val headersBuilder = NetworkHeaders.Builder()
+			var hasHeaders = false
+			if (candidate.attachMeloHeaders) {
+				headersBuilder.add("X-MeloKeep-Request", "1")
+				if (meloConfig.bearerToken.isNotBlank()) {
+					headersBuilder.add("Authorization", "Bearer ${meloConfig.bearerToken}")
+				}
+				hasHeaders = true
+			}
+			ImageRequest.Builder(platformContext)
+				.data(candidate.url)
+				.apply {
+					candidate.cacheKey?.let { key ->
+						memoryCacheKey(key)
+						diskCacheKey(key)
+					}
+					if (hasHeaders) {
+						httpHeaders(headersBuilder.build())
+					}
+				}
+				.diskCachePolicy(CachePolicy.ENABLED)
+				.memoryCachePolicy(CachePolicy.ENABLED)
+				.crossfade(120)
+				.build()
+		}
+	}
+
+	val paletteIndex = remember(trimmedName) {
+		(trimmedName.lowercase().hashCode() and 0x7fffffff) % 4
+	}
+	val (fallbackBgColor, fallbackFgColor) = when (paletteIndex) {
+		0 -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+		1 -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+		2 -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+		else -> MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.primary
+	}
+	val initialGlyph = remember(trimmedName) {
+		trimmedName.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString()
+	}
+
+	Surface(
+		modifier = modifier.size(size),
+		shape = shape,
+		color = fallbackBgColor,
+		border = border,
+	) {
+		Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+			if (!imageLoaded) {
+				if (initialGlyph != null) {
+					Text(
+						text = initialGlyph,
+						style = MaterialTheme.typography.titleMedium.copy(
+							fontSize = (size.value * 0.42f).coerceIn(11f, 50f).sp,
+							fontWeight = FontWeight.Bold,
+						),
+						color = fallbackFgColor,
+						maxLines = 1,
+					)
+				} else {
+					Icon(
+						imageVector = Icons.Rounded.Person,
+						contentDescription = null,
+						tint = fallbackFgColor,
+						modifier = Modifier.size((size * 0.50f).coerceIn(12.dp, 54.dp)),
+					)
+				}
+			}
+			if (request != null) {
+				AsyncImage(
+					model = request,
+					contentDescription = contentDescription,
+					contentScale = ContentScale.Crop,
+					onSuccess = { imageLoaded = true },
+					onError = {
+						imageLoaded = false
+						if (candidateIndex + 1 < candidates.size) {
+							candidateIndex += 1
+						} else {
+							allFailed = true
+						}
+					},
+					modifier = Modifier.fillMaxSize().clip(shape),
 				)
 			}
 		}

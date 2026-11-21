@@ -588,11 +588,38 @@ private fun HubServicesOverviewCard(
 	appVersionName: String,
 	hasNewVersion: Boolean,
 	positiveColor: Color,
-	onOpenOnboarding: () -> Unit,
+	@Suppress("UNUSED_PARAMETER") onOpenOnboarding: () -> Unit,
 	onOpenMeloKeep: () -> Unit,
 	onOpenNavidrome: () -> Unit,
 	onOpenVersion: () -> Unit
 ) {
+	val navidromeOnline = navidromeConnected && !navidromeRestoring
+	val onlineCount = (if (meloConnected) 1 else 0) + (if (navidromeOnline) 1 else 0)
+	val summaryText = when {
+		onlineCount == 2 -> "双服务在线"
+		onlineCount == 1 -> "单服务在线"
+		navidromeRestoring -> "正在恢复连接"
+		else -> "尚未连接"
+	}
+	val summaryAccent = when {
+		onlineCount == 2 -> positiveColor
+		onlineCount == 1 || navidromeRestoring -> MaterialTheme.colorScheme.primary
+		else -> MaterialTheme.colorScheme.onSurfaceVariant
+	}
+	val summaryDotColor = when {
+		onlineCount == 2 -> positiveColor
+		onlineCount == 1 || navidromeRestoring -> MaterialTheme.colorScheme.primary
+		else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)
+	}
+	val summaryBg = when {
+		onlineCount > 0 || navidromeRestoring -> summaryAccent.copy(alpha = 0.11f)
+		else -> MaterialTheme.colorScheme.surfaceContainerHigh
+	}
+	val summaryBorder = when {
+		onlineCount > 0 || navidromeRestoring -> summaryAccent.copy(alpha = 0.28f)
+		else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+	}
+
 	MeloGroupedCard {
 		Column(modifier = Modifier.fillMaxWidth()) {
 			Column(
@@ -612,26 +639,30 @@ private fun HubServicesOverviewCard(
 						fontWeight = FontWeight.SemiBold,
 						color = MaterialTheme.colorScheme.onSurface
 					)
-					Row(
-						modifier = Modifier
-							.clip(RoundedCornerShape(8.dp))
-							.clickable(onClick = onOpenOnboarding)
-							.padding(horizontal = 6.dp, vertical = 3.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(2.dp)
+					Surface(
+						shape = CircleShape,
+						color = summaryBg,
+						border = BorderStroke(MeloHairlineWidth, summaryBorder)
 					) {
-						Text(
-							text = "连接向导",
-							style = MaterialTheme.typography.labelMedium,
-							fontWeight = FontWeight.Medium,
-							color = MaterialTheme.colorScheme.primary
-						)
-						Icon(
-							imageVector = Icons.Outlined.ChevronForward,
-							contentDescription = null,
-							tint = MaterialTheme.colorScheme.primary,
-							modifier = Modifier.size(14.dp)
-						)
+						Row(
+							modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(5.dp)
+						) {
+							Box(
+								modifier = Modifier
+									.size(6.dp)
+									.clip(CircleShape)
+									.background(summaryDotColor)
+							)
+							Text(
+								text = summaryText,
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = FontWeight.Medium,
+								color = summaryAccent,
+								maxLines = 1
+							)
+						}
 					}
 				}
 
@@ -886,9 +917,14 @@ internal fun HubSettingsRow(
 }
 
 private fun compactHubPresetLabel(descriptor: MeloStudioPresets.Descriptor): String = when (descriptor.id) {
-	MeloStudioPresets.OBSIDIAN -> "曜石黑"
-	MeloStudioPresets.VINYL_GOLD -> "流金黑"
-	MeloStudioPresets.PURE_LIGHT -> "纯净白"
+	MeloStudioPresets.OBSIDIAN -> "曜石录音室"
+	MeloStudioPresets.VINYL_GOLD -> "流金黑胶"
+	MeloStudioPresets.MIDNIGHT_AURORA -> "午夜极光"
+	MeloStudioPresets.CYBER_AMETHYST -> "暗紫霓虹"
+	MeloStudioPresets.PURE_LIGHT -> "纯净晨雾"
+	MeloStudioPresets.WARM_VINYL -> "暖调黑胶纸"
+	MeloStudioPresets.NORDIC_FROST -> "北欧冰川"
+	MeloStudioPresets.ROSE_MIST -> "雾樱漫音"
 	MeloStudioPresets.DYNAMIC -> "跟随封面"
 	else -> descriptor.title
 }

@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -803,6 +804,7 @@ internal fun IosLibArtistDetailScreen(
 ) {
 	val scope = rememberCoroutineScope()
 	var artist by remember(artistId) { mutableStateOf<IosArtistSummary?>(null) }
+	var artistInfoImageUrl by remember(artistId) { mutableStateOf<String?>(null) }
 	var albums by remember(artistId) { mutableStateOf<List<IosAlbumSummary>>(emptyList()) }
 	var topSongs by remember(artistId) { mutableStateOf<List<IosTrackItem>>(emptyList()) }
 	var similarArtists by remember(artistId) { mutableStateOf<List<IosArtistSummary>>(emptyList()) }
@@ -819,9 +821,10 @@ internal fun IosLibArtistDetailScreen(
 			albums = list
 			if (a.name.isNotBlank()) resolvedName = a.name
 		}
-		val (tops, sims) = subsonicManager.fetchArtistTopSongsAndSimilar(artistId, resolvedName)
-		topSongs = tops
-		similarArtists = sims
+		val extra = subsonicManager.fetchArtistExtraInfo(artistId, resolvedName)
+		topSongs = extra.topSongs
+		similarArtists = extra.similarArtists
+		artistInfoImageUrl = extra.imageUrl
 		loading = false
 	}
 
@@ -887,11 +890,12 @@ internal fun IosLibArtistDetailScreen(
 							horizontalAlignment = Alignment.CenterHorizontally,
 							verticalArrangement = Arrangement.spacedBy(12.dp),
 						) {
-							CoverArtBox(
+							IosArtistAvatar(
+								artistName = artist?.name ?: artistName,
 								coverUrl = artist?.coverUrl,
+								artistImageUrl = artist?.artistImageUrl ?: artistInfoImageUrl,
 								size = 132.dp,
-								cornerRadius = 66.dp,
-								modifier = Modifier.border(IosHairlineWidth, iosLibHairlineBorderColor(), CircleShape),
+								border = BorderStroke(IosHairlineWidth, iosLibHairlineBorderColor()),
 							)
 
 							Column(
@@ -1125,11 +1129,12 @@ internal fun IosLibArtistDetailScreen(
 											horizontalAlignment = Alignment.CenterHorizontally,
 											verticalArrangement = Arrangement.spacedBy(6.dp),
 										) {
-											CoverArtBox(
+											IosArtistAvatar(
+												artistName = sim.name,
 												coverUrl = sim.coverUrl,
+												artistImageUrl = sim.artistImageUrl,
 												size = 64.dp,
-												cornerRadius = 32.dp,
-												modifier = Modifier.border(IosHairlineWidth, iosLibHairlineBorderColor(), CircleShape),
+												border = BorderStroke(IosHairlineWidth, iosLibHairlineBorderColor()),
 											)
 											Text(
 												text = sim.name,
@@ -1543,7 +1548,12 @@ internal fun IosLibNavFavoritesScreen(
 										verticalAlignment = Alignment.CenterVertically,
 										horizontalArrangement = Arrangement.spacedBy(12.dp),
 									) {
-										CoverArtBox(coverUrl = artist.coverUrl, size = 44.dp, cornerRadius = 22.dp)
+										IosArtistAvatar(
+											artistName = artist.name,
+											coverUrl = artist.coverUrl,
+											artistImageUrl = artist.artistImageUrl,
+											size = 44.dp,
+										)
 										Column(modifier = Modifier.weight(1f)) {
 											Text(
 												text = artist.name,

@@ -31,8 +31,7 @@ import paige.navic.domain.model.settings.ThemeMode
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.theme.MeloStudioPresets
 import paige.navic.ui.theme.ObsidianStudioColorScheme
-import paige.navic.ui.theme.PureLightStudioColorScheme
-import paige.navic.ui.theme.VinylGoldStudioColorScheme
+import paige.navic.ui.theme.resolveStaticStudioColorScheme
 import coil3.compose.LocalPlatformContext as LocalCoilPlatformContext
 
 @Composable
@@ -89,16 +88,15 @@ fun rememberColorSchemeFromCoverArt(
 
 @Composable
 fun rememberColorSchemeForCurrentSong(forceDark: Boolean = false): ColorScheme {
+	val preferenceManager = koinInject<PreferenceManager>()
 	val meloSettingsStore = koinInject<MeloSettingsStore>()
 	val studioPreset by meloSettingsStore.studioThemePreset.collectAsStateWithLifecycle()
 
 	if (studioPreset != MeloStudioPresets.DYNAMIC) {
-		return when (studioPreset) {
-			MeloStudioPresets.PURE_LIGHT -> PureLightStudioColorScheme
-			MeloStudioPresets.VINYL_GOLD -> VinylGoldStudioColorScheme
-			MeloStudioPresets.OBSIDIAN -> ObsidianStudioColorScheme
-			else -> ObsidianStudioColorScheme
-		}
+		return resolveStaticStudioColorScheme(
+			preset = studioPreset,
+			amoled = preferenceManager.amoled
+		) ?: ObsidianStudioColorScheme
 	}
 
 	val player = koinInject<MediaPlayer>()

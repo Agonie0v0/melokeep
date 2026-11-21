@@ -517,6 +517,13 @@ internal fun IosLibDeviceLocalSection(
 										audioPlayer.playQueue(artist.tracks, 0)
 									}
 								},
+								leading = {
+									IosArtistAvatar(
+										artistName = artist.name,
+										size = 40.dp,
+										border = null,
+									)
+								},
 							)
 							if (idx < filteredArtists.lastIndex) {
 								IosHairlineDivider(startIndent = 64.dp)
@@ -1078,6 +1085,7 @@ private fun IosDeviceGroupRow(
 	isLast: Boolean,
 	onClick: () -> Unit,
 	onPlayAll: () -> Unit,
+	leading: (@Composable () -> Unit)? = null,
 ) {
 	Surface(
 		shape = iosLibGroupedItemShape(isFirst = isFirst, isLast = isLast),
@@ -1093,19 +1101,23 @@ private fun IosDeviceGroupRow(
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(12.dp),
 		) {
-			Box(
-				modifier = Modifier
-					.size(40.dp)
-					.clip(RoundedCornerShape(10.dp))
-					.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-				contentAlignment = Alignment.Center,
-			) {
-				Icon(
-					imageVector = icon,
-					contentDescription = null,
-					tint = MaterialTheme.colorScheme.primary,
-					modifier = Modifier.size(20.dp),
-				)
+			if (leading != null) {
+				leading()
+			} else {
+				Box(
+					modifier = Modifier
+						.size(40.dp)
+						.clip(RoundedCornerShape(10.dp))
+						.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+					contentAlignment = Alignment.Center,
+				) {
+					Icon(
+						imageVector = icon,
+						contentDescription = null,
+						tint = MaterialTheme.colorScheme.primary,
+						modifier = Modifier.size(20.dp),
+					)
+				}
 			}
 			Column(modifier = Modifier.weight(1f)) {
 				Text(

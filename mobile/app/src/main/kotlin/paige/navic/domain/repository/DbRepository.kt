@@ -579,6 +579,7 @@ class DbRepository(
 
 		val batch = sessionManager.api.getArtists().index
 			.flatMap { index -> index.artists.map { artist -> artist.toEntity() } }
+			.map { entity -> entity.copy(artistImageUrl = entity.artistImageUrl.cleanArtistImageUrl()) }
 		artists.addAll(batch)
 		//}
 
@@ -609,14 +610,28 @@ class DbRepository(
 		val currentEntity = artistDao.getArtistById(artistId)
 			?: throw Exception("Artist not found in local DB")
 
+		val resolvedImageUrl = artistInfo.largeImageUrl.cleanArtistImageUrl()
+			?: artistInfo.mediumImageUrl.cleanArtistImageUrl()
+			?: currentEntity.artistImageUrl.cleanArtistImageUrl()
+
 		val updatedEntity = currentEntity.copy(
 			biography = artistInfo.biography,
 			similarArtistIds = simIds,
-			lastFmUrl = artistInfo.lastFmUrl
+			lastFmUrl = artistInfo.lastFmUrl,
+			artistImageUrl = resolvedImageUrl
 		)
 
 		artistDao.insertArtist(updatedEntity)
 
 		updatedEntity.toDomainModel()
+	}
+
+	private fun String?.cleanArtistImageUrl(): String? =
+		this?.trim()?.takeIf { url ->
+			url.isNotEmpty() && !url.contains(LASTFM_DEFAULT_STAR_HASH, ignoreCase = true)
+		}
+
+	private companion object {
+		const val LASTFM_DEFAULT_STAR_HASH = "2a96cbd8b46e442fc41c2b86b821562f"
 	}
 }

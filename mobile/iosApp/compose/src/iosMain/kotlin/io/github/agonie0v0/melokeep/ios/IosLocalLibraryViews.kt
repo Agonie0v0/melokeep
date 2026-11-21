@@ -14,7 +14,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -603,6 +602,45 @@ internal fun IosLibLocalDetailScreen(
 						title = route.name,
 						onBack = onBack,
 					)
+					if (group != null) {
+						Surface(
+							shape = RoundedCornerShape(14.dp),
+							color = MaterialTheme.colorScheme.surfaceContainer,
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 6.dp),
+						) {
+							Row(
+								modifier = Modifier.padding(12.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
+							) {
+								IosArtistAvatar(
+									artistName = group.name,
+									coverUrl = group.cover,
+									size = 52.dp,
+									border = BorderStroke(IosHairlineWidth, iosLibHairlineBorderColor()),
+									preferMeloAvatar = true,
+								)
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp),
+								) {
+									Text(
+										text = group.name,
+										style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+									Text(
+										text = "${group.albumCount} 张专辑 · ${group.items.size} 首",
+										style = MaterialTheme.typography.bodySmall.tabularNums(),
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+								}
+							}
+						}
+					}
 					LocalTrackListView(
 						items = group?.items.orEmpty(),
 						favoriteIds = localState.favoriteIds,
@@ -1048,11 +1086,12 @@ private fun LocalOverviewContent(
 							horizontalAlignment = Alignment.CenterHorizontally,
 							verticalArrangement = Arrangement.spacedBy(6.dp),
 						) {
-							CoverArtBox(
+							IosArtistAvatar(
+								artistName = artist.name,
 								coverUrl = artist.cover,
 								size = 64.dp,
-								cornerRadius = 32.dp,
-								modifier = Modifier.border(IosHairlineWidth, iosLibHairlineBorderColor(), CircleShape),
+								border = BorderStroke(IosHairlineWidth, iosLibHairlineBorderColor()),
+								preferMeloAvatar = true,
 							)
 							Text(
 								text = artist.name,
@@ -1226,7 +1265,12 @@ private fun LocalArtistsContent(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(12.dp),
 						) {
-							CoverArtBox(coverUrl = artist.cover, size = 44.dp, cornerRadius = 22.dp)
+							IosArtistAvatar(
+								artistName = artist.name,
+								coverUrl = artist.cover,
+								size = 44.dp,
+								preferMeloAvatar = true,
+							)
 							Column(modifier = Modifier.weight(1f)) {
 								Text(
 									text = artist.name,

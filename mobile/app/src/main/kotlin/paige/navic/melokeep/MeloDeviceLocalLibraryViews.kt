@@ -103,7 +103,6 @@ import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Add
 import paige.navic.ui.icons.outlined.Album
 import paige.navic.ui.icons.outlined.ArrowBack
-import paige.navic.ui.icons.outlined.Artist
 import paige.navic.ui.icons.outlined.Check
 import paige.navic.ui.icons.outlined.Checklist
 import paige.navic.ui.icons.outlined.ChevronForward
@@ -1210,28 +1209,14 @@ private fun DeviceArtistRow(
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(12.dp)
 		) {
-			Box(
+			MeloArtistAvatar(
+				artistName = artist.name,
+				coverArtId = artist.coverArtId,
 				modifier = Modifier
 					.size(44.dp)
-					.clip(CircleShape)
-					.background(MaterialTheme.colorScheme.surfaceContainerHigh)
 					.border(MeloHairlineWidth, libraryHairlineBorderColor(), CircleShape),
-				contentAlignment = Alignment.Center
-			) {
-				Icon(
-					imageVector = Icons.Outlined.Artist,
-					contentDescription = null,
-					tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-					modifier = Modifier.size(20.dp)
-				)
-				if (!artist.coverArtId.isNullOrBlank()) {
-					CoverArt(
-						coverArtId = artist.coverArtId,
-						modifier = Modifier.fillMaxSize(),
-						shape = CircleShape
-					)
-				}
-			}
+				shape = CircleShape
+			)
 
 			Column(modifier = Modifier.weight(1f)) {
 				Text(

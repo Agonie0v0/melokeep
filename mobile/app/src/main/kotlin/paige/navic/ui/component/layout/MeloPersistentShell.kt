@@ -395,7 +395,6 @@ fun MeloPlayerDeck(
 	}.collectAsStateWithLifecycle(emptySet())
 
 	val song = snapshot.song
-	if (song == null && preferenceManager.hideIfIdle) return
 
 	var enqueuingThisSong by remember(song?.id) { mutableStateOf(false) }
 

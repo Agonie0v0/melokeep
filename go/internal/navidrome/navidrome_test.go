@@ -98,7 +98,7 @@ func TestNavidromeCRUDScanStreamAndDeletionBoundary(t *testing.T) {
 				"subsonic-response": map[string]any{
 					"status": "ok",
 					"artists": map[string]any{
-						"index": []map[string]any{{"artist": []map[string]any{{"id": "ar1", "name": "独立乐手", "albumCount": 10}}}},
+						"index": []map[string]any{{"artist": []map[string]any{{"id": "ar1", "name": "独立乐手", "albumCount": 10, "coverArt": "ar-art-1"}}}},
 					},
 				},
 			})
@@ -204,8 +204,15 @@ func TestNavidromeCRUDScanStreamAndDeletionBoundary(t *testing.T) {
 	if scan, err := client.StartScan(ctx, admin); err != nil || !scan.Scanning {
 		t.Fatalf("StartScan failed: %+v %v", scan, err)
 	}
-	if artists, err := client.GetArtists(ctx); err != nil || len(artists) != 1 {
+	artists, err := client.GetArtists(ctx)
+	if err != nil || len(artists) != 1 {
 		t.Fatalf("GetArtists failed: %+v %v", artists, err)
+	}
+	if artists[0].Cover == nil || *artists[0].Cover != "/api/navidrome/cover/ar-art-1" {
+		t.Fatalf("unexpected GetArtists Cover: %#v", artists[0].Cover)
+	}
+	if artists[0].AvatarURL != "/api/artists/avatar?name=%E7%8B%AC%E7%AB%8B%E4%B9%90%E6%89%8B" {
+		t.Fatalf("unexpected GetArtists AvatarURL: %q", artists[0].AvatarURL)
 	}
 	if alb, err := client.GetAlbum(ctx, "al1"); err != nil || len(alb.Tracks) != 1 {
 		t.Fatalf("GetAlbum failed: %+v %v", alb, err)
@@ -466,5 +473,118 @@ func TestOpenMediaDownloadFallbackAndJSONRejection(t *testing.T) {
 	}
 	if downloadCalls.Load() < 3 {
 		t.Fatalf("expected download endpoint called for each test case")
+	}
+}
+
+func TestNavidromeArtistCoverAndAvatarURL(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/rest/"), ".view") {
+		case "getArtists":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"artists": map[string]any{
+						"index": []map[string]any{
+							{
+								"artist": []map[string]any{
+									{
+										"id":             "ar-cover",
+										"name":           "陈绮贞",
+										"albumCount":     6,
+										"coverArt":       "ar-ar-cover",
+										"artistImageUrl": "https://img.example.com/ignored.jpg",
+									},
+									{
+										"id":             "ar-placeholder",
+										"name":           "A / B",
+										"albumCount":     2,
+										"artistImageUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png",
+									},
+									{
+										"id":             "ar-imgurl",
+										"name":           "Daft Punk",
+										"albumCount":     4,
+										"artistImageUrl": "https://cdn.example.com/daft.jpg",
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		case "getArtist":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subsonic-response": map[string]any{
+					"status": "ok",
+					"artist": map[string]any{
+						"id":         "ar-cover",
+						"name":       "陈绮贞",
+						"coverArt":   "ar-ar-cover",
+						"albumCount": 1,
+						"album": []map[string]any{
+							{"id": "al-1", "name": "华丽的冒险", "artist": "陈绮贞", "songCount": 10},
+						},
+					},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	st := newTestStore(t)
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+
+	client, err := NewClient(pool, st, Settings{}, nil)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := client.UpdateSettings(ctx, auth.WebAdminActor("admin"), SettingsUpdate{
+		Enabled:  true,
+		URL:      srv.URL,
+		Username: "alice",
+		Password: "secret",
+	}); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+
+	artists, err := client.GetArtists(ctx)
+	if err != nil || len(artists) != 3 {
+		t.Fatalf("GetArtists failed: %+v %v", artists, err)
+	}
+	if artists[0].Cover == nil || *artists[0].Cover != "/api/navidrome/cover/ar-ar-cover" {
+		t.Fatalf("expected coverArt mapped Cover for artist 0, got %#v", artists[0].Cover)
+	}
+	if artists[0].AvatarURL != "/api/artists/avatar?name=%E9%99%88%E7%BB%AE%E8%B4%9E" {
+		t.Fatalf("unexpected artist 0 avatar_url: %q", artists[0].AvatarURL)
+	}
+	if artists[1].Cover != nil {
+		t.Fatalf("expected Last.fm placeholder artistImageUrl filtered out, got %q", *artists[1].Cover)
+	}
+	if artists[1].AvatarURL != "/api/artists/avatar?name=A+%2F+B" {
+		t.Fatalf("unexpected artist 1 avatar_url: %q", artists[1].AvatarURL)
+	}
+	if artists[2].Cover == nil || *artists[2].Cover != "https://cdn.example.com/daft.jpg" {
+		t.Fatalf("expected valid artistImageUrl preserved in Cover, got %#v", artists[2].Cover)
+	}
+	if artists[2].AvatarURL != "/api/artists/avatar?name=Daft+Punk" {
+		t.Fatalf("unexpected artist 2 avatar_url: %q", artists[2].AvatarURL)
+	}
+
+	detail, err := client.GetArtist(ctx, "ar-cover")
+	if err != nil {
+		t.Fatalf("GetArtist failed: %v", err)
+	}
+	if detail.ID != "ar-cover" || detail.Name != "陈绮贞" || len(detail.Albums) != 1 {
+		t.Fatalf("unexpected ArtistDetailDTO: %+v", detail)
+	}
+	if detail.Cover == nil || *detail.Cover != "/api/navidrome/cover/ar-ar-cover" {
+		t.Fatalf("unexpected ArtistDetailDTO Cover: %#v", detail.Cover)
+	}
+	if detail.AvatarURL != "/api/artists/avatar?name=%E9%99%88%E7%BB%AE%E8%B4%9E" {
+		t.Fatalf("unexpected ArtistDetailDTO AvatarURL: %q", detail.AvatarURL)
 	}
 }

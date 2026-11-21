@@ -114,6 +114,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -131,13 +132,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.hideFromAccessibility
@@ -160,6 +166,8 @@ import io.github.agonie0v0.melokeep.shared.MeloTrack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import platform.Foundation.NSDate
+import platform.Foundation.timeIntervalSince1970
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -306,23 +314,37 @@ fun MeloKeepIosApp(
 		amoledBlack = prefs.amoledBlack,
 		seedColor = seedColor,
 	) {
-		val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-		val chromeBottomPadding = PaddingValues(
-			bottom = navBottom + if (currentTrack != null) MeloBottomChromeClearance else 88.dp,
-		)
-		val bgColor = MaterialTheme.colorScheme.background
+		CompositionLocalProvider(LocalIosMeloSettingsStore provides settingsStore) {
+			val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+			val chromeBottomPadding = PaddingValues(
+				bottom = navBottom + if (currentTrack != null) MeloBottomChromeClearance else 88.dp,
+			)
+			val scrollThresholdPx = with(LocalDensity.current) { 52.dp.toPx() }
+			val bottomBarScrollManager = remember(scrollThresholdPx) {
+				IosBottomBarScrollManager(scrollThresholdPx)
+			}
+			val hideOnScroll = prefs.hideBottomBarOnScroll && !showOnboarding && !nowPlayingExpanded
+			LaunchedEffect(currentTab, showOnboarding, nowPlayingExpanded, prefs.hideBottomBarOnScroll) {
+				bottomBarScrollManager.reset()
+			}
+			val bottomChromeHiddenByScroll = hideOnScroll && bottomBarScrollManager.isTriggered
+			val bgColor = MaterialTheme.colorScheme.background
 
-		Box(
-			modifier = Modifier
-				.fillMaxSize()
-				.background(bgColor),
-		) {
-			// 4-Tab 零销毁保活主工作台：首次访问挂载，切 Tab 仅 GPU alpha + zIndex 切换
 			Box(
 				modifier = Modifier
 					.fillMaxSize()
-					.statusBarsPadding(),
+					.background(bgColor),
 			) {
+				// 4-Tab 零销毁保活主工作台：首次访问挂载，切 Tab 仅 GPU alpha + zIndex 切换
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.statusBarsPadding()
+						.then(
+							if (hideOnScroll) Modifier.nestedScroll(bottomBarScrollManager.connection)
+							else Modifier,
+						),
+				) {
 				IosRootTab.entries.forEach { tab ->
 					val isSelected = tab == currentTab
 					val shouldMount = isSelected || tab in mountedTabs
@@ -439,6 +461,7 @@ fun MeloKeepIosApp(
 					activeDownloadIds = activeDownloadIds,
 					serverActiveTasks = studioState.activeTaskCount,
 					currentTab = currentTab,
+					scrollCollapsed = bottomChromeHiddenByScroll,
 					onSelectTab = { currentTab = it },
 					onOpenNowPlaying = { nowPlayingExpanded = true },
 					onTogglePlayPause = { audioPlayer.togglePlayPause() },
@@ -471,12 +494,12 @@ fun MeloKeepIosApp(
 				exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
 			) {
 				if (currentTrack != null) {
-					val isPureLight = studioPreset == MeloStudioPresets.PURE_LIGHT
-					val forceDark = if (isPureLight) false else (studioPreset != MeloStudioPresets.DYNAMIC)
+					val isLightPreset = MeloStudioPresets.isLightPreset(studioPreset)
+					val forceDark = if (isLightPreset) false else (studioPreset != MeloStudioPresets.DYNAMIC)
 					MeloKeepIosTheme(
 						studioPreset = studioPreset,
-						themeMode = if (isPureLight) IosThemeMode.LIGHT else prefs.themeMode,
-						amoledBlack = if (isPureLight) false else prefs.amoledBlack,
+						themeMode = if (isLightPreset) IosThemeMode.LIGHT else prefs.themeMode,
+						amoledBlack = if (isLightPreset) false else prefs.amoledBlack,
 						seedColor = seedColor,
 						forceDark = forceDark,
 					) {
@@ -515,6 +538,7 @@ fun MeloKeepIosApp(
 			val snackbarBottom = when {
 				nowPlayingExpanded -> navBottom + 24.dp
 				showOnboarding -> navBottom + 84.dp
+				bottomChromeHiddenByScroll -> navBottom + 16.dp
 				currentTrack != null -> navBottom + MeloBottomChromeClearance + 4.dp
 				else -> navBottom + 90.dp
 			}
@@ -525,6 +549,81 @@ fun MeloKeepIosApp(
 					.padding(horizontal = 12.dp)
 					.padding(bottom = snackbarBottom),
 			)
+		}
+		}
+	}
+}
+
+private class IosBottomBarScrollManager(thresholdPx: Float) {
+	var isTriggered by mutableStateOf(false)
+	private var accumulator = 0f
+	private var lastToggleTimeMs = 0L
+
+	private val hideThresholdPx: Float = thresholdPx.coerceAtLeast(16f)
+	private val showThresholdPx: Float = (thresholdPx * 0.35f).coerceAtLeast(12f)
+
+	fun reset() {
+		isTriggered = false
+		accumulator = 0f
+		lastToggleTimeMs = 0L
+	}
+
+	private fun nowMs(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+
+	private fun isWithinCooldown(cooldownMs: Long): Boolean {
+		val last = lastToggleTimeMs
+		if (last == 0L) return false
+		val elapsed = nowMs() - last
+		return elapsed in 0L until cooldownMs
+	}
+
+	val connection = object : NestedScrollConnection {
+		override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+			if (!isTriggered) return Offset.Zero
+			val deltaY = available.y
+			if (abs(deltaY) < 1f || abs(available.x) > abs(deltaY) * 1.15f) {
+				return Offset.Zero
+			}
+			if (source == NestedScrollSource.SideEffect && isWithinCooldown(220L)) {
+				return Offset.Zero
+			}
+			if (deltaY < 0f) {
+				accumulator = 0f
+				return Offset.Zero
+			}
+			accumulator += deltaY
+			if (accumulator >= showThresholdPx) {
+				isTriggered = false
+				accumulator = 0f
+				lastToggleTimeMs = nowMs()
+			}
+			return Offset.Zero
+		}
+
+		override fun onPostScroll(
+			consumed: Offset,
+			available: Offset,
+			source: NestedScrollSource,
+		): Offset {
+			if (isTriggered) return Offset.Zero
+			val deltaY = consumed.y
+			if (abs(deltaY) < 1f || abs(consumed.x) > abs(deltaY) * 1.15f) {
+				return Offset.Zero
+			}
+			if (source == NestedScrollSource.SideEffect && isWithinCooldown(220L)) {
+				return Offset.Zero
+			}
+			if (deltaY > 0f) {
+				accumulator = 0f
+				return Offset.Zero
+			}
+			accumulator += deltaY
+			if (accumulator <= -hideThresholdPx) {
+				isTriggered = true
+				accumulator = 0f
+				lastToggleTimeMs = nowMs()
+			}
+			return Offset.Zero
 		}
 	}
 }
@@ -541,6 +640,7 @@ private fun IosPersistentBottomOverlay(
 	activeDownloadIds: Set<String>,
 	serverActiveTasks: Int,
 	currentTab: IosRootTab,
+	scrollCollapsed: Boolean = false,
 	onSelectTab: (IosRootTab) -> Unit,
 	onOpenNowPlaying: () -> Unit,
 	onTogglePlayPause: () -> Unit,
@@ -548,9 +648,28 @@ private fun IosPersistentBottomOverlay(
 	onPrevious: () -> Unit,
 	onEnqueueIngest: (IosTrackItem) -> Unit,
 ) {
+	var overlayHeightPx by remember { mutableFloatStateOf(0f) }
+	val collapseProgress by animateFloatAsState(
+		targetValue = if (scrollCollapsed) 1f else 0f,
+		animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+		label = "IosBottomOverlayScrollCollapse",
+	)
 	Box(
 		modifier = Modifier
 			.fillMaxWidth()
+			.onSizeChanged { overlayHeightPx = it.height.toFloat() }
+			.graphicsLayer {
+				val travelY = if (overlayHeightPx > 0f) overlayHeightPx + 16f else 420f
+				translationY = collapseProgress * travelY
+				alpha = (1f - collapseProgress * 1.15f).coerceIn(0f, 1f)
+			}
+			.then(
+				if (scrollCollapsed) {
+					Modifier.clearAndSetSemantics { hideFromAccessibility() }
+				} else {
+					Modifier
+				},
+			)
 			.background(
 				Brush.verticalGradient(
 					0.0f to Color.Transparent,

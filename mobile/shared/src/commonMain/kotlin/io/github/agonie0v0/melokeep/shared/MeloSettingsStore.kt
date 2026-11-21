@@ -268,7 +268,17 @@ class MeloSettingsStore(
 		private const val KEY_STUDIO_THEME_PRESET = "melo_studio_theme_preset"
 		private const val KEY_ONBOARDING_DISMISSED = "melo_onboarding_dismissed"
 		private const val DEFAULT_STUDIO_THEME_PRESET = "obsidian"
-		private val SUPPORTED_THEME_PRESETS = setOf("obsidian", "vinyl-gold", "pure-light", "dynamic")
+		private val SUPPORTED_THEME_PRESETS = setOf(
+			"obsidian",
+			"vinyl-gold",
+			"midnight-aurora",
+			"cyber-amethyst",
+			"pure-light",
+			"warm-vinyl",
+			"nordic-frost",
+			"rose-mist",
+			"dynamic",
+		)
 
 		fun normalizeBaseUrl(raw: String): String {
 			val trimmed = raw.trim().trimEnd('/')

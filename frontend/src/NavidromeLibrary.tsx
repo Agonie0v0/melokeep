@@ -43,9 +43,66 @@ interface Artist {
   id: string;
   name: string;
   album_count: number;
+  cover?: string | null;
+  avatar_url?: string | null;
+}
+interface ArtistDetail {
+  id?: string;
+  name: string;
+  cover?: string | null;
+  avatar_url?: string | null;
+  albums: Album[];
 }
 interface AlbumDetail extends Album {
   tracks: Track[];
+}
+
+function ArtistAvatar({
+  name,
+  cover,
+  avatarUrl,
+  sizeClass = "",
+}: {
+  name: string;
+  cover?: string | null;
+  avatarUrl?: string | null;
+  sizeClass?: "list" | "cards" | "large" | "";
+}) {
+  const primary = cover?.trim() || "";
+  const secondary = avatarUrl?.trim() || "";
+  const candidates = useMemo(() => {
+    const list: string[] = [];
+    if (primary) list.push(primary);
+    if (secondary && secondary !== primary) list.push(secondary);
+    return list;
+  }, [primary, secondary]);
+
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setAttempt(0);
+  }, [primary, secondary]);
+
+  const imgSrc = candidates[attempt] || "";
+
+  return (
+    <span
+      className={`nav-artist-avatar${sizeClass ? ` nav-artist-avatar-${sizeClass}` : ""}`}
+      aria-label={sizeClass === "large" && name ? `${name} 头像` : undefined}
+    >
+      {imgSrc ? (
+        <img
+          key={imgSrc}
+          src={imgSrc}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setAttempt((idx) => idx + 1)}
+        />
+      ) : (
+        <Users aria-hidden="true" />
+      )}
+    </span>
+  );
 }
 
 function preference(key: string, values: string[], fallback: string) {
@@ -113,6 +170,7 @@ export function NavidromeLibrary({
   const [artists, setArtists] = useState<Artist[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [artist, setArtist] = useState<Artist | null>(null);
+  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -227,12 +285,13 @@ export function NavidromeLibrary({
         setTracks(data.tracks);
         setHasMore(data.has_more);
       } else if (artist) {
-        const data = await api<{ albums: Album[] }>(
+        const data = await api<ArtistDetail>(
           `/navidrome/artists/${encodeURIComponent(artist.id)}`,
           "GET",
           undefined,
           abort.signal,
         );
+        setArtistDetail(data);
         setAlbums(data.albums);
         setTracks([]);
         setHasMore(false);
@@ -322,6 +381,7 @@ export function NavidromeLibrary({
   function reset(nextMode: string, persist = true) {
     setMode(nextMode);
     setArtist(null);
+    setArtistDetail(null);
     setAlbum(null);
     setQuery("");
     setSearch("");
@@ -766,7 +826,20 @@ export function NavidromeLibrary({
               </div>
             </div>
           )}
-          {!album && artist && <h3>{artist.name}的专辑</h3>}
+          {!album && artist && (
+            <div className="nav-artist-heading">
+              <ArtistAvatar
+                name={artistDetail?.name || artist.name}
+                cover={artistDetail?.cover ?? artist.cover}
+                avatarUrl={artistDetail?.avatar_url ?? artist.avatar_url}
+                sizeClass="large"
+              />
+              <div>
+                <h3>{artistDetail?.name || artist.name}的专辑</h3>
+                <p>{albums.length || artist.album_count} 张专辑</p>
+              </div>
+            </div>
+          )}
           {!album && query && <h3>“{query}”的搜索结果</h3>}
           {shownTracks.length > 0 && layout === "cards" && (
             <div className="nav-song-cards">
@@ -1024,12 +1097,18 @@ export function NavidromeLibrary({
                   className="nav-artist"
                   key={item.id}
                   onClick={() => {
+                    setArtistDetail(null);
                     setArtist(item);
                     setOffset(0);
                   }}
                 >
-                  <Users />
-                  <span>
+                  <ArtistAvatar
+                    name={item.name}
+                    cover={item.cover}
+                    avatarUrl={item.avatar_url}
+                    sizeClass={layout === "cards" ? "cards" : "list"}
+                  />
+                  <span className="nav-artist-meta">
                     <strong>{item.name}</strong>
                     <small>{item.album_count} 张专辑</small>
                   </span>

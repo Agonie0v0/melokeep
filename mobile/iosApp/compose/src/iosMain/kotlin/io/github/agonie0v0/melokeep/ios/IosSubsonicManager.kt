@@ -150,6 +150,7 @@ data class IosPlaybackPrefs(
 	val lyricsAlign: String = "center",
 	val themeMode: IosThemeMode = IosThemeMode.SYSTEM,
 	val amoledBlack: Boolean = false,
+	val hideBottomBarOnScroll: Boolean = true,
 )
 
 internal fun normalizeIosLyricsHexOrEmpty(raw: String): String {
@@ -202,7 +203,14 @@ data class IosArtistSummary(
 	val albumCount: Int,
 	val coverArtId: String?,
 	val coverUrl: String?,
+	val artistImageUrl: String? = null,
 	val isStarred: Boolean = false,
+)
+
+data class IosArtistExtraInfo(
+	val topSongs: List<IosTrackItem>,
+	val similarArtists: List<IosArtistSummary>,
+	val imageUrl: String? = null,
 )
 
 data class IosPlaylistSummary(
@@ -829,11 +837,11 @@ class IosSubsonicManager(
 		}
 	}
 
-	suspend fun fetchArtistTopSongsAndSimilar(
+	suspend fun fetchArtistExtraInfo(
 		artistId: String,
 		artistName: String,
-	): Pair<List<IosTrackItem>, List<IosArtistSummary>> {
-		val activeClient = client ?: return emptyList<IosTrackItem>() to emptyList()
+	): IosArtistExtraInfo {
+		val activeClient = client ?: return IosArtistExtraInfo(emptyList(), emptyList(), null)
 		val activeServerId = _state.value.activeServer?.id
 		return try {
 			coroutineScope {
@@ -843,18 +851,38 @@ class IosSubsonicManager(
 						else activeClient.getTopSongs(artistName, count = 20).map { it.toIosTrack(activeClient, activeServerId) }
 					}.getOrDefault(emptyList())
 				}
-				val similarDeferred = async {
+				val infoDeferred = async {
 					runCatching {
-						activeClient.getArtistInfoID3(artistId, maxSimilar = 12).similarArtists.map { it.toSummary(activeClient) }
-					}.getOrDefault(emptyList())
+						activeClient.getArtistInfoID3(artistId, maxSimilar = 12)
+					}.getOrNull()
 				}
-				topSongsDeferred.await() to similarDeferred.await()
+				val info = infoDeferred.await()
+				val infoImageUrl = info?.let {
+					sanitizeIosArtistImageUrl(it.largeImageUrl)
+						?: sanitizeIosArtistImageUrl(it.mediumImageUrl)
+						?: sanitizeIosArtistImageUrl(it.smallImageUrl)
+				}
+				val sims = info?.similarArtists.orEmpty().map { it.toSummary(activeClient) }
+				IosArtistExtraInfo(
+					topSongs = topSongsDeferred.await(),
+					similarArtists = sims,
+					imageUrl = infoImageUrl,
+				)
 			}
 		} catch (e: CancellationException) {
 			throw e
 		} catch (_: Throwable) {
-			emptyList<IosTrackItem>() to emptyList()
+			IosArtistExtraInfo(emptyList(), emptyList(), null)
 		}
+	}
+
+	@Suppress("unused")
+	suspend fun fetchArtistTopSongsAndSimilar(
+		artistId: String,
+		artistName: String,
+	): Pair<List<IosTrackItem>, List<IosArtistSummary>> {
+		val info = fetchArtistExtraInfo(artistId, artistName)
+		return info.topSongs to info.similarArtists
 	}
 
 	suspend fun toggleAlbumStar(albumId: String, currentlyStarred: Boolean): Result<Boolean> {
@@ -1523,13 +1551,15 @@ class IosSubsonicManager(
 	}
 
 	private fun Artist.toSummary(activeClient: SubsonicClient): IosArtistSummary {
+		val cleanArtistImageUrl = sanitizeIosArtistImageUrl(artistImageUrl)
+		val subsonicCoverUrl = coverArtId?.let { activeClient.getCoverArtUrl(it, size = "512", auth = true) }
 		return IosArtistSummary(
 			id = id,
 			name = name,
 			albumCount = albumCount,
 			coverArtId = coverArtId,
-			coverUrl = coverArtId?.let { activeClient.getCoverArtUrl(it, size = "512", auth = true) }
-				?: artistImageUrl,
+			coverUrl = subsonicCoverUrl ?: cleanArtistImageUrl,
+			artistImageUrl = cleanArtistImageUrl,
 			isStarred = starredAt != null,
 		)
 	}

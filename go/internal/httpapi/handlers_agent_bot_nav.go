@@ -15,6 +15,7 @@ import (
 
 	"github.com/agonie0v0/melokeep/internal/agent"
 	"github.com/agonie0v0/melokeep/internal/download"
+	"github.com/agonie0v0/melokeep/internal/library"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/search"
 )
@@ -733,6 +734,42 @@ func (s *Server) handleNavidromeCover(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.deps.Navidrome.ProxyCover(w, r, r.PathValue("ident")); err != nil {
 		writeDomainError(w, err)
+	}
+}
+
+func (s *Server) handleArtistAvatar(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" || library.IsIgnoredArtist(name) {
+		writeError(w, http.StatusNotFound, "歌手头像不存在")
+		return
+	}
+	snap := s.currentSnapshot()
+	var (
+		data []byte
+		mime string
+		err  error
+	)
+	if s.deps.Library != nil {
+		data, mime, err = s.deps.Library.ResolveArtistAvatar(r.Context(), snap, name)
+	} else {
+		fetcher := library.NewArtistArtworkFetcher(s.deps.Transport, s.deps.Store, s.deps.Files, library.ArtistArtworkOptions{})
+		data, mime, err = fetcher.ResolveArtistAvatar(r.Context(), snap, name)
+	}
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if mime == "" {
+		mime = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
 	}
 }
 

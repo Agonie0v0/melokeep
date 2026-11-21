@@ -601,28 +601,102 @@
 .nav-artists {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0 28px;
+  gap: 12px;
+  margin-top: 20px;
 }
 .nav-artist {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 20px 8px;
+  gap: 14px;
+  padding: 12px 14px;
   text-align: left;
-  border-bottom: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
   min-width: 0;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
 }
-.nav-artist > svg {
+.nav-artist-avatar {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.nav-artist-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.nav-artist-avatar svg {
+  width: 22px;
+  height: 22px;
+  color: var(--muted);
+}
+.nav-artist-avatar-cards {
+  width: 56px;
+  height: 56px;
+}
+.nav-artist-avatar-cards svg {
+  width: 24px;
+  height: 24px;
+}
+.nav-artist-avatar-large {
+  width: 68px;
+  height: 68px;
+}
+.nav-artist-avatar-large svg {
   width: 28px;
   height: 28px;
-  color: var(--muted);
-  flex-shrink: 0;
+}
+.nav-artist-meta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 .nav-artist strong {
-  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-artist .nav-artist-meta small {
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 .nav-artist:hover {
   background: var(--hover);
+  border-color: var(--line);
+}
+.nav-artist-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 22px;
+  min-width: 0;
+}
+.nav-artist-heading h3 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.nav-artist-heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
 }
 .jobs-top-bar {
   display: flex;
@@ -1089,6 +1163,20 @@
   .nav-album-heading h3 {
     font-size: 21px;
   }
+  .nav-artist-heading {
+    gap: 14px;
+  }
+  .nav-artist-heading h3 {
+    font-size: 19px;
+  }
+  .nav-artist-avatar-large {
+    width: 56px;
+    height: 56px;
+  }
+  .nav-artists-cards {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
   .navidrome-library .library-search {
     flex-basis: 100%;
     min-height: 44px;
@@ -1205,10 +1293,22 @@
 }
 .nav-artists-list {
   grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin-top: 16px;
 }
 .nav-artists-list .nav-artist {
+  padding: 12px 10px;
   border-radius: 0;
-  border-bottom: 1px solid var(--line);
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+}
+.nav-artists-list .nav-artist:hover {
+  background: color-mix(in srgb, var(--subtle) 65%, transparent);
+  border-color: var(--line-soft);
+}
+.nav-artists-list .nav-artist-avatar {
+  background: var(--subtle);
 }
 .navidrome-library .library-modes [aria-pressed="true"] {
   background: var(--surface);

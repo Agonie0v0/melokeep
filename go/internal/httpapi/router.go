@@ -472,6 +472,7 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodGet, "/api/navidrome/artists/{ident}", "navidrome.artist", s.handleNavidromeArtist)
 	s.addRoute(http.MethodGet, "/api/navidrome/search", "navidrome.search", s.handleNavidromeSearch)
 	s.addRoute(http.MethodGet, "/api/navidrome/cover/{ident}", "navidrome.cover", s.handleNavidromeCover)
+	s.addRoute(http.MethodGet, "/api/artists/avatar", "engine_api.artist_avatar", s.handleArtistAvatar)
 	s.addRoute(http.MethodGet, "/api/navidrome/stream/{ident}", "navidrome.stream", s.handleNavidromeStream)
 	s.addRoute(http.MethodGet, "/api/navidrome/download/{ident}", "navidrome.download", s.handleNavidromeDownload)
 	s.addRoute(http.MethodPost, "/api/navidrome/downloads/archive", "navidrome.download_archive", s.handleNavidromeDownloadArchive)

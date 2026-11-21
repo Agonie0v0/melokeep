@@ -1676,104 +1676,30 @@ internal fun IosSettingsThemeAppearanceSheet(
 				verticalArrangement = Arrangement.spacedBy(18.dp),
 			) {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IosSectionLabel(title = "主题预设")
-					MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(10.dp),
-						) {
-							rowPresets.forEach { preset ->
-								val selected = studioPreset == preset.id
-								Surface(
-									onClick = { settingsStore.setStudioThemePreset(preset.id) },
-									shape = RoundedCornerShape(14.dp),
-									color = MaterialTheme.colorScheme.surfaceContainer,
-									border = BorderStroke(
-										width = if (selected) 1.5.dp else IosHairlineWidth,
-										color = if (selected) {
-											MaterialTheme.colorScheme.primary
-										} else {
-											MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-										},
-									),
-									modifier = Modifier.weight(1f),
-								) {
-									Column(
-										modifier = Modifier.padding(12.dp),
-										verticalArrangement = Arrangement.spacedBy(8.dp),
-									) {
-										Row(
-											modifier = Modifier.fillMaxWidth(),
-											horizontalArrangement = Arrangement.SpaceBetween,
-											verticalAlignment = Alignment.CenterVertically,
-										) {
-											Row(
-												horizontalArrangement = Arrangement.spacedBy(4.dp),
-												verticalAlignment = Alignment.CenterVertically,
-											) {
-												Box(
-													modifier = Modifier
-														.size(14.dp)
-														.clip(CircleShape)
-														.background(preset.previewBackground)
-														.border(
-															IosHairlineWidth,
-															MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-															CircleShape,
-														),
-												)
-												Box(
-													modifier = Modifier
-														.size(14.dp)
-														.clip(CircleShape)
-														.background(preset.previewContainer)
-														.border(
-															IosHairlineWidth,
-															MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-															CircleShape,
-														),
-												)
-												Box(
-													modifier = Modifier
-														.size(14.dp)
-														.clip(CircleShape)
-														.background(preset.previewAccent),
-												)
-											}
-											if (selected) {
-												Icon(
-													imageVector = Icons.Rounded.Check,
-													contentDescription = "已选中",
-													tint = MaterialTheme.colorScheme.primary,
-													modifier = Modifier.size(16.dp),
-												)
-											}
-										}
-										Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-											Text(
-												text = preset.title,
-												style = MaterialTheme.typography.bodyMedium,
-												fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-												color = MaterialTheme.colorScheme.onSurface,
-												maxLines = 1,
-												overflow = TextOverflow.Ellipsis,
-											)
-											Text(
-												text = preset.subtitle,
-												style = MaterialTheme.typography.labelSmall,
-												color = MaterialTheme.colorScheme.onSurfaceVariant,
-												maxLines = 1,
-												overflow = TextOverflow.Ellipsis,
-											)
-										}
-									}
-								}
-							}
-							if (rowPresets.size == 1) {
-								Spacer(modifier = Modifier.weight(1f))
-							}
-						}
-					}
+					IosSectionLabel(title = "深色主题")
+					IosThemePresetGrid(
+						presets = MeloStudioPresets.darkPresets,
+						selectedPresetId = studioPreset,
+						onSelect = { settingsStore.setStudioThemePreset(it) },
+					)
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "浅色主题")
+					IosThemePresetGrid(
+						presets = MeloStudioPresets.lightPresets,
+						selectedPresetId = studioPreset,
+						onSelect = { settingsStore.setStudioThemePreset(it) },
+					)
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					IosSectionLabel(title = "动态自适应")
+					IosThemePresetGrid(
+						presets = MeloStudioPresets.dynamicPresets,
+						selectedPresetId = studioPreset,
+						onSelect = { settingsStore.setStudioThemePreset(it) },
+					)
 				}
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1880,7 +1806,154 @@ internal fun IosSettingsThemeAppearanceSheet(
 								),
 							)
 						}
+						IosHairlineDivider(startIndent = 16.dp)
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clickable {
+									subsonicManager.updatePrefs {
+										it.copy(hideBottomBarOnScroll = !it.hideBottomBarOnScroll)
+									}
+								}
+								.padding(horizontal = 16.dp, vertical = 12.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "下滑隐藏底栏",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium,
+									color = MaterialTheme.colorScheme.onSurface,
+								)
+								Text(
+									text = "下滑列表时自动收起播放舱与底栏，上滑恢复",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Switch(
+								checked = prefs.hideBottomBarOnScroll,
+								onCheckedChange = { checked ->
+									subsonicManager.updatePrefs { it.copy(hideBottomBarOnScroll = checked) }
+								},
+								colors = SwitchDefaults.colors(
+									checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+									checkedTrackColor = MaterialTheme.colorScheme.primary,
+								),
+							)
+						}
 					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun IosThemePresetGrid(
+	presets: List<MeloStudioPresets.Descriptor>,
+	selectedPresetId: String,
+	onSelect: (String) -> Unit,
+) {
+	Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+		presets.chunked(2).forEach { rowPresets ->
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+			) {
+				rowPresets.forEach { preset ->
+					val selected = selectedPresetId == preset.id
+					Surface(
+						onClick = { onSelect(preset.id) },
+						shape = RoundedCornerShape(14.dp),
+						color = MaterialTheme.colorScheme.surfaceContainer,
+						border = BorderStroke(
+							width = if (selected) 1.5.dp else IosHairlineWidth,
+							color = if (selected) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+							},
+						),
+						modifier = Modifier.weight(1f),
+					) {
+						Column(
+							modifier = Modifier.padding(12.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Row(
+									horizontalArrangement = Arrangement.spacedBy(4.dp),
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									Box(
+										modifier = Modifier
+											.size(14.dp)
+											.clip(CircleShape)
+											.background(preset.previewBackground)
+											.border(
+												IosHairlineWidth,
+												MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+												CircleShape,
+											),
+									)
+									Box(
+										modifier = Modifier
+											.size(14.dp)
+											.clip(CircleShape)
+											.background(preset.previewContainer)
+											.border(
+												IosHairlineWidth,
+												MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+												CircleShape,
+											),
+									)
+									Box(
+										modifier = Modifier
+											.size(14.dp)
+											.clip(CircleShape)
+											.background(preset.previewAccent),
+									)
+								}
+								if (selected) {
+									Icon(
+										imageVector = Icons.Rounded.Check,
+										contentDescription = "已选中",
+										tint = MaterialTheme.colorScheme.primary,
+										modifier = Modifier.size(16.dp),
+									)
+								}
+							}
+							Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+								Text(
+									text = preset.title,
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+									color = MaterialTheme.colorScheme.onSurface,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+								Text(
+									text = preset.subtitle,
+									style = MaterialTheme.typography.labelSmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
+					}
+				}
+				if (rowPresets.size == 1) {
+					Spacer(modifier = Modifier.weight(1f))
 				}
 			}
 		}

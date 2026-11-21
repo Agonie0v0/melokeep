@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/agonie0v0/melokeep/internal/media"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/store"
+	"github.com/agonie0v0/melokeep/internal/transport"
 )
 
 const (
@@ -343,6 +345,9 @@ type Service struct {
 	opts        ServiceOptions
 	watcher     *Watcher
 
+	artworkMu sync.Mutex
+	artwork   *ArtistArtworkFetcher
+
 	baseCtx    context.Context
 	baseCancel context.CancelFunc
 	bgWG       sync.WaitGroup
@@ -366,6 +371,10 @@ func NewService(
 		}
 	}
 	baseCtx, baseCancel := context.WithCancel(context.Background())
+	var artPool *transport.Pool
+	if scraper != nil {
+		artPool = scraper.pool
+	}
 	s := &Service{
 		store:       st,
 		coordinator: coord,
@@ -373,12 +382,36 @@ func NewService(
 		runner:      runner,
 		scraper:     scraper,
 		opts:        opts,
+		artwork:     NewArtistArtworkFetcher(artPool, st, coord, ArtistArtworkOptions{}),
 		baseCtx:     baseCtx,
 		baseCancel:  baseCancel,
 		controls:    make(map[string]*jobControl),
 	}
 	s.watcher = NewWatcher(s)
 	return s
+}
+
+func (s *Service) artworkFetcher() *ArtistArtworkFetcher {
+	if s == nil {
+		return nil
+	}
+	s.artworkMu.Lock()
+	defer s.artworkMu.Unlock()
+	if s.artwork == nil {
+		var artPool *transport.Pool
+		if s.scraper != nil {
+			artPool = s.scraper.pool
+		}
+		s.artwork = NewArtistArtworkFetcher(artPool, s.store, s.coordinator, ArtistArtworkOptions{})
+	}
+	return s.artwork
+}
+
+// SetArtistArtworkOptions updates artist portrait scraper options (primarily for tests).
+func (s *Service) SetArtistArtworkOptions(opts ArtistArtworkOptions) {
+	if f := s.artworkFetcher(); f != nil {
+		f.SetOptions(opts)
+	}
 }
 
 func (s *Service) log(level, taskID, message string) {
@@ -559,6 +592,12 @@ func (s *Service) prepareSubmission(ctx context.Context, actor auth.Actor, req S
 		libRoot = resolveDirAgainstRoots(settings.LibraryDir, roots)
 		if _, lErr := files.ValidatePath(roots, libRoot, files.ValidateOptions{MustExist: false, AudioOnly: false}); lErr != nil {
 			return preparedSubmission{}, lErr
+		}
+	} else if req.Action == "artist_artwork" {
+		if cand := resolveDirAgainstRoots(settings.LibraryDir, roots); cand != "" {
+			if _, lErr := files.ValidatePath(roots, cand, files.ValidateOptions{MustExist: false, AudioOnly: false}); lErr == nil {
+				libRoot = cand
+			}
 		}
 	}
 
@@ -1026,7 +1065,7 @@ func (s *Service) runAsyncScan(
 						SourceMeta:   td,
 					}
 				} else {
-					builtItem = s.buildPreviewItemCore(scanCtx, snap, settings, req, flags, vp, asset, td, idx+1)
+					builtItem = s.buildPreviewItemCore(scanCtx, snap, settings, req, flags, libRoot, vp, asset, td, idx+1)
 					builtItem.ID = existingID
 					builtItem.Ordinal = idx
 				}
@@ -1654,6 +1693,7 @@ func (s *Service) executeApplyLoop(execCtx context.Context, ctrl *jobControl, jo
 	failedCount := 0
 	stoppedByUser := ""
 	total := len(jobMeta.Items)
+	writtenArtworkTargets := make(map[string]bool)
 
 	for idx := range jobMeta.Items {
 		ctrl.mu.Lock()
@@ -1686,6 +1726,27 @@ func (s *Service) executeApplyLoop(execCtx context.Context, ctrl *jobControl, jo
 				it.Error = err.Error()
 				failedCount++
 				s.log("error", jobID, fmt.Sprintf("曲目处理失败 (%s)：%v", it.Name, err))
+			} else {
+				it.Status = model.LibraryItemComplete
+				it.Error = ""
+				committedCount++
+			}
+		} else if jobMeta.Action == "artist_artwork" {
+			artStatus, err := s.applyArtistArtworkItem(execCtx, jobMeta, it, writtenArtworkTargets)
+			if err != nil {
+				var de *model.DomainError
+				if errors.As(err, &de) && de.Code == model.ErrConflict {
+					it.Status = model.LibraryItemFailed
+					it.Warnings = mergeWarnings(it.Warnings, []string{de.Detail})
+				} else {
+					it.Status = model.LibraryItemFailed
+				}
+				it.Error = err.Error()
+				failedCount++
+				s.log("error", jobID, fmt.Sprintf("歌手头像写入失败 (%s)：%v", it.Name, err))
+			} else if artStatus == "skipped" {
+				it.Status = model.LibraryItemSkipped
+				it.Error = ""
 			} else {
 				it.Status = model.LibraryItemComplete
 				it.Error = ""
@@ -1729,6 +1790,12 @@ func (s *Service) executeApplyLoop(execCtx context.Context, ctrl *jobControl, jo
 	if err := s.saveJobMeta(persistCtx, jobMeta); err != nil {
 		return model.LibraryJobDTO{}, err
 	}
+	if committedCount > 0 && (jobMeta.Action == "scrape" || jobMeta.Action == "both" || jobMeta.Action == "organize") && execCtx.Err() == nil && !s.isClosed() {
+		s.backfillArtistArtworkAfterApply(execCtx, jobMeta)
+	}
+	if committedCount > 0 && s.opts.NavidromeHook != nil && execCtx.Err() == nil && !s.isClosed() {
+		_ = s.opts.NavidromeHook(execCtx)
+	}
 	if err := s.persistJobAndItems(persistCtx, jobMeta, finalStatus, finalDetail, countCompleteItems(jobMeta.Items)); err != nil {
 		return model.LibraryJobDTO{}, err
 	}
@@ -1742,9 +1809,6 @@ func (s *Service) executeApplyLoop(execCtx context.Context, ctrl *jobControl, jo
 	s.log(logLevel, jobID, fmt.Sprintf("曲库整理结束 (%s)：状态=%s，成功写入=%d，失败=%d（总计 %d 首）",
 		jobMeta.Action, finalStatus, committedCount, failedCount, len(jobMeta.Items)))
 
-	if committedCount > 0 && s.opts.NavidromeHook != nil && execCtx.Err() == nil && !s.isClosed() {
-		_ = s.opts.NavidromeHook(execCtx)
-	}
 	return s.ToDTO(persistCtx, jobID)
 }
 
@@ -2740,7 +2804,7 @@ func (s *Service) buildPreviewItem(
 	counter int,
 	reserved map[string]struct{},
 ) persistedItemMeta {
-	item := s.buildPreviewItemCore(ctx, snap, settings, req, flags, vp, asset, tagData, counter)
+	item := s.buildPreviewItemCore(ctx, snap, settings, req, flags, libRoot, vp, asset, tagData, counter)
 	s.assignPreviewItemTarget(libRoot, settings, req, roots, &item, counter, reserved)
 	return item
 }
@@ -2751,6 +2815,7 @@ func (s *Service) buildPreviewItemCore(
 	settings Settings,
 	req SubmitRequest,
 	flags submitFlags,
+	libRoot string,
 	vp files.ValidatedPath,
 	asset store.AssetRecord,
 	tagData helper.AudioTagData,
@@ -2911,9 +2976,7 @@ func (s *Service) buildPreviewItemCore(
 		return item
 
 	case "artist_artwork":
-		item.Status = model.LibraryItemNeedsReview
-		item.Warnings = mergeWarnings(item.Warnings, []string{"歌手头像自动抓取暂未启用，请使用封面导入或手动上传"})
-		return item
+		return s.buildArtistArtworkPreviewItem(ctx, snap, libRoot, vp, item)
 
 	case "rename", "organize":
 		return item
@@ -3958,4 +4021,272 @@ func (s *Service) RecoverOnStartup(ctx context.Context) (int, error) {
 		s.log("warn", "", fmt.Sprintf("启动恢复：发现 %d 个未完成的整理任务，已标记为待处理", updated))
 	}
 	return int(updated), nil
+}
+
+func extractItemArtistName(tags map[string]string) string {
+	for _, key := range []string{"album_artist", "artist"} {
+		val := strings.TrimSpace(tags[key])
+		if val == "" || IsIgnoredArtist(val) {
+			continue
+		}
+		if PrimaryArtistName(val) != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func artistTargetKey(p string) string {
+	clean := filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(clean)
+	}
+	return clean
+}
+
+func (s *Service) resolveArtistDirForItem(libRoot string, vp files.ValidatedPath, artistName string) string {
+	if libRoot != "" {
+		if dir := ResolveArtistDir(libRoot, vp.AbsPath, artistName); dir != "" {
+			return dir
+		}
+	}
+	if vp.Root.CanonicalPath != "" && vp.Root.CanonicalPath != libRoot {
+		if dir := ResolveArtistDir(vp.Root.CanonicalPath, vp.AbsPath, artistName); dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func (s *Service) buildArtistArtworkPreviewItem(
+	ctx context.Context,
+	snap config.Snapshot,
+	libRoot string,
+	vp files.ValidatedPath,
+	item persistedItemMeta,
+) persistedItemMeta {
+	artistRaw := extractItemArtistName(item.Before)
+	if artistRaw == "" {
+		item.Status = model.LibraryItemNeedsReview
+		item.Warnings = mergeWarnings(item.Warnings, []string{"缺少有效歌手信息，无法定位或抓取歌手头像"})
+		return item
+	}
+	artistDir := s.resolveArtistDirForItem(libRoot, vp, artistRaw)
+	if artistDir == "" {
+		item.Status = model.LibraryItemNeedsReview
+		item.Warnings = mergeWarnings(item.Warnings, []string{"无法定位安全的一级歌手目录（需为曲库根目录/<歌手>/<专辑>/<曲目> 或 曲库根目录/<歌手>/<曲目> 结构）"})
+		return item
+	}
+	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		item.Target = existing
+		item.Status = model.LibraryItemSkipped
+		item.Warnings = mergeWarnings(item.Warnings, []string{"歌手头像已存在，跳过写入"})
+		return item
+	}
+
+	fetcher := s.artworkFetcher()
+	lookup := fetcher.LookupArtistArtwork(ctx, snap, artistRaw)
+	target := filepath.Join(artistDir, "artist.jpg")
+	if !lookup.Found || len(lookup.Data) == 0 {
+		item.Target = target
+		item.Status = model.LibraryItemNeedsReview
+		msg := "未搜索到有效歌手写真，请手动上传或稍后重试"
+		if lookup.Err != nil && !errors.Is(lookup.Err, context.Canceled) {
+			msg = "未搜索到有效歌手写真（" + lookup.Err.Error() + "），请手动上传或稍后重试"
+		}
+		item.Warnings = mergeWarnings(item.Warnings, []string{msg})
+		return item
+	}
+
+	chosenID := "artist-artwork"
+	if lookup.Source != "" {
+		chosenID = "artist-artwork:" + lookup.Source
+	}
+	item.Target = target
+	item.CoverURL = lookup.ImageURL
+	item.Chosen = &chosenID
+	item.Artwork = &model.LibraryJobArtworkDTO{
+		Artist: lookup.Artist,
+		Source: lookup.Source,
+		URL:    lookup.ImageURL,
+	}
+	item.Status = model.LibraryItemPreviewReady
+	return item
+}
+
+func (s *Service) applyArtistArtworkItem(
+	ctx context.Context,
+	jobMeta persistedJobMeta,
+	it *persistedItemMeta,
+	writtenTargets map[string]bool,
+) (string, error) {
+	roots := s.coordinator.Roots()
+	srcVP, sErr := files.ValidatePath(roots, it.OriginalPath, files.ValidateOptions{MustExist: true, AudioOnly: true})
+	if sErr != nil {
+		return "", sErr
+	}
+	if it.AssetID != "" {
+		asset, ok, err := s.store.GetAsset(ctx, it.AssetID)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", model.NewError(model.ErrNotFound, http.StatusNotFound, "资产记录不存在")
+		}
+		if it.ExpectedRev > 0 && asset.Revision != it.ExpectedRev {
+			return "", model.NewError(model.ErrConflict, http.StatusConflict, "文件已被外部修改，请重新预览")
+		}
+	}
+
+	libRoot := ""
+	if cand := resolveDirAgainstRoots(jobMeta.Settings.LibraryDir, roots); cand != "" {
+		if _, lErr := files.ValidatePath(roots, cand, files.ValidateOptions{MustExist: false, AudioOnly: false}); lErr == nil {
+			libRoot = cand
+		}
+	}
+	artistRaw := extractItemArtistName(it.After)
+	if artistRaw == "" {
+		artistRaw = extractItemArtistName(it.Before)
+	}
+	if artistRaw == "" {
+		return "", model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "缺少有效歌手信息，无法写入歌手头像")
+	}
+	artistDir := s.resolveArtistDirForItem(libRoot, srcVP, artistRaw)
+	if artistDir == "" {
+		return "", model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "无法定位安全的一级歌手目录")
+	}
+
+	targetPath := filepath.Join(artistDir, "artist.jpg")
+	targetKey := artistTargetKey(targetPath)
+	if writtenTargets[targetKey] {
+		it.Target = targetPath
+		return "deduped", nil
+	}
+	if existing, _, ok := findExistingArtistArtwork(artistDir); ok {
+		it.Target = existing
+		it.Warnings = mergeWarnings(it.Warnings, []string{"歌手头像已存在，跳过写入"})
+		return "skipped", nil
+	}
+
+	snap := s.opts.SnapshotProvider()
+	target, status, err := s.artworkFetcher().WriteArtistArtworkFromCandidate(ctx, snap, artistDir, artistRaw, it.CoverURL)
+	if err != nil {
+		return "", err
+	}
+	if status == "exists" {
+		it.Target = target
+		it.Warnings = mergeWarnings(it.Warnings, []string{"歌手头像已存在，跳过写入"})
+		return "skipped", nil
+	}
+	writtenTargets[targetKey] = true
+	it.Target = target
+	return "written", nil
+}
+
+func (s *Service) backfillArtistArtworkAfterApply(ctx context.Context, jobMeta persistedJobMeta) {
+	if s == nil || s.coordinator == nil {
+		return
+	}
+	fetcher := s.artworkFetcher()
+	if fetcher == nil {
+		return
+	}
+	roots := s.coordinator.Roots()
+	if len(roots) == 0 {
+		return
+	}
+	libRoot := ""
+	if cand := resolveDirAgainstRoots(jobMeta.Settings.LibraryDir, roots); cand != "" {
+		if _, lErr := files.ValidatePath(roots, cand, files.ValidateOptions{MustExist: false, AudioOnly: false}); lErr == nil {
+			libRoot = cand
+		}
+	}
+
+	type artworkBackfillTask struct {
+		artistDir  string
+		artistName string
+	}
+	seen := make(map[string]bool)
+	var tasks []artworkBackfillTask
+	for _, it := range jobMeta.Items {
+		if ctx.Err() != nil {
+			return
+		}
+		if it.Status != model.LibraryItemComplete {
+			continue
+		}
+		artistRaw := extractItemArtistName(it.After)
+		if artistRaw == "" {
+			artistRaw = extractItemArtistName(it.Before)
+		}
+		if artistRaw == "" {
+			continue
+		}
+		audioPath := strings.TrimSpace(it.Target)
+		if audioPath == "" {
+			audioPath = it.OriginalPath
+		}
+		vp, vErr := files.ValidatePath(roots, audioPath, files.ValidateOptions{MustExist: false, AudioOnly: true})
+		if vErr != nil {
+			continue
+		}
+		artistDir := s.resolveArtistDirForItem(libRoot, vp, artistRaw)
+		if artistDir == "" {
+			continue
+		}
+		key := artistTargetKey(artistDir)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if _, _, exists := findExistingArtistArtwork(artistDir); exists {
+			continue
+		}
+		tasks = append(tasks, artworkBackfillTask{
+			artistDir:  artistDir,
+			artistName: artistRaw,
+		})
+	}
+	if len(tasks) == 0 {
+		return
+	}
+
+	snap := s.opts.SnapshotProvider()
+	var pending []artworkBackfillTask
+	for _, task := range tasks {
+		if fetcher.writeFromCacheIfAvailable(snap, task.artistDir, task.artistName) {
+			continue
+		}
+		pending = append(pending, task)
+	}
+	if len(pending) == 0 || !fetcher.hasPool() {
+		return
+	}
+
+	_ = s.startBackground(func(bgCtx context.Context) {
+		sem := make(chan struct{}, 2)
+		var wg sync.WaitGroup
+		for _, task := range pending {
+			select {
+			case sem <- struct{}{}:
+			case <-bgCtx.Done():
+				wg.Wait()
+				return
+			}
+			task := task
+			wg.Add(1)
+			go func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				tCtx, cancel := context.WithTimeout(bgCtx, artistFetchTimeout)
+				defer cancel()
+				if _, _, err := fetcher.WriteArtistArtworkFromCandidate(tCtx, snap, task.artistDir, task.artistName, ""); err != nil {
+					s.log("debug", jobMeta.JobID, fmt.Sprintf("歌手头像自动补全跳过 (%s)：%v", task.artistName, err))
+				}
+			}()
+		}
+		wg.Wait()
+	})
 }

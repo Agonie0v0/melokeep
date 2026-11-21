@@ -946,8 +946,10 @@ private fun NavidromeOverviewContent(
 							horizontalAlignment = Alignment.CenterHorizontally,
 							verticalArrangement = Arrangement.spacedBy(6.dp)
 						) {
-							CoverArt(
+							MeloArtistAvatar(
+								artistName = artist.name,
 								coverArtId = artist.coverArtId,
+								artistImageUrl = artist.artistImageUrl,
 								modifier = Modifier
 									.size(68.dp)
 									.border(MeloHairlineWidth, libraryHairlineBorderColor(), CircleShape),
@@ -1714,8 +1716,10 @@ private fun NavidromeArtistsSubContent(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(12.dp)
 						) {
-							CoverArt(
+							MeloArtistAvatar(
+								artistName = artist.name,
 								coverArtId = artist.coverArtId,
+								artistImageUrl = artist.artistImageUrl,
 								modifier = Modifier.size(46.dp),
 								shape = CircleShape
 							)

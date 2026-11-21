@@ -1930,31 +1930,31 @@ internal fun SettingsThemeAppearancePanel(
 		),
 		verticalArrangement = Arrangement.spacedBy(18.dp)
 	) {
-		item(key = "theme-presets") {
-			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(title = "Studio 主题预设")
-				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-					MeloStudioPresets.all.chunked(2).forEach { rowPresets ->
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(10.dp)
-						) {
-							rowPresets.forEach { descriptor ->
-								val selected = studioPreset == descriptor.id
-								ThemePresetSwatchCard(
-									descriptor = descriptor,
-									selected = selected,
-									onClick = { meloSettingsStore.setStudioThemePreset(descriptor.id) },
-									modifier = Modifier.weight(1f)
-								)
-							}
-							if (rowPresets.size == 1) {
-								Spacer(modifier = Modifier.weight(1f))
-							}
-						}
-					}
-				}
-			}
+		item(key = "theme-presets-dark") {
+			ThemePresetGridSection(
+				title = "深色主题（${MeloStudioPresets.darkPresets.size}）",
+				descriptors = MeloStudioPresets.darkPresets,
+				selectedPreset = studioPreset,
+				onSelect = meloSettingsStore::setStudioThemePreset
+			)
+		}
+
+		item(key = "theme-presets-light") {
+			ThemePresetGridSection(
+				title = "浅色主题（${MeloStudioPresets.lightPresets.size}）",
+				descriptors = MeloStudioPresets.lightPresets,
+				selectedPreset = studioPreset,
+				onSelect = meloSettingsStore::setStudioThemePreset
+			)
+		}
+
+		item(key = "theme-presets-dynamic") {
+			ThemePresetGridSection(
+				title = "动态自适应（${MeloStudioPresets.dynamicPresets.size}）",
+				descriptors = MeloStudioPresets.dynamicPresets,
+				selectedPreset = studioPreset,
+				onSelect = meloSettingsStore::setStudioThemePreset
+			)
 		}
 
 		item(key = "theme-mode-amoled") {
@@ -1989,7 +1989,11 @@ internal fun SettingsThemeAppearancePanel(
 						}
 						if (studioPreset != MeloStudioPresets.DYNAMIC) {
 							Text(
-								text = "当前使用固定调色预设；切换为「动态壁纸色」时将自动遵循以上深浅色与 AMOLED 纯黑设置。",
+								text = if (MeloStudioPresets.isLightPreset(studioPreset)) {
+									"当前使用浅色预设；「色彩极性」与「AMOLED 纯黑背景」仅在深色预设或「动态壁纸色」下生效。"
+								} else {
+									"当前使用深色预设，可开启下方「AMOLED 纯黑背景」转为纯黑底色；「色彩极性」仅在「动态壁纸色」下生效。"
+								},
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant
 							)
@@ -2083,6 +2087,38 @@ internal fun SettingsThemeAppearancePanel(
 }
 
 @Composable
+private fun ThemePresetGridSection(
+	title: String,
+	descriptors: List<MeloStudioPresets.Descriptor>,
+	selectedPreset: String,
+	onSelect: (String) -> Unit
+) {
+	Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+		MeloSectionLabel(title = title)
+		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+			descriptors.chunked(2).forEach { rowPresets ->
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					rowPresets.forEach { descriptor ->
+						ThemePresetSwatchCard(
+							descriptor = descriptor,
+							selected = selectedPreset == descriptor.id,
+							onClick = { onSelect(descriptor.id) },
+							modifier = Modifier.weight(1f)
+						)
+					}
+					if (rowPresets.size == 1) {
+						Spacer(modifier = Modifier.weight(1f))
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
 private fun ThemePresetSwatchCard(
 	descriptor: MeloStudioPresets.Descriptor,
 	selected: Boolean,
@@ -2133,6 +2169,11 @@ private fun ThemePresetSwatchCard(
 							.size(width = 16.dp, height = 10.dp)
 							.clip(RoundedCornerShape(3.dp))
 							.background(descriptor.previewContainer)
+							.border(
+								width = 0.5.dp,
+								color = (if (descriptor.isDark) Color.White else Color.Black).copy(alpha = 0.14f),
+								shape = RoundedCornerShape(3.dp)
+							)
 					)
 					Box(
 						modifier = Modifier
@@ -2230,6 +2271,13 @@ internal fun SettingsInterfaceGesturesPanel(
 								BottomBarVisibilityMode.Default
 							}
 						}
+					)
+					MeloHairlineDivider(startIndent = 16.dp)
+					SettingsToggleRow(
+						title = "无播放时隐藏播放栏",
+						subtitle = "当前没有正在播放的歌曲时自动隐藏底部播放栏",
+						checked = preferenceManager.hideIfIdle,
+						onCheckedChange = { preferenceManager.hideIfIdle = it }
 					)
 				}
 			}

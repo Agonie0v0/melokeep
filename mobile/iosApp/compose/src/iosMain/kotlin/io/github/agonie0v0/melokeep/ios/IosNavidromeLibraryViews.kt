@@ -643,11 +643,12 @@ private fun NavOverviewContent(
 							horizontalAlignment = Alignment.CenterHorizontally,
 							verticalArrangement = Arrangement.spacedBy(6.dp),
 						) {
-							CoverArtBox(
+							IosArtistAvatar(
+								artistName = artist.name,
 								coverUrl = artist.coverUrl,
+								artistImageUrl = artist.artistImageUrl,
 								size = 64.dp,
-								cornerRadius = 32.dp,
-								modifier = Modifier.border(IosHairlineWidth, iosLibHairlineBorderColor(), CircleShape),
+								border = BorderStroke(IosHairlineWidth, iosLibHairlineBorderColor()),
 							)
 							Text(
 								text = artist.name,
@@ -1293,7 +1294,12 @@ private fun NavArtistsSubContent(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(12.dp),
 						) {
-							CoverArtBox(coverUrl = artist.coverUrl, size = 44.dp, cornerRadius = 22.dp)
+							IosArtistAvatar(
+								artistName = artist.name,
+								coverUrl = artist.coverUrl,
+								artistImageUrl = artist.artistImageUrl,
+								size = 44.dp,
+							)
 							Column(
 								modifier = Modifier.weight(1f),
 								verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -2055,7 +2061,13 @@ private fun NavSearchResultsContent(
 							},
 							label = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
 							leadingIcon = {
-								Icon(Icons.Rounded.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+								IosArtistAvatar(
+									artistName = artist.name,
+									coverUrl = artist.coverUrl,
+									artistImageUrl = artist.artistImageUrl,
+									size = 20.dp,
+									border = null,
+								)
 							},
 						)
 					}

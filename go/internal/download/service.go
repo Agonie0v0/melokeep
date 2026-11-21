@@ -21,6 +21,7 @@ import (
 	"github.com/agonie0v0/melokeep/internal/config"
 	"github.com/agonie0v0/melokeep/internal/files"
 	"github.com/agonie0v0/melokeep/internal/helper"
+	"github.com/agonie0v0/melokeep/internal/library"
 	"github.com/agonie0v0/melokeep/internal/media"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/provider"
@@ -106,6 +107,7 @@ type Service struct {
 	coords      *files.Coordinator
 	runner      *media.Runner
 	tags        *media.TagService
+	libArtwork  *library.Service
 	opts        Options
 	stagingRoot string
 	maxQueued   int
@@ -175,6 +177,11 @@ func NewService(
 	_ = os.MkdirAll(staging, 0o755)
 
 	baseCtx, baseCancel := context.WithCancel(context.Background())
+	var artScraper *library.Scraper
+	if pool != nil {
+		artScraper = library.NewScraper(pool, nil, runner, library.ScraperOptions{})
+	}
+	libArtwork := library.NewService(st, coords, tags, runner, artScraper, library.ServiceOptions{})
 	s := &Service{
 		store:       st,
 		pool:        pool,
@@ -182,6 +189,7 @@ func NewService(
 		coords:      coords,
 		runner:      runner,
 		tags:        tags,
+		libArtwork:  libArtwork,
 		opts:        opts,
 		stagingRoot: staging,
 		maxQueued:   maxQueued,
@@ -220,6 +228,9 @@ func (s *Service) Close() error {
 
 	s.baseCancel()
 	s.wg.Wait()
+	if s.libArtwork != nil {
+		_ = s.libArtwork.Close()
+	}
 	return nil
 }
 
@@ -1132,6 +1143,8 @@ func (s *Service) executeJob(dlID string) {
 
 	var pubErr error
 	var createdJobID string
+	var publishedRootPath string
+	var publishedPath string
 	func() {
 		roots := s.coords.Roots()
 		if len(roots) == 0 {
@@ -1148,6 +1161,8 @@ func (s *Service) executeJob(dlID string) {
 			}
 		}
 		targetPath := TargetAudioPath(targetRoot.CanonicalPath, spec.snap.Runtime.DownloadLayout, pTrack, ext, dlID)
+		publishedRootPath = targetRoot.CanonicalPath
+		publishedPath = targetPath
 		sidecars := BuildSidecars(targetPath, spec.snap.Runtime.LyricsMode, lyricsText, coverData, coverMime)
 
 		var autoSpec *store.AutoOrganizeJobSpec
@@ -1254,6 +1269,17 @@ func (s *Service) executeJob(dlID string) {
 	_ = os.Remove(partPath)
 	s.deleteSpec(dlID)
 	s.log("info", dlID, fmt.Sprintf("下载完成：《%s》 · %s · %d bytes", trRec.Title, strings.TrimPrefix(ext, "."), bytesWritten))
+	if s.libArtwork != nil && strings.TrimSpace(trRec.Artist) != "" && publishedRootPath != "" && publishedPath != "" {
+		if library.ResolveArtistDir(publishedRootPath, publishedPath, trRec.Artist) != "" {
+			artCtx, artCancel := context.WithTimeout(s.baseCtx, 6*time.Second)
+			if target, status, artErr := s.libArtwork.EnsureArtistArtwork(artCtx, spec.snap, publishedRootPath, publishedPath, trRec.Artist); artErr != nil {
+				s.log("debug", dlID, fmt.Sprintf("下载后自动补全歌手头像跳过 (%s)：%v", trRec.Artist, artErr))
+			} else if status == "written" {
+				s.log("debug", dlID, fmt.Sprintf("下载后已自动补全歌手头像：%s -> %s", trRec.Artist, target))
+			}
+			artCancel()
+		}
+	}
 	if createdJobID != "" && s.opts.AutoOrganizeRunner != nil {
 		finalDL, _, _ := s.store.GetDownload(s.baseCtx, dlID)
 		s.wg.Add(1)

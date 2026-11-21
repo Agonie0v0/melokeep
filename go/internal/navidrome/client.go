@@ -868,6 +868,23 @@ func (c *Client) GetAlbum(ctx context.Context, id string) (AlbumDetailDTO, error
 	return AlbumDetailDTO{AlbumDTO: projectAlbum(a), Tracks: tracks}, nil
 }
 
+func resolveArtistCoverAndAvatar(name, coverArt, artistImageURL string) (*string, string) {
+	var cover *string
+	if ca := strings.TrimSpace(coverArt); ca != "" {
+		u := "/api/navidrome/cover/" + url.PathEscape(ca)
+		cover = &u
+	} else if img := strings.TrimSpace(artistImageURL); img != "" && !strings.Contains(strings.ToLower(img), "2a96cbd8b46e442fc41c2b86b821562f") {
+		if parsed, err := url.Parse(img); err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) {
+			cover = &img
+		}
+	}
+	var avatarURL string
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		avatarURL = "/api/artists/avatar?name=" + url.QueryEscape(trimmed)
+	}
+	return cover, avatarURL
+}
+
 func (c *Client) GetArtists(ctx context.Context) ([]ArtistDTO, error) {
 	body, err := c.requestJSON(ctx, http.MethodGet, "getArtists", nil)
 	if err != nil {
@@ -876,9 +893,11 @@ func (c *Client) GetArtists(ctx context.Context) ([]ArtistDTO, error) {
 	var wrapper struct {
 		Index []struct {
 			Artist []struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				AlbumCount int    `json:"albumCount"`
+				ID             string `json:"id"`
+				Name           string `json:"name"`
+				AlbumCount     int    `json:"albumCount"`
+				CoverArt       string `json:"coverArt"`
+				ArtistImageURL string `json:"artistImageUrl"`
 			} `json:"artist"`
 		} `json:"index"`
 	}
@@ -888,7 +907,14 @@ func (c *Client) GetArtists(ctx context.Context) ([]ArtistDTO, error) {
 	var out []ArtistDTO
 	for _, idx := range wrapper.Index {
 		for _, a := range idx.Artist {
-			out = append(out, ArtistDTO{ID: a.ID, Name: a.Name, AlbumCount: a.AlbumCount})
+			cover, avatarURL := resolveArtistCoverAndAvatar(a.Name, a.CoverArt, a.ArtistImageURL)
+			out = append(out, ArtistDTO{
+				ID:         a.ID,
+				Name:       a.Name,
+				AlbumCount: a.AlbumCount,
+				Cover:      cover,
+				AvatarURL:  avatarURL,
+			})
 		}
 	}
 	if out == nil {
@@ -907,8 +933,11 @@ func (c *Client) GetArtist(ctx context.Context, id string) (ArtistDetailDTO, err
 		return ArtistDetailDTO{}, err
 	}
 	var wrapper struct {
-		Name  string     `json:"name"`
-		Album []rawAlbum `json:"album"`
+		ID             string     `json:"id"`
+		Name           string     `json:"name"`
+		CoverArt       string     `json:"coverArt"`
+		ArtistImageURL string     `json:"artistImageUrl"`
+		Album          []rawAlbum `json:"album"`
 	}
 	if len(body.Artist) > 0 {
 		_ = json.Unmarshal(body.Artist, &wrapper)
@@ -917,7 +946,18 @@ func (c *Client) GetArtist(ctx context.Context, id string) (ArtistDetailDTO, err
 	for _, a := range wrapper.Album {
 		albums = append(albums, projectAlbum(a))
 	}
-	return ArtistDetailDTO{Name: wrapper.Name, Albums: albums}, nil
+	artistID := strings.TrimSpace(wrapper.ID)
+	if artistID == "" {
+		artistID = id
+	}
+	cover, avatarURL := resolveArtistCoverAndAvatar(wrapper.Name, wrapper.CoverArt, wrapper.ArtistImageURL)
+	return ArtistDetailDTO{
+		ID:        artistID,
+		Name:      wrapper.Name,
+		Cover:     cover,
+		AvatarURL: avatarURL,
+		Albums:    albums,
+	}, nil
 }
 
 func (c *Client) Search(ctx context.Context, query string, offset int) (SearchResultDTO, error) {

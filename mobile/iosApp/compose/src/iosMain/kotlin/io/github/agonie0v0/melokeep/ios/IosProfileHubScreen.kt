@@ -82,7 +82,7 @@ fun IosHubProfileRoute(
 	@Suppress("UNUSED_PARAMETER") studioController: MeloStudioController,
 	subsonicManager: IosSubsonicManager,
 	audioPlayer: IosAudioPlayer,
-	onOpenOnboarding: () -> Unit,
+	@Suppress("UNUSED_PARAMETER") onOpenOnboarding: () -> Unit,
 	@Suppress("UNUSED_PARAMETER") onOpenSleepTimer: () -> Unit = {},
 	bottomPadding: PaddingValues = PaddingValues(0.dp),
 	onOpenPhoneDownloads: (() -> Unit)? = null,
@@ -184,49 +184,30 @@ fun IosHubProfileRoute(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.SpaceBetween,
 						) {
-							Row(
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								Text(
-									text = "服务状态",
-									style = MaterialTheme.typography.titleSmall,
-									fontWeight = FontWeight.SemiBold,
-									color = MaterialTheme.colorScheme.onSurface,
-								)
-								Surface(
-									shape = CircleShape,
-									color = if (connectedCount > 0) {
-										MaterialTheme.colorScheme.meloPositive.copy(alpha = 0.14f)
-									} else {
-										MaterialTheme.colorScheme.surfaceContainerHigh
-									},
-								) {
-									Text(
-										text = statusBadgeText,
-										style = MaterialTheme.typography.labelSmall,
-										fontWeight = FontWeight.Medium,
-										color = if (connectedCount > 0) {
-											MaterialTheme.colorScheme.meloPositive
-										} else {
-											MaterialTheme.colorScheme.onSurfaceVariant
-										},
-										modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-									)
-								}
-							}
-
+							Text(
+								text = "服务状态",
+								style = MaterialTheme.typography.titleSmall,
+								fontWeight = FontWeight.SemiBold,
+								color = MaterialTheme.colorScheme.onSurface,
+							)
 							Surface(
-								onClick = onOpenOnboarding,
 								shape = CircleShape,
-								color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+								color = if (connectedCount > 0) {
+									MaterialTheme.colorScheme.meloPositive.copy(alpha = 0.14f)
+								} else {
+									MaterialTheme.colorScheme.surfaceContainerHigh
+								},
 							) {
 								Text(
-									text = "连接向导",
-									style = MaterialTheme.typography.labelMedium,
+									text = statusBadgeText,
+									style = MaterialTheme.typography.labelSmall,
 									fontWeight = FontWeight.Medium,
-									color = MaterialTheme.colorScheme.primary,
-									modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+									color = if (connectedCount > 0) {
+										MaterialTheme.colorScheme.meloPositive
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+									modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
 								)
 							}
 						}
@@ -394,7 +375,8 @@ fun IosHubProfileRoute(
 				} else {
 					null
 				}
-				val amoledTag = if (prefs.amoledBlack) "纯黑" else null
+				val isLightPreset = MeloStudioPresets.isLightPreset(studioPreset)
+				val amoledTag = if (prefs.amoledBlack && !isLightPreset) "纯黑" else null
 				val themeSummary = listOfNotNull(presetLabel, modeTag, amoledTag).joinToString(" · ")
 
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -717,7 +699,12 @@ private fun IosHubActionRow(
 private fun compactIosPresetLabel(presetId: String): String = when (presetId) {
 	MeloStudioPresets.OBSIDIAN -> "曜石录音室"
 	MeloStudioPresets.VINYL_GOLD -> "流金黑胶"
+	MeloStudioPresets.MIDNIGHT_AURORA -> "午夜极光"
+	MeloStudioPresets.CYBER_AMETHYST -> "暗紫霓虹"
 	MeloStudioPresets.PURE_LIGHT -> "纯净晨雾"
+	MeloStudioPresets.WARM_VINYL -> "暖调黑胶纸"
+	MeloStudioPresets.NORDIC_FROST -> "北欧冰川"
+	MeloStudioPresets.ROSE_MIST -> "雾樱漫音"
 	MeloStudioPresets.DYNAMIC -> "动态壁纸色"
 	else -> presetId
 }

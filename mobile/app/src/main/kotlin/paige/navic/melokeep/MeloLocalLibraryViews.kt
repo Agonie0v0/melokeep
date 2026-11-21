@@ -653,7 +653,16 @@ internal fun LibraryLocalDetailView(
 						title = route.name,
 						subtitle = group?.let { "${it.albumCount} 专辑 · ${it.items.size} 首" },
 						cover = group?.cover,
-						onBack = onBack
+						onBack = onBack,
+						leadingAvatar = {
+							MeloArtistAvatar(
+								artistName = route.name,
+								coverArtId = group?.cover,
+								preferMeloAvatar = true,
+								modifier = Modifier.size(40.dp),
+								shape = CircleShape
+							)
+						}
 					)
 					LocalTrackListView(
 						modifier = Modifier.weight(1f),
@@ -700,6 +709,7 @@ private fun LocalDetailHeader(
 	subtitle: String?,
 	cover: String?,
 	onBack: () -> Unit,
+	leadingAvatar: (@Composable () -> Unit)? = null,
 	actions: @Composable RowScope.() -> Unit = {}
 ) {
 	Row(
@@ -713,7 +723,9 @@ private fun LocalDetailHeader(
 		IconButton(onClick = onBack) {
 			Icon(Icons.Outlined.ArrowBack, contentDescription = "返回")
 		}
-		if (!cover.isNullOrBlank()) {
+		if (leadingAvatar != null) {
+			leadingAvatar()
+		} else if (!cover.isNullOrBlank()) {
 			CoverArt(
 				coverArtId = cover,
 				modifier = Modifier.size(40.dp),
@@ -1061,8 +1073,10 @@ private fun LocalOverviewContent(
 							horizontalAlignment = Alignment.CenterHorizontally,
 							verticalArrangement = Arrangement.spacedBy(6.dp)
 						) {
-							CoverArt(
+							MeloArtistAvatar(
+								artistName = artist.name,
 								coverArtId = artist.cover,
+								preferMeloAvatar = true,
 								modifier = Modifier
 									.size(68.dp)
 									.border(MeloHairlineWidth, libraryHairlineBorderColor(), CircleShape),
@@ -1240,8 +1254,10 @@ private fun LocalArtistsContent(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(12.dp)
 						) {
-							CoverArt(
+							MeloArtistAvatar(
+								artistName = artist.name,
 								coverArtId = artist.cover,
+								preferMeloAvatar = true,
 								modifier = Modifier.size(46.dp),
 								shape = CircleShape
 							)

@@ -142,7 +142,19 @@ export function ThemePicker({
                 onClick={() => setCustomAccent(sw.color)}
               />
             ))}
-            <label className="accent-custom-pick" title="自定义颜色">
+            <label
+              className={`accent-custom-pick ${
+                appearance.customAccent &&
+                !ACCENT_SWATCHES.some(
+                  (sw) =>
+                    sw.color.toLowerCase() ===
+                    appearance.customAccent.toLowerCase(),
+                )
+                  ? "active"
+                  : ""
+              }`}
+              title="自定义强调色"
+            >
               <input
                 type="color"
                 aria-label="自定义强调色"
@@ -164,31 +176,41 @@ export function ThemePicker({
             type="button"
             className="theme-toggle-pill"
             aria-pressed={appearance.ambientGlow}
+            title={
+              appearance.ambientGlow
+                ? "动态封面流光：已开启"
+                : "动态封面流光：已关闭"
+            }
             onClick={() => setAmbientGlow(!appearance.ambientGlow)}
           >
             <Sparkles aria-hidden="true" />
-            <span>动态封面流光</span>
-            <strong>{appearance.ambientGlow ? "开" : "关"}</strong>
+            <span className="theme-toggle-label">动态封面流光</span>
+            <span className="theme-switch-track" aria-hidden="true">
+              <span className="theme-switch-thumb" />
+            </span>
           </button>
-          <div
-            className="theme-density-switch"
-            role="group"
-            aria-label="界面密度"
-          >
-            <button
-              type="button"
-              aria-pressed={appearance.density === "modern"}
-              onClick={() => setDensity("modern")}
+          <div className="theme-density-row">
+            <span className="theme-density-label">界面密度</span>
+            <div
+              className="theme-density-switch"
+              role="group"
+              aria-label="界面密度"
             >
-              标准
-            </button>
-            <button
-              type="button"
-              aria-pressed={appearance.density === "compact"}
-              onClick={() => setDensity("compact")}
-            >
-              紧凑
-            </button>
+              <button
+                type="button"
+                aria-pressed={appearance.density === "modern"}
+                onClick={() => setDensity("modern")}
+              >
+                标准
+              </button>
+              <button
+                type="button"
+                aria-pressed={appearance.density === "compact"}
+                onClick={() => setDensity("compact")}
+              >
+                紧凑
+              </button>
+            </div>
           </div>
         </div>
 

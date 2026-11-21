@@ -48,7 +48,10 @@ fun NavicTheme(
 			}
 			fallbackTheme.colorScheme()
 		}
-		else -> resolveStaticStudioColorScheme(studioPreset) ?: preferenceManager.theme.colorScheme()
+		else -> resolveStaticStudioColorScheme(
+			preset = studioPreset,
+			amoled = preferenceManager.amoled
+		) ?: preferenceManager.theme.colorScheme()
 	}
 
 	val effectiveScheme = colorScheme ?: dynamicOrLegacyScheme

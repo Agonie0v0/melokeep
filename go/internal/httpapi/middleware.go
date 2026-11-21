@@ -302,7 +302,7 @@ func isMediaStreamPath(rawPath string) bool {
 		return true
 	}
 	switch cleanPath {
-	case "/api/files/audio", "/api/files/cover", "/api/files/content":
+	case "/api/files/audio", "/api/files/cover", "/api/files/content", "/api/artists/avatar":
 		return true
 	default:
 		return false

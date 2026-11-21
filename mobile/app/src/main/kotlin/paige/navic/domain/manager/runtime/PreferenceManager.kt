@@ -55,7 +55,7 @@ class PreferenceManager(
 	var animationStyle by preference(AnimationStyle.Expressive)
 	var nowPlayingBackgroundStyle by preference(NowPlayingBackgroundStyle.Dynamic)
 	var swipeToSkip by preference(true)
-	var hideIfIdle by preference(false)
+	var hideIfIdle by preference(true)
 	var enablePredictiveBackAnimations by preference(true)
 	var gridSize by preference(GridSize.TwoByTwo)
 	var coverArtShape by preference(CoverArtShape.Soft)

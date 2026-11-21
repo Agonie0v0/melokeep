@@ -6,6 +6,7 @@
 
 package paige.navic.melokeep
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,6 +18,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
@@ -60,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +75,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +84,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import kotlinx.collections.immutable.toPersistentList
@@ -103,6 +114,8 @@ import paige.navic.di.LocalSizeClass
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
+import paige.navic.domain.manager.session.SessionManager
+import coil3.compose.LocalPlatformContext as LocalCoilPlatformContext
 import paige.navic.domain.model.DomainAlbum
 import paige.navic.domain.model.DomainAlbumListType
 import paige.navic.domain.model.DomainArtistListType
@@ -893,10 +906,13 @@ fun MeloArtistDetailScreen(artistId: String) {
 									shadowElevation = 4.dp,
 									modifier = Modifier.size(144.dp)
 								) {
-									CoverArt(
+									MeloArtistAvatar(
+										artistName = artist.name,
 										coverArtId = artist.coverArtId,
+										artistImageUrl = artist.artistImageUrl,
 										contentDescription = artist.name,
-										modifier = Modifier.fillMaxSize()
+										modifier = Modifier.fillMaxSize(),
+										shape = CircleShape
 									)
 								}
 
@@ -1214,10 +1230,13 @@ fun MeloArtistDetailScreen(artistId: String) {
 												border = libraryHairlineBorder(),
 												modifier = Modifier.size(68.dp)
 											) {
-												CoverArt(
+												MeloArtistAvatar(
+													artistName = sim.name,
 													coverArtId = sim.coverArtId,
+													artistImageUrl = sim.artistImageUrl,
 													contentDescription = sim.name,
-													modifier = Modifier.fillMaxSize()
+													modifier = Modifier.fillMaxSize(),
+													shape = CircleShape
 												)
 											}
 											Text(
@@ -1906,10 +1925,13 @@ fun MeloLikedSongsScreen() {
 													color = MaterialTheme.colorScheme.surfaceContainerHighest,
 													modifier = Modifier.size(46.dp)
 												) {
-													CoverArt(
+													MeloArtistAvatar(
+														artistName = artist.name,
 														coverArtId = artist.coverArtId,
+														artistImageUrl = artist.artistImageUrl,
 														contentDescription = artist.name,
-														modifier = Modifier.fillMaxSize()
+														modifier = Modifier.fillMaxSize(),
+														shape = CircleShape
 													)
 												}
 												Column(modifier = Modifier.weight(1f)) {
@@ -3275,6 +3297,264 @@ internal fun MeloSwipeableSongRow(
 	) {
 		Box(modifier = Modifier.fillMaxWidth()) {
 			content()
+		}
+	}
+}
+
+private const val LASTFM_DEFAULT_STAR_HASH = "2a96cbd8b46e442fc41c2b86b821562f"
+
+private val ARTIST_PLACEHOLDER_NAMES = setOf(
+	"未知歌手",
+	"unknown artist",
+	"various artists",
+	"群星"
+)
+
+private fun String?.cleanUsableArtistImageUrl(): String? =
+	this?.trim()?.takeIf { url ->
+		url.isNotEmpty() && !url.contains(LASTFM_DEFAULT_STAR_HASH, ignoreCase = true)
+	}
+
+private data class ArtistAvatarCandidate(
+	val url: String,
+	val cacheKey: String?,
+	val attachMeloHeaders: Boolean,
+	val attachSubsonicHeaders: Boolean
+)
+
+/**
+ * 统一歌手头像组件：
+ * 1. 优先非空且非 Last.fm 默认星标的 [artistImageUrl] 或 Navidrome/本地 [coverArtId]（当 [preferMeloAvatar] 为 true 时优先 MeloKeep `/api/artists/avatar`）；
+ * 2. 主源缺失或 Coil 加载失败时，自动降级至 MeloKeep `/api/artists/avatar?name=...`（附带 Bearer / media_token 鉴权）；
+ * 3. 所有网络源均不可用或加载中时显示和谐主题色首字或歌手图标占位，绝不留空白框。
+ */
+@Composable
+internal fun MeloArtistAvatar(
+	artistName: String,
+	coverArtId: String? = null,
+	artistImageUrl: String? = null,
+	modifier: Modifier = Modifier,
+	shape: Shape = CircleShape,
+	contentDescription: String? = artistName,
+	preferMeloAvatar: Boolean = false
+) {
+	val imageLoader = koinInject<ImageLoader>()
+	val sessionManager = koinInject<SessionManager>()
+	val preferenceManager = koinInject<PreferenceManager>()
+	val meloSettingsStore = koinInject<MeloSettingsStore>()
+	val meloApiClient = koinInject<MeloKeepApiClient>()
+	val coilPlatformContext = LocalCoilPlatformContext.current
+
+	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
+	val trimmedName = remember(artistName) { artistName.trim() }
+
+	val candidates = remember(
+		trimmedName,
+		coverArtId,
+		artistImageUrl,
+		preferMeloAvatar,
+		meloConfig,
+		sessionManager.instanceUrl
+	) {
+		val cleanBase = meloConfig.baseUrl.trim().trimEnd('/')
+		val meloReady = meloConfig.isAuthenticated ||
+			(meloConfig.isConfigured && meloConfig.mediaToken.isNotBlank())
+
+		val externalCandidate = artistImageUrl.cleanUsableArtistImageUrl()?.let { url ->
+			val isOwnMelo = cleanBase.isNotEmpty() && url.startsWith(cleanBase, ignoreCase = true)
+			val resolvedUrl = if (isOwnMelo) {
+				meloApiClient.resolveMediaUrl(url) ?: url
+			} else {
+				url
+			}
+			ArtistAvatarCandidate(
+				url = resolvedUrl,
+				cacheKey = "artist_img:${url.substringBefore("?media_token=")}",
+				attachMeloHeaders = isOwnMelo,
+				attachSubsonicHeaders = false
+			)
+		}
+
+		val coverCandidate = coverArtId.cleanUsableArtistImageUrl()?.let { rawCover ->
+			val hasDirectScheme = rawCover.startsWith("http://", ignoreCase = true) ||
+				rawCover.startsWith("https://", ignoreCase = true) ||
+				rawCover.startsWith("content://", ignoreCase = true) ||
+				rawCover.startsWith("file://", ignoreCase = true)
+			val isRelativeApi = rawCover.startsWith("/api/", ignoreCase = true) ||
+				rawCover.startsWith("/downloads/", ignoreCase = true)
+
+			when {
+				hasDirectScheme -> {
+					val isOwnMelo = cleanBase.isNotEmpty() && rawCover.startsWith(cleanBase, ignoreCase = true)
+					val resolvedUrl = if (isOwnMelo) {
+						meloApiClient.resolveMediaUrl(rawCover) ?: rawCover
+					} else {
+						rawCover
+					}
+					ArtistAvatarCandidate(
+						url = resolvedUrl,
+						cacheKey = rawCover.substringBefore("?media_token="),
+						attachMeloHeaders = isOwnMelo,
+						attachSubsonicHeaders = false
+					)
+				}
+				isRelativeApi && meloReady -> {
+					val resolvedUrl = meloApiClient.resolveMediaUrl(rawCover)
+					resolvedUrl?.let {
+						ArtistAvatarCandidate(
+							url = it,
+							cacheKey = "melo_cover:${rawCover.substringBefore("?media_token=")}",
+							attachMeloHeaders = true,
+							attachSubsonicHeaders = false
+						)
+					}
+				}
+				!isRelativeApi && sessionManager.instanceUrl.isNotBlank() -> {
+					ArtistAvatarCandidate(
+						url = sessionManager.getCoverArtUrl(rawCover),
+						cacheKey = rawCover,
+						attachMeloHeaders = false,
+						attachSubsonicHeaders = true
+					)
+				}
+				else -> null
+			}
+		}
+
+		val meloAvatarCandidate = if (
+			meloReady &&
+			trimmedName.isNotEmpty() &&
+			trimmedName.lowercase() !in ARTIST_PLACEHOLDER_NAMES
+		) {
+			val path = "/api/artists/avatar?name=${Uri.encode(trimmedName)}"
+			meloApiClient.resolveMediaUrl(path)?.let { resolvedUrl ->
+				ArtistAvatarCandidate(
+					url = resolvedUrl,
+					cacheKey = "melo_artist_avatar:${trimmedName.lowercase()}",
+					attachMeloHeaders = true,
+					attachSubsonicHeaders = false
+				)
+			}
+		} else {
+			null
+		}
+
+		val ordered = if (preferMeloAvatar) {
+			listOfNotNull(externalCandidate, meloAvatarCandidate, coverCandidate)
+		} else {
+			listOfNotNull(externalCandidate, coverCandidate, meloAvatarCandidate)
+		}
+		ordered.distinctBy { it.url }
+	}
+
+	var candidateIndex by remember(candidates) { mutableIntStateOf(0) }
+	var allFailed by remember(candidates) { mutableStateOf(candidates.isEmpty()) }
+	var imageLoaded by remember(candidates) { mutableStateOf(false) }
+
+	val activeCandidate = if (!allFailed) candidates.getOrNull(candidateIndex) else null
+
+	val request = remember(
+		activeCandidate,
+		meloConfig.bearerToken,
+		preferenceManager.customHeaders,
+		coilPlatformContext
+	) {
+		activeCandidate?.let { candidate ->
+			val headersBuilder = NetworkHeaders.Builder()
+			var hasHeaders = false
+			if (candidate.attachMeloHeaders) {
+				headersBuilder.add("X-MeloKeep-Request", "1")
+				if (meloConfig.bearerToken.isNotBlank()) {
+					headersBuilder.add("Authorization", "Bearer ${meloConfig.bearerToken}")
+				}
+				hasHeaders = true
+			}
+			if (candidate.attachSubsonicHeaders) {
+				preferenceManager.customHeadersMap().forEach { (key, value) ->
+					headersBuilder.add(key, value)
+					hasHeaders = true
+				}
+			}
+			ImageRequest.Builder(coilPlatformContext)
+				.data(candidate.url)
+				.apply {
+					candidate.cacheKey?.let { key ->
+						memoryCacheKey(key)
+						diskCacheKey(key)
+					}
+					if (hasHeaders) {
+						httpHeaders(headersBuilder.build())
+					}
+				}
+				.diskCachePolicy(CachePolicy.ENABLED)
+				.memoryCachePolicy(CachePolicy.ENABLED)
+				.crossfade(120)
+				.build()
+		}
+	}
+
+	val paletteIndex = remember(trimmedName) {
+		(trimmedName.lowercase().hashCode() and 0x7fffffff) % 4
+	}
+	val (fallbackBgColor, fallbackFgColor) = when (paletteIndex) {
+		0 -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+		1 -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+		2 -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+		else -> MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.primary
+	}
+	val initialGlyph = remember(trimmedName) {
+		trimmedName.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString()
+	}
+
+	BoxWithConstraints(
+		modifier = modifier
+			.clip(shape)
+			.background(fallbackBgColor),
+		contentAlignment = Alignment.Center
+	) {
+		if (!imageLoaded) {
+			val resolvedDp = if (maxWidth.value.isFinite() && maxHeight.value.isFinite()) {
+				minOf(maxWidth, maxHeight)
+			} else {
+				48.dp
+			}
+			if (initialGlyph != null) {
+				Text(
+					text = initialGlyph,
+					style = MaterialTheme.typography.titleMedium.copy(
+						fontSize = (resolvedDp.value * 0.40f).coerceIn(14f, 52f).sp,
+						fontWeight = FontWeight.Bold
+					),
+					color = fallbackFgColor,
+					maxLines = 1
+				)
+			} else {
+				Icon(
+					imageVector = Icons.Outlined.Artist,
+					contentDescription = null,
+					tint = fallbackFgColor,
+					modifier = Modifier.size((resolvedDp * 0.46f).coerceIn(18.dp, 56.dp))
+				)
+			}
+		}
+
+		if (request != null) {
+			AsyncImage(
+				model = request,
+				imageLoader = imageLoader,
+				contentDescription = contentDescription,
+				contentScale = ContentScale.Crop,
+				onSuccess = { imageLoaded = true },
+				onError = {
+					imageLoaded = false
+					if (candidateIndex + 1 < candidates.size) {
+						candidateIndex += 1
+					} else {
+						allFailed = true
+					}
+				},
+				modifier = Modifier.fillMaxSize()
+			)
 		}
 	}
 }

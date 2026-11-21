@@ -187,11 +187,17 @@ fun App() {
 	val preferenceManager = koinInject<PreferenceManager>()
 	val meloSettingsStore = koinInject<MeloSettingsStore>()
 	val studioController = koinInject<MeloStudioController>()
+	val player = koinInject<MediaPlayer>()
 	val rootViewModel = koinViewModel<RootViewModel>()
 
 	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
 	val onboardingDismissed by meloSettingsStore.onboardingDismissed.collectAsStateWithLifecycle()
+	val hasCurrentSong by remember(player) {
+		player.uiState
+			.map { it.currentSong != null }
+			.distinctUntilChanged()
+	}.collectAsStateWithLifecycle(initialValue = player.uiState.value.currentSong != null)
 
 	LaunchedEffect(meloConfig.isAuthenticated) {
 		if (meloConfig.isAuthenticated) {
@@ -283,7 +289,8 @@ fun App() {
 		topEntry is Screen.PhoneDownloads ||
 		topEntry is Screen.DailyMix
 	val showPlayerDeck = !isOverlayOrFullscreen &&
-		(isAtRootShell || preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens)
+		(isAtRootShell || preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens) &&
+		(hasCurrentSong || !preferenceManager.hideIfIdle)
 
 	val selectRootTab: (MeloRootTab) -> Unit = remember(backStack, rootViewModel, scrollManager) {
 		{ targetTab ->
@@ -332,7 +339,8 @@ fun App() {
 							val hasActiveSnackbar = snackBarState.currentSnackbarData != null
 							val targetBottomPadding = when {
 								hasActiveSnackbar && hideOnScroll -> 8.dp
-								showNavDock -> MeloBottomChromeClearance
+								showNavDock && showPlayerDeck -> MeloBottomChromeClearance
+								showNavDock -> 84.dp
 								showPlayerDeck -> 92.dp
 								topEntry is Screen.MeloOnboarding -> 88.dp
 								else -> 8.dp

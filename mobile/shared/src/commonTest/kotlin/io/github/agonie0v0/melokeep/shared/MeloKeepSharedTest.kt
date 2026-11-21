@@ -514,10 +514,22 @@ class MeloKeepSharedTest {
 		assertEquals("vinyl-gold", reloaded.studioThemePreset.value)
 		assertTrue(reloaded.onboardingDismissed.value)
 
-		reloaded.setStudioThemePreset("pure-light")
-		assertEquals("pure-light", reloaded.studioThemePreset.value)
-		reloaded.setStudioThemePreset("dynamic")
-		assertEquals("dynamic", reloaded.studioThemePreset.value)
+		listOf(
+			"pure-light",
+			"warm-vinyl",
+			"nordic-frost",
+			"rose-mist",
+			"obsidian",
+			"vinyl-gold",
+			"midnight-aurora",
+			"cyber-amethyst",
+			"dynamic",
+		).forEach { preset ->
+			reloaded.setStudioThemePreset(preset)
+			assertEquals(preset, reloaded.studioThemePreset.value)
+			assertEquals(preset, MeloSettingsStore(backing).studioThemePreset.value)
+		}
+
 		reloaded.setStudioThemePreset("invalid-preset")
 		assertEquals("obsidian", reloaded.studioThemePreset.value)
 	}

@@ -223,15 +223,18 @@ export function AppearanceSettings({
         <h2>细节配置</h2>
         <div className="appearance-detail-grid">
           <div className="appearance-detail-box">
-            <strong>强调色</strong>
-            <div className="accent-swatch-row large">
+            <div className="appearance-detail-head">
+              <strong>主题强调色</strong>
               <button
                 type="button"
-                className={`secondary small-btn ${!appearance.customAccent ? "active-accent" : ""}`}
+                className={`appearance-preset-follow-btn ${!appearance.customAccent ? "active" : ""}`}
+                aria-pressed={!appearance.customAccent}
                 onClick={() => setCustomAccent("")}
               >
                 跟随当前预设
               </button>
+            </div>
+            <div className="accent-swatch-row large">
               {ACCENT_SWATCHES.map((sw) => (
                 <button
                   key={sw.color}
@@ -243,7 +246,19 @@ export function AppearanceSettings({
                   onClick={() => setCustomAccent(sw.color)}
                 />
               ))}
-              <label className="accent-custom-pick">
+              <label
+                className={`accent-custom-pick ${
+                  appearance.customAccent &&
+                  !ACCENT_SWATCHES.some(
+                    (sw) =>
+                      sw.color.toLowerCase() ===
+                      appearance.customAccent.toLowerCase(),
+                  )
+                    ? "active"
+                    : ""
+                }`}
+                title="自定义强调色"
+              >
                 <input
                   type="color"
                   aria-label="自定义强调色选择器"
@@ -255,42 +270,57 @@ export function AppearanceSettings({
                   }
                   onChange={(e) => setCustomAccent(e.target.value)}
                 />
-                <span>拾色器</span>
+                <span>自定义</span>
               </label>
             </div>
           </div>
 
           <div className="appearance-detail-box">
-            <strong>光晕与排版密度</strong>
-            <div className="appearance-toggles-row">
-              <label className="ready-filter">
-                <input
-                  type="checkbox"
-                  checked={appearance.ambientGlow}
-                  onChange={(e) => setAmbientGlow(e.target.checked)}
-                />
-                <Sparkles aria-hidden="true" />
-                专辑封面动态流光
+            <div className="appearance-detail-head">
+              <strong>光晕与排版密度</strong>
+            </div>
+            <div className="appearance-detail-rows">
+              <label className="appearance-detail-row appearance-toggle-row">
+                <span className="appearance-row-label">
+                  <Sparkles size={15} aria-hidden="true" />
+                  <span>专辑封面动态流光</span>
+                </span>
+                <span className="appearance-switch">
+                  <input
+                    type="checkbox"
+                    checked={appearance.ambientGlow}
+                    onChange={(e) => setAmbientGlow(e.target.checked)}
+                  />
+                  <span
+                    className="appearance-switch-slider"
+                    aria-hidden="true"
+                  />
+                </span>
               </label>
-              <div
-                className="theme-density-switch large"
-                role="group"
-                aria-label="信息密度模式"
-              >
-                <button
-                  type="button"
-                  aria-pressed={appearance.density === "modern"}
-                  onClick={() => setDensity("modern")}
+              <div className="appearance-detail-row">
+                <span className="appearance-row-label">
+                  <span>界面排版密度</span>
+                </span>
+                <div
+                  className="theme-density-switch large"
+                  role="group"
+                  aria-label="信息密度模式"
                 >
-                  标准
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={appearance.density === "compact"}
-                  onClick={() => setDensity("compact")}
-                >
-                  紧凑
-                </button>
+                  <button
+                    type="button"
+                    aria-pressed={appearance.density === "modern"}
+                    onClick={() => setDensity("modern")}
+                  >
+                    标准
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={appearance.density === "compact"}
+                    onClick={() => setDensity("compact")}
+                  >
+                    紧凑
+                  </button>
+                </div>
               </div>
             </div>
           </div>

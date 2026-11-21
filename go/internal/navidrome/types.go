@@ -140,14 +140,19 @@ type AlbumDetailDTO struct {
 }
 
 type ArtistDTO struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	AlbumCount int    `json:"album_count"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	AlbumCount int     `json:"album_count"`
+	Cover      *string `json:"cover,omitempty"`
+	AvatarURL  string  `json:"avatar_url,omitempty"`
 }
 
 type ArtistDetailDTO struct {
-	Name   string     `json:"name"`
-	Albums []AlbumDTO `json:"albums"`
+	ID        string     `json:"id,omitempty"`
+	Name      string     `json:"name"`
+	Cover     *string    `json:"cover,omitempty"`
+	AvatarURL string     `json:"avatar_url,omitempty"`
+	Albums    []AlbumDTO `json:"albums"`
 }
 
 type SongsPageDTO struct {
