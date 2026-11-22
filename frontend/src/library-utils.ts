@@ -219,21 +219,80 @@ export function describeMinMatchScore(score: number): string {
   return "宽松匹配：更多曲目自动整理，建议留意结果复核";
 }
 
+export type ToastTone = "success" | "warning" | "error" | "info";
+
+const TOAST_ERROR_RE = /失败|错误|断开|无效|超时|无法|异常(?!目录)/;
+const TOAST_WARNING_RE =
+  /异常目录|跳过|付费|需登录|请先|请输入|正在|暂不可|警告/;
+const TOAST_SUCCESS_RE =
+  /已加入|已删除|已移除|已刷新|已完成|已保存|已更新|已关闭|已开启|已设置|已勾选|已全选|已安排|成功/;
+
+export function inferToastTone(message: string): ToastTone {
+  const text = (message || "").trim();
+  if (!text) return "info";
+  if (TOAST_ERROR_RE.test(text)) return "error";
+  if (TOAST_WARNING_RE.test(text)) return "warning";
+  if (TOAST_SUCCESS_RE.test(text)) return "success";
+  return "info";
+}
+
 export function pickRecommendedMetadataSourceIds(
+  metadataSources?: MetadataSource[],
+  maxPluginSources = 3,
+): string[] {
+  if (!metadataSources?.length) {
+    return [...RECOMMENDED_FALLBACK_SOURCE_IDS];
+  }
+  const explicitPlugins = metadataSources.filter(
+    (source) => source.builtin === false && source.recommended === true,
+  );
+  const explicitBuiltins = metadataSources.filter(
+    (source) => source.builtin !== false && source.recommended === true,
+  );
+  const pluginLimit = Math.max(0, Math.floor(maxPluginSources));
+  const pickedPlugins = explicitPlugins.slice(0, pluginLimit);
+  if (pickedPlugins.length > 0) {
+    const hasStructuredPlugin = pickedPlugins.some((source) => {
+      const fields = new Set(source.fields || []);
+      return fields.has("title") && fields.has("album");
+    });
+    const pickedPluginIds = pickedPlugins.map((source) => source.id);
+    const fallbackBuiltinIds = explicitBuiltins
+      .filter((source) => !(hasStructuredPlugin && source.id === "musicbrainz"))
+      .map((source) => source.id);
+    return [...pickedPluginIds, ...fallbackBuiltinIds];
+  }
+  if (explicitBuiltins.length > 0) {
+    return explicitBuiltins.map((source) => source.id);
+  }
+  const fallbackSet = new Set<string>(RECOMMENDED_FALLBACK_SOURCE_IDS);
+  const matched = metadataSources
+    .filter((source) => source.builtin !== false && fallbackSet.has(source.id))
+    .map((source) => source.id);
+  return matched.length ? matched : [...RECOMMENDED_FALLBACK_SOURCE_IDS];
+}
+
+export function pickBuiltinRecommendedMetadataSourceIds(
   metadataSources?: MetadataSource[],
 ): string[] {
   if (!metadataSources?.length) {
     return [...RECOMMENDED_FALLBACK_SOURCE_IDS];
   }
-  const explicit = metadataSources
-    .filter((source) => source.recommended === true)
+  const explicitBuiltins = metadataSources
+    .filter((source) => source.builtin !== false && source.recommended === true)
     .map((source) => source.id);
-  if (explicit.length) return explicit;
-  const fallbackSet = new Set<string>(RECOMMENDED_FALLBACK_SOURCE_IDS);
-  const matched = metadataSources
-    .filter((source) => fallbackSet.has(source.id))
-    .map((source) => source.id);
-  return matched.length ? matched : [...RECOMMENDED_FALLBACK_SOURCE_IDS];
+  if (explicitBuiltins.length > 0) {
+    return explicitBuiltins;
+  }
+  const builtinIdSet = new Set(
+    metadataSources
+      .filter((source) => source.builtin !== false)
+      .map((source) => source.id),
+  );
+  const matched = RECOMMENDED_FALLBACK_SOURCE_IDS.filter((id) =>
+    builtinIdSet.has(id),
+  );
+  return matched.length ? [...matched] : [...RECOMMENDED_FALLBACK_SOURCE_IDS];
 }
 
 export function pickBuiltinMetadataSourceIds(

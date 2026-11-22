@@ -1462,7 +1462,7 @@ func (s *Service) Review(ctx context.Context, actor auth.Actor, jobID string, ch
 		it.Chosen = &cid
 		it.CoverURL = selected.CoverURL
 		if selected.Lyrics != "" && it.LyricsText == nil {
-			l := selected.Lyrics
+			l := TransformLyrics(selected.Lyrics, jobMeta.Settings.Chinese, jobMeta.Settings.RepairEncoding)
 			it.LyricsText = &l
 		}
 		it.After = applyCandidateToTags(it.Before, *selected, jobMeta.Settings, it.Locks)
@@ -1552,11 +1552,12 @@ func (s *Service) SearchItemCandidates(ctx context.Context, actor auth.Actor, jo
 	}
 	it := &jobMeta.Items[targetIdx]
 	ref := ScrapeReference{
-		Title:  it.Before["title"],
-		Artist: it.Before["artist"],
-		Album:  it.Before["album"],
-		Path:   it.OriginalPath,
-		Query:  query,
+		Title:   it.Before["title"],
+		Artist:  it.Before["artist"],
+		Album:   it.Before["album"],
+		Path:    it.OriginalPath,
+		Query:   query,
+		Chinese: jobMeta.Settings.Chinese,
 	}
 	cands, warns := s.scraper.Search(ctx, s.opts.SnapshotProvider(), ref, useSources)
 	ranked, _ := PickCandidatesWithMinScore(ref, cands, effectiveMinMatchScore(jobMeta.Settings, jobMeta.Request))
@@ -2932,6 +2933,11 @@ func (s *Service) buildPreviewItemCore(
 				after[f] = Transform(v, req.Find, req.Replacement, chinese, repair)
 			}
 		}
+		if strings.TrimSpace(tagData.Lyrics) != "" && ((chinese != "" && chinese != "none") || repair) {
+			if nextLyrics := TransformLyrics(tagData.Lyrics, chinese, repair); nextLyrics != tagData.Lyrics {
+				item.LyricsText = &nextLyrics
+			}
+		}
 		item.After = after
 		return item
 
@@ -3015,6 +3021,7 @@ func (s *Service) buildPreviewItemCore(
 			Album:    before["album"],
 			Duration: tagData.Duration,
 			Path:     vp.AbsPath,
+			Chinese:  settings.Chinese,
 		}
 		var cands []ScrapeCandidate
 		var warns []string
@@ -3053,7 +3060,7 @@ func (s *Service) buildPreviewItemCore(
 		item.Chosen = &cid
 		item.CoverURL = best.CoverURL
 		if best.Lyrics != "" {
-			l := best.Lyrics
+			l := TransformLyrics(best.Lyrics, settings.Chinese, settings.RepairEncoding)
 			item.LyricsText = &l
 		}
 		item.After = applyCandidateToTags(before, *best, settings, locks)

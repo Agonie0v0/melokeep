@@ -9,6 +9,7 @@ import {
   MIN_MATCH_SCORE_MIN,
   partitionMetadataSources,
   pickBuiltinMetadataSourceIds,
+  pickBuiltinRecommendedMetadataSourceIds,
   pickRecommendedMetadataSourceIds,
   sanitizeMinMatchScore,
 } from "./library-utils";
@@ -148,6 +149,15 @@ export function MetadataSources({
   const [sourceQuery, setSourceQuery] = useState("");
   const allSources = config.metadata_sources ?? [];
   const builtinIds = pickBuiltinMetadataSourceIds(allSources);
+  const builtinRecommendedIds =
+    pickBuiltinRecommendedMetadataSourceIds(allSources);
+  const recommendedPluginIds = allSources
+    .filter((source) => source.builtin === false && source.recommended === true)
+    .map((source) => source.id);
+  const hasRecommendedPlugin = recommendedPluginIds.length > 0;
+  const hasSelectedRecommendedPlugin = recommendedPluginIds.some((id) =>
+    config.sources.includes(id),
+  );
   const { builtin, plugins } = partitionMetadataSources(
     allSources,
     sourceQuery,
@@ -181,6 +191,14 @@ export function MetadataSources({
             <button
               type="button"
               className="secondary"
+              disabled={disabled || !builtinRecommendedIds.length}
+              onClick={() => change(builtinRecommendedIds)}
+            >
+              仅内置推荐
+            </button>
+            <button
+              type="button"
+              className="secondary"
               disabled={disabled || !builtinIds.length}
               onClick={() => change(builtinIds)}
             >
@@ -206,6 +224,11 @@ export function MetadataSources({
             />
           )}
         </div>
+        {hasRecommendedPlugin && !hasSelectedRecommendedPlugin && (
+          <p className="metadata-sources-hint">
+            已检测到支持完整标签与歌词的已启用插件，点击「一键勾选推荐组合」可优先使用；保留原文或按需开启繁转简均可。
+          </p>
+        )}
 
         <div className="metadata-source-groups">
           {builtin.length > 0 && (
@@ -471,6 +494,22 @@ export function LibrarySettings({
                 />
               </label>
             </div>
+            <div className="field-row">
+              <label className="field-xl library-chinese-field">
+                中文预处理
+                <select
+                  value={config.chinese || "none"}
+                  onChange={(e) => update("chinese", e.target.value)}
+                >
+                  <option value="none">保留原文</option>
+                  <option value="simplified">繁体转简体</option>
+                  <option value="traditional">简体转繁体</option>
+                </select>
+                <small>
+                  同时作用于刮削的标签与歌词；默认保留原文，按需开启
+                </small>
+              </label>
+            </div>
             <label className="library-match-score-field">
               默认自动匹配分数
               <div className="library-match-score-controls">
@@ -650,17 +689,6 @@ export function LibrarySettings({
                     <option value="both">刮削并整理入库</option>
                     <option value="scrape">只刮削资料</option>
                     <option value="organize">只整理目录</option>
-                  </select>
-                </label>
-                <label className="field-sm">
-                  中文预处理
-                  <select
-                    value={config.chinese || "none"}
-                    onChange={(e) => update("chinese", e.target.value)}
-                  >
-                    <option value="none">保留原文</option>
-                    <option value="simplified">繁体转简体</option>
-                    <option value="traditional">简体转繁体</option>
                   </select>
                 </label>
               </div>

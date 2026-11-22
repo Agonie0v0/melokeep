@@ -6,7 +6,16 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Music2, X, Play, Plus, ListMusic, MoreHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  ListMusic,
+  MoreHorizontal,
+  Music2,
+  Play,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import { activeLine, clock, type LyricLine } from "./lyrics";
 import {
   DEFAULT_LYRICS_FONT_SIZE,
@@ -427,5 +436,82 @@ export function Modal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+export function ConfirmDialog({
+  title,
+  description,
+  detail,
+  error,
+  confirmLabel = "确认操作",
+  cancelLabel = "取消",
+  busyLabel = "正在处理…",
+  busy = false,
+  tone = "danger",
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  description: ReactNode;
+  detail?: ReactNode;
+  error?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  busyLabel?: string;
+  busy?: boolean;
+  tone?: "danger" | "warning" | "primary";
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      title={title}
+      className="confirm-dialog"
+      close={busy ? undefined : onCancel}
+    >
+      <div className="confirm-dialog-body">
+        <div className={`confirm-dialog-icon is-${tone}`} aria-hidden="true">
+          {tone === "danger" ? <Trash2 /> : <AlertTriangle />}
+        </div>
+        <div className="confirm-dialog-copy">
+          <div className="confirm-dialog-desc">
+            {typeof description === "string" ? (
+              <p>{description}</p>
+            ) : (
+              description
+            )}
+          </div>
+          {detail && (
+            <div className="confirm-dialog-detail">
+              {typeof detail === "string" ? <p>{detail}</p> : detail}
+            </div>
+          )}
+        </div>
+      </div>
+      {error && (
+        <p className="confirm-dialog-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="dialog-actions">
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy}
+          onClick={onCancel}
+        >
+          {cancelLabel}
+        </button>
+        <button
+          type="button"
+          className={tone === "danger" ? "primary danger" : "primary"}
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {busy ? busyLabel : confirmLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }

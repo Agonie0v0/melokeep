@@ -3533,6 +3533,73 @@ tr.current {
   gap: 12px;
   margin-top: 20px;
 }
+.modal-dialog.confirm-dialog {
+  width: min(440px, 100%);
+}
+.confirm-dialog .dialog-heading {
+  margin-bottom: 14px;
+}
+.confirm-dialog-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.confirm-dialog-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.confirm-dialog-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.confirm-dialog-icon.is-warning {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  color: var(--amber);
+}
+.confirm-dialog-icon.is-primary {
+  background: var(--soft);
+  color: var(--accent);
+}
+.confirm-dialog-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.confirm-dialog-desc,
+.confirm-dialog-desc p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.confirm-dialog-detail {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.confirm-dialog-detail p {
+  margin: 0;
+}
+.confirm-dialog-error {
+  margin: 12px 0 0;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .login-dialog {
   width: min(408px, 100%);
   padding: 36px 32px 32px;
@@ -3763,26 +3830,107 @@ tr.current {
 }
 #toast {
   position: fixed;
-  bottom: 28px;
+  top: 72px;
+  bottom: auto;
   left: 50%;
   transform: translateX(-50%);
   z-index: 250;
-  background: var(--ink);
-  color: var(--surface);
-  border-radius: 99px;
-  padding: 10px 18px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border-radius: 14px;
+  padding: 10px 12px 10px 14px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
   width: max-content;
-  max-width: calc(100% - 32px);
-  font-size: 12.5px;
+  max-width: min(560px, calc(100vw - 24px));
+  font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+  line-height: 1.45;
+  box-shadow:
+    0 16px 38px -8px rgba(15, 23, 42, 0.18),
+    0 4px 12px rgba(15, 23, 42, 0.08);
 }
-#toast button {
-  display: flex;
-  color: inherit;
+:root[data-theme="dark"] #toast {
+  box-shadow:
+    0 20px 44px -8px rgba(0, 0, 0, 0.62),
+    0 6px 16px rgba(0, 0, 0, 0.36);
+}
+#toast .app-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  background: var(--soft);
+  color: var(--accent);
+}
+#toast .app-toast-icon svg {
+  width: 16px;
+  height: 16px;
+}
+#toast.app-toast.is-success {
+  border-color: color-mix(in srgb, var(--emerald) 32%, var(--line));
+}
+#toast.app-toast.is-success .app-toast-icon {
+  background: var(--emerald-bg);
+  color: var(--emerald);
+}
+#toast.app-toast.is-warning {
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--line));
+}
+#toast.app-toast.is-warning .app-toast-icon {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  color: var(--amber);
+}
+#toast.app-toast.is-error {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+}
+#toast.app-toast.is-error .app-toast-icon {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+#toast.app-toast.is-info {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+#toast.app-toast.is-info .app-toast-icon {
+  background: var(--soft);
+  color: var(--accent);
+}
+#toast .app-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
+}
+#toast button,
+#toast .app-toast-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--muted);
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+#toast button:hover,
+#toast .app-toast-close:hover {
+  background: var(--subtle);
+  color: var(--ink);
+}
+#toast .app-toast-close svg {
+  width: 15px;
+  height: 15px;
 }
 
 /* ==========================================================================
@@ -4469,7 +4617,9 @@ tr.current {
     font-size: 11px;
   }
   #toast {
-    bottom: 24px;
+    top: 64px;
+    bottom: auto;
+    max-width: calc(100vw - 24px);
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -35,7 +36,9 @@ var (
 		"cover":        regexp.MustCompile(`(?i)\bcover\b|翻唱`),
 		"acoustic":     regexp.MustCompile(`(?i)\bacoustic\b|不插电`),
 	}
-	mbUUIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	mbUUIDRe              = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	scraperURLErrPrefixRe = regexp.MustCompile(`(?i)\b(?:Get|Post|Head|Put|Delete|Patch|Options)\s+"https?://[^"]+"\s*:\s*`)
+	scraperRawURLRe       = regexp.MustCompile(`(?i)https?://[^\s"')]+`)
 )
 
 type ScrapeCandidate struct {
@@ -113,6 +116,7 @@ type ScrapeReference struct {
 	Version  string
 	Path     string
 	Query    string
+	Chinese  string
 }
 
 const DefaultMinMatchScore = 85
@@ -192,6 +196,22 @@ func dynamicPluginFields(caps model.Capability) []string {
 	return fields
 }
 
+func pluginCapabilityRank(caps model.Capability, proxyRecommended bool) int {
+	switch {
+	case caps.Metadata && caps.Lyrics:
+		if !proxyRecommended {
+			return 0
+		}
+		return 1
+	case caps.Metadata:
+		return 2
+	case caps.Lyrics:
+		return 3
+	default:
+		return 4
+	}
+}
+
 // SourceCatalog returns the built-in metadata sources together with enabled plugin sources.
 func (s *Scraper) SourceCatalog() []model.MetadataSourceDTO {
 	out := builtinSourceCatalog()
@@ -202,12 +222,20 @@ func (s *Scraper) SourceCatalog() []model.MetadataSourceDTO {
 	for _, item := range out {
 		seen[item.ID] = true
 	}
+	type rankedPluginSource struct {
+		dto  model.MetadataSourceDTO
+		rank int
+	}
+	var plugins []rankedPluginSource
 	for _, entry := range s.providers.PluginEntries() {
 		if entry.Provider == nil {
 			continue
 		}
 		caps := entry.Provider.Capabilities()
 		if !caps.Search && !caps.Metadata && !caps.Lyrics {
+			continue
+		}
+		if caps.Episodes && !caps.Metadata && !caps.Lyrics {
 			continue
 		}
 		id := strings.TrimSpace(entry.Provider.ID())
@@ -219,15 +247,30 @@ func (s *Scraper) SourceCatalog() []model.MetadataSourceDTO {
 		if label == "" {
 			label = id
 		}
-		out = append(out, model.MetadataSourceDTO{
-			ID:          id,
-			Label:       label,
-			Description: strings.TrimSpace(entry.Meta.Description),
-			Fields:      dynamicPluginFields(caps),
-			Note:        strings.TrimSpace(caps.Note),
-			Builtin:     false,
-			Recommended: false,
+		recommended := caps.Metadata && caps.Lyrics && !caps.Episodes && !entry.Meta.ProxyRecommended
+		recommendReason := ""
+		if recommended {
+			recommendReason = "已启用插件：支持结构化标签、封面与同步歌词"
+		}
+		plugins = append(plugins, rankedPluginSource{
+			dto: model.MetadataSourceDTO{
+				ID:              id,
+				Label:           label,
+				Description:     strings.TrimSpace(entry.Meta.Description),
+				Fields:          dynamicPluginFields(caps),
+				Note:            strings.TrimSpace(caps.Note),
+				Builtin:         false,
+				Recommended:     recommended,
+				RecommendReason: recommendReason,
+			},
+			rank: pluginCapabilityRank(caps, entry.Meta.ProxyRecommended),
 		})
+	}
+	sort.SliceStable(plugins, func(i, j int) bool {
+		return plugins[i].rank < plugins[j].rank
+	})
+	for _, p := range plugins {
+		out = append(out, p.dto)
 	}
 	return out
 }
@@ -613,7 +656,7 @@ func (s *Scraper) Search(ctx context.Context, snap config.Snapshot, ref ScrapeRe
 		case "musicbrainz":
 			found, err = s.searchMusicBrainz(ctx, snap, searchRef)
 		case "itunes":
-			found, err = s.searchITunes(ctx, snap, query)
+			found, err = s.searchITunes(ctx, snap, query, searchRef.Chinese)
 		case "lrclib":
 			found, err = s.searchLRCLIB(ctx, snap, searchRef)
 		case "acoustid":
@@ -652,7 +695,7 @@ func (s *Scraper) Search(ctx context.Context, snap config.Snapshot, ref ScrapeRe
 			if label == "" {
 				label = src
 			}
-			warnings = append(warnings, fmt.Sprintf("%s查询失败：%s", label, err.Error()))
+			warnings = append(warnings, fmt.Sprintf("%s查询失败：%s", label, formatScraperError(err)))
 			continue
 		}
 		candidates = append(candidates, found...)
@@ -817,18 +860,80 @@ func lrclibRecordToCandidate(rec lrclibRecord) (ScrapeCandidate, bool) {
 	}, true
 }
 
-func (s *Scraper) lrclibGet(ctx context.Context, snap config.Snapshot, endpoint string) (int, []byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return 0, nil, err
+func formatScraperError(err error) string {
+	if err == nil {
+		return ""
 	}
-	req.Header.Set("User-Agent", "MeloKeep/3.0")
-	resp, err := s.pool.Do(ctx, req, transport.RequestOptions{
+	msg := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "tls handshake timeout") {
+		return "TLS 握手超时，请检查网络或代理设置"
+	}
+	de, hasDomainErr := model.AsDomainError(err)
+	if hasDomainErr && de.Code == model.ErrDeadline {
+		return "上游请求超时，请稍后重试或检查代理设置"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(lower, "timeout") || strings.Contains(lower, "client.timeout") {
+		return "上游请求超时，请稍后重试或检查代理设置"
+	}
+	if (hasDomainErr && de.Status == http.StatusServiceUnavailable) || strings.Contains(lower, "http 503") || strings.Contains(lower, "上游返回 503") {
+		return "服务暂时繁忙或触发限流（HTTP 503），重试后仍失败，请稍后再试"
+	}
+	if (hasDomainErr && de.Status == http.StatusTooManyRequests) || strings.Contains(lower, "http 429") || strings.Contains(lower, "上游返回 429") {
+		return "请求过于频繁（HTTP 429），请稍后再试"
+	}
+	cleaned := scraperURLErrPrefixRe.ReplaceAllString(msg, "")
+	cleaned = scraperRawURLRe.ReplaceAllString(cleaned, "")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return "上游请求失败，请稍后重试"
+	}
+	return cleaned
+}
+
+func isNonRetryableScraperErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if de, ok := model.AsDomainError(err); ok {
+		switch de.Code {
+		case model.ErrForbidden, model.ErrInvalidInput, model.ErrCancelled, model.ErrInvalidResponse:
+			return true
+		}
+	}
+	return false
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (s *Scraper) lrclibGet(ctx context.Context, snap config.Snapshot, endpoint string) (int, []byte, error) {
+	resp, err := s.pool.DoWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "MeloKeep/3.0")
+		return req, nil
+	}, transport.RequestOptions{
 		Domain:           transport.DomainPublicMedia,
 		ConfigRevision:   snap.Revision,
 		ProxyURL:         scraperProxyURL(snap, "lrclib"),
-		Timeout:          12 * time.Second,
+		Timeout:          20 * time.Second,
 		MaxResponseBytes: 4 << 20,
+		Idempotent:       true,
+		MaxRetries:       2,
 	})
 	if err != nil {
 		return 0, nil, err
@@ -922,7 +1027,7 @@ func (s *Scraper) searchLRCLIB(ctx context.Context, snap config.Snapshot, ref Sc
 	return out, nil
 }
 
-func (s *Scraper) musicBrainzGet(ctx context.Context, snap config.Snapshot, path string, params url.Values, out any) error {
+func (s *Scraper) waitMusicBrainzSlot(ctx context.Context) error {
 	s.mbMu.Lock()
 	wait := time.Until(s.mbNext)
 	if wait > 0 {
@@ -936,36 +1041,96 @@ func (s *Scraper) musicBrainzGet(ctx context.Context, snap config.Snapshot, path
 	}
 	s.mbNext = time.Now().Add(s.opts.MBLimitInterval)
 	s.mbMu.Unlock()
+	return nil
+}
 
+func musicBrainzRetryDelay(interval time.Duration, attempt int, resp *http.Response) time.Duration {
+	delay := interval * time.Duration(attempt+1)
+	if delay < 0 {
+		delay = 0
+	}
+	if resp != nil {
+		if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
+			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+				if raDur := time.Duration(secs) * time.Second; raDur > delay {
+					delay = raDur
+				}
+			}
+		}
+	}
+	if delay > 3*time.Second {
+		delay = 3 * time.Second
+	}
+	return delay
+}
+
+func (s *Scraper) musicBrainzGet(ctx context.Context, snap config.Snapshot, path string, params url.Values, out any) error {
 	if params == nil {
 		params = url.Values{}
 	}
 	params.Set("fmt", "json")
 	endpoint := strings.TrimRight(s.opts.MusicBrainzBaseURL, "/") + "/" + strings.TrimLeft(path, "/") + "?" + params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
+
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := s.waitMusicBrainzSlot(ctx); err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", "MeloKeep/3.0 (https://github.com/Agonie0v0/melokeep)")
+		resp, err := s.pool.Do(ctx, req, transport.RequestOptions{
+			Domain:           transport.DomainPublicMedia,
+			ConfigRevision:   snap.Revision,
+			ProxyURL:         scraperProxyURL(snap, "musicbrainz"),
+			Timeout:          20 * time.Second,
+			MaxResponseBytes: 4 << 20,
+		})
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil || isNonRetryableScraperErr(err) || attempt == maxAttempts-1 {
+				return err
+			}
+			if sErr := sleepWithContext(ctx, musicBrainzRetryDelay(s.opts.MBLimitInterval, attempt, nil)); sErr != nil {
+				return sErr
+			}
+			continue
+		}
+
+		retryableStatus := resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			(resp.StatusCode >= 500 && resp.StatusCode != http.StatusNotImplemented)
+		if resp.StatusCode >= 400 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			if !retryableStatus || attempt == maxAttempts-1 {
+				return lastErr
+			}
+			if sErr := sleepWithContext(ctx, musicBrainzRetryDelay(s.opts.MBLimitInterval, attempt, resp)); sErr != nil {
+				return sErr
+			}
+			continue
+		}
+
+		raw, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			if ctx.Err() != nil || isNonRetryableScraperErr(readErr) || attempt == maxAttempts-1 {
+				return readErr
+			}
+			if sErr := sleepWithContext(ctx, musicBrainzRetryDelay(s.opts.MBLimitInterval, attempt, nil)); sErr != nil {
+				return sErr
+			}
+			continue
+		}
+		return json.Unmarshal(raw, out)
 	}
-	req.Header.Set("User-Agent", "MeloKeep/3.0 (https://github.com/Agonie0v0/melokeep)")
-	resp, err := s.pool.Do(ctx, req, transport.RequestOptions{
-		Domain:           transport.DomainPublicMedia,
-		ConfigRevision:   snap.Revision,
-		ProxyURL:         scraperProxyURL(snap, "musicbrainz"),
-		Timeout:          12 * time.Second,
-		MaxResponseBytes: 4 << 20,
-	})
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(raw, out)
+	return lastErr
 }
 
 type mbArtistCredit struct {
@@ -1066,7 +1231,7 @@ func (s *Scraper) enrichMusicBrainz(ctx context.Context, snap config.Snapshot, c
 		} `json:"media"`
 	}
 	if err := s.musicBrainzGet(ctx, snap, "release/"+cand.ReleaseID, url.Values{"inc": {"recordings+artist-credits"}}, &rel); err != nil {
-		return cand, []string{fmt.Sprintf("MusicBrainz 发行资料获取失败（%v）", err)}
+		return cand, []string{fmt.Sprintf("MusicBrainz 发行资料获取失败（%s）", formatScraperError(err))}
 	}
 	if rel.Title != "" {
 		cand.Album = rel.Title
@@ -1096,20 +1261,32 @@ func (s *Scraper) enrichMusicBrainz(ctx context.Context, snap config.Snapshot, c
 	return cand, warnings
 }
 
-func (s *Scraper) searchITunes(ctx context.Context, snap config.Snapshot, query string) ([]ScrapeCandidate, error) {
-	endpoint := strings.TrimRight(s.opts.ITunesBaseURL, "/") + "/search?" + url.Values{
-		"term": {query}, "media": {"music"}, "entity": {"song"}, "limit": {"8"},
-	}.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+func (s *Scraper) searchITunes(ctx context.Context, snap config.Snapshot, query, chinese string) ([]ScrapeCandidate, error) {
+	params := url.Values{
+		"term":   {query},
+		"media":  {"music"},
+		"entity": {"song"},
+		"limit":  {"8"},
 	}
-	resp, err := s.pool.Do(ctx, req, transport.RequestOptions{
+	switch chinese {
+	case "simplified":
+		params.Set("country", "CN")
+		params.Set("lang", "zh_cn")
+	case "traditional":
+		params.Set("country", "TW")
+		params.Set("lang", "zh_tw")
+	}
+	endpoint := strings.TrimRight(s.opts.ITunesBaseURL, "/") + "/search?" + params.Encode()
+	resp, err := s.pool.DoWithRetry(ctx, func() (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	}, transport.RequestOptions{
 		Domain:           transport.DomainPublicMedia,
 		ConfigRevision:   snap.Revision,
 		ProxyURL:         scraperProxyURL(snap, "itunes"),
-		Timeout:          12 * time.Second,
+		Timeout:          20 * time.Second,
 		MaxResponseBytes: 4 << 20,
+		Idempotent:       true,
+		MaxRetries:       2,
 	})
 	if err != nil {
 		return nil, err

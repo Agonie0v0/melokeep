@@ -2897,3 +2897,659 @@ func TestPhase3MinMatchScoreAndSourceCatalog(t *testing.T) {
 		}
 	})
 }
+
+func TestScraperDynamicSourceCatalogRankingAndEpisodeFilter(t *testing.T) {
+	reg, err := provider.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []provider.Entry{
+		{
+			Provider: &mockBasicSearchPlugin{
+				id:   "open-podcast",
+				caps: model.Capability{Tier: "plugin", Search: true, Episodes: true},
+			},
+			Meta: provider.Metadata{Label: "Open Podcast", Description: "有声节目插件"},
+		},
+		{
+			Provider: &mockBasicSearchPlugin{
+				id:   "open-search-only",
+				caps: model.Capability{Tier: "plugin", Search: true},
+			},
+			Meta: provider.Metadata{Label: "Open Search Only"},
+		},
+		{
+			Provider: &mockMetadataLyricsPlugin{
+				id:   "open-lyrics-only",
+				caps: model.Capability{Tier: "plugin", Lyrics: true},
+			},
+			Meta: provider.Metadata{Label: "Open Lyrics Only"},
+		},
+		{
+			Provider: &mockMetadataLyricsPlugin{
+				id:   "open-meta-only",
+				caps: model.Capability{Tier: "plugin", Metadata: true},
+			},
+			Meta: provider.Metadata{Label: "Open Meta Only"},
+		},
+		{
+			Provider: &mockMetadataLyricsPlugin{
+				id:   "open-meta-proxy",
+				caps: model.Capability{Tier: "plugin", Metadata: true, Lyrics: true},
+			},
+			Meta: provider.Metadata{Label: "Open Meta Proxy", ProxyRecommended: true},
+		},
+		{
+			Provider: &mockMetadataLyricsPlugin{
+				id:   "open-meta-lyrics",
+				caps: model.Capability{Tier: "plugin", Metadata: true, Lyrics: true},
+			},
+			Meta: provider.Metadata{Label: "Open Meta Lyrics"},
+		},
+	}
+	for _, entry := range entries {
+		if err := reg.RegisterPlugin(entry); err != nil {
+			t.Fatalf("RegisterPlugin %s: %v", entry.Provider.ID(), err)
+		}
+	}
+
+	sc := NewScraper(nil, reg, nil, ScraperOptions{})
+	catalog := sc.SourceCatalog()
+
+	// Built-in 4 sources keep original order and attributes.
+	if len(catalog) != 9 {
+		t.Fatalf("expected 4 built-ins + 5 eligible plugins = 9, got %d: %+v", len(catalog), catalog)
+	}
+	if sc.ValidSourceID("open-podcast") {
+		t.Fatalf("pure episodes plugin must be excluded from metadata source catalog")
+	}
+	if !catalog[0].Builtin || !catalog[1].Builtin || !catalog[2].Builtin || !catalog[3].Builtin {
+		t.Fatalf("expected first 4 sources to remain built-in, got %+v", catalog[:4])
+	}
+
+	wantPluginOrder := []string{
+		"open-meta-lyrics",
+		"open-meta-proxy",
+		"open-meta-only",
+		"open-lyrics-only",
+		"open-search-only",
+	}
+	var gotPluginOrder []string
+	byID := make(map[string]model.MetadataSourceDTO, len(catalog))
+	for _, src := range catalog {
+		byID[src.ID] = src
+		if !src.Builtin {
+			gotPluginOrder = append(gotPluginOrder, src.ID)
+		}
+	}
+	if !slices.Equal(gotPluginOrder, wantPluginOrder) {
+		t.Fatalf("plugin order = %v, want %v", gotPluginOrder, wantPluginOrder)
+	}
+
+	rec := byID["open-meta-lyrics"]
+	if !rec.Recommended || rec.RecommendReason != "已启用插件：支持结构化标签、封面与同步歌词" {
+		t.Fatalf("expected open-meta-lyrics recommended with exact reason, got %+v", rec)
+	}
+	if byID["open-meta-proxy"].Recommended {
+		t.Fatalf("proxy-recommended plugin should not be auto-recommended: %+v", byID["open-meta-proxy"])
+	}
+	if byID["open-meta-only"].Recommended || byID["open-lyrics-only"].Recommended || byID["open-search-only"].Recommended {
+		t.Fatalf("incomplete capability plugins should not be auto-recommended")
+	}
+
+	// Package-level SourceCatalog() stays unaffected.
+	if len(SourceCatalog()) != 4 {
+		t.Fatalf("expected package-level SourceCatalog to remain 4 built-ins")
+	}
+}
+
+func TestScraperRetriesAndErrorSanitization(t *testing.T) {
+	ctx := context.Background()
+	snap := config.NewSnapshot(config.DefaultRuntimeConfig(), config.DefaultResourceBudgets())
+
+	t.Run("musicBrainzGet retries on 503 and succeeds", func(t *testing.T) {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/ws/2/recording" {
+				http.NotFound(w, r)
+				return
+			}
+			if calls.Add(1) <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"recordings": []map[string]any{
+					{
+						"id":     "mb-retry-1",
+						"title":  "晨风序曲",
+						"length": 210000,
+						"artist-credit": []map[string]any{
+							{"name": "自由乐手", "joinphrase": ""},
+						},
+						"releases": []map[string]any{
+							{"id": "44444444-4444-4444-4444-444444444444", "title": "海风随想", "date": "2025-01-01"},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{
+			MusicBrainzBaseURL: srv.URL + "/ws/2",
+			MBLimitInterval:    time.Millisecond,
+		})
+		cands, warns := sc.Search(ctx, snap, ScrapeReference{Title: "晨风序曲", Artist: "自由乐手"}, []string{"musicbrainz"})
+		if len(warns) != 0 || len(cands) != 1 || cands[0].SourceID != "mb-retry-1" {
+			t.Fatalf("expected MusicBrainz retry success, cands=%+v warns=%v", cands, warns)
+		}
+		if calls.Load() != 3 {
+			t.Fatalf("expected 3 attempts (2 retries), got %d", calls.Load())
+		}
+	})
+
+	t.Run("musicBrainzGet respects numeric Retry-After on 429", func(t *testing.T) {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) == 1 {
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"recordings": []map[string]any{
+					{
+						"id":     "mb-429-1",
+						"title":  "微光序曲",
+						"length": 180000,
+						"artist-credit": []map[string]any{
+							{"name": "自由乐手", "joinphrase": ""},
+						},
+						"releases": []map[string]any{
+							{"id": "55555555-5555-5555-5555-555555555555", "title": "海风随想"},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{
+			MusicBrainzBaseURL: srv.URL + "/ws/2",
+			MBLimitInterval:    time.Millisecond,
+		})
+		start := time.Now()
+		cands, warns := sc.Search(ctx, snap, ScrapeReference{Title: "微光序曲", Artist: "自由乐手"}, []string{"musicbrainz"})
+		elapsed := time.Since(start)
+		if len(warns) != 0 || len(cands) != 1 {
+			t.Fatalf("expected MusicBrainz 429 retry success, cands=%+v warns=%v", cands, warns)
+		}
+		if elapsed < 900*time.Millisecond {
+			t.Fatalf("expected Retry-After >= 1s respected, elapsed=%v", elapsed)
+		}
+	})
+
+	t.Run("lrclibGet retries on 503 and transient network reset", func(t *testing.T) {
+		var mode atomic.Int32 // 0 = 503 x2 -> 200, 1 = hijack close x2 -> 200
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/get" {
+				http.NotFound(w, r)
+				return
+			}
+			n := calls.Add(1)
+			if mode.Load() == 0 && n <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if mode.Load() == 1 && n <= 2 {
+				if hj, ok := w.(http.Hijacker); ok {
+					conn, _, err := hj.Hijack()
+					if err == nil {
+						_ = conn.Close()
+						return
+					}
+				}
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           7101,
+				"trackName":    "晨风序曲",
+				"artistName":   "自由乐手",
+				"syncedLyrics": "[00:01.00]微风吹过山谷",
+			})
+		}))
+		defer srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{LRCLIBBaseURL: srv.URL + "/api"})
+
+		cands, warns := sc.Search(ctx, snap, ScrapeReference{Title: "晨风序曲", Artist: "自由乐手"}, []string{"lrclib"})
+		if len(warns) != 0 || len(cands) != 1 || calls.Load() != 3 {
+			t.Fatalf("expected lrclib 503 retry success on 3rd attempt, cands=%+v warns=%v calls=%d", cands, warns, calls.Load())
+		}
+
+		mode.Store(1)
+		calls.Store(0)
+		cands2, warns2 := sc.Search(ctx, snap, ScrapeReference{Title: "晨风序曲", Artist: "自由乐手"}, []string{"lrclib"})
+		if len(warns2) != 0 || len(cands2) != 1 || calls.Load() != 3 {
+			t.Fatalf("expected lrclib connection-reset retry success on 3rd attempt, cands=%+v warns=%v calls=%d", cands2, warns2, calls.Load())
+		}
+	})
+
+	t.Run("lrclibGet 404 does not retry and timeout warning is sanitized", func(t *testing.T) {
+		var getCalls, searchCalls atomic.Int32
+		var slowMode atomic.Bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if slowMode.Load() {
+				select {
+				case <-time.After(150 * time.Millisecond):
+				case <-r.Context().Done():
+				}
+				return
+			}
+			switch r.URL.Path {
+			case "/api/get":
+				getCalls.Add(1)
+				w.WriteHeader(http.StatusNotFound)
+			case "/api/search":
+				searchCalls.Add(1)
+				_ = json.NewEncoder(w).Encode([]map[string]any{
+					{"id": 7201, "trackName": "晨风序曲", "artistName": "自由乐手", "syncedLyrics": "[00:01.00]搜索补全歌词"},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{LRCLIBBaseURL: srv.URL + "/api"})
+
+		cands, warns := sc.Search(ctx, snap, ScrapeReference{Title: "晨风序曲", Artist: "自由乐手"}, []string{"lrclib"})
+		if len(warns) != 0 || len(cands) != 1 || getCalls.Load() != 1 || searchCalls.Load() != 1 {
+			t.Fatalf("expected 404 without retry -> /search fallback, get=%d search=%d cands=%+v warns=%v", getCalls.Load(), searchCalls.Load(), cands, warns)
+		}
+
+		slowMode.Store(true)
+		shortCtx, cancel := context.WithTimeout(ctx, 40*time.Millisecond)
+		defer cancel()
+		_, timeoutWarns := sc.Search(shortCtx, snap, ScrapeReference{Title: "其他歌名", Artist: "自由乐手"}, []string{"lrclib"})
+		if len(timeoutWarns) != 1 || !strings.Contains(timeoutWarns[0], "上游请求超时") || strings.Contains(timeoutWarns[0], "http://") || strings.Contains(timeoutWarns[0], "%E") {
+			t.Fatalf("expected sanitized timeout warning, got %v", timeoutWarns)
+		}
+	})
+
+	t.Run("lrclibGet exhausted failure sanitizes warnings without URL or percent encoding", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		closedURL := srv.URL + "/api"
+		srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{LRCLIBBaseURL: closedURL})
+		_, warns := sc.Search(ctx, snap, ScrapeReference{Title: "其他歌名", Artist: "自由乐手"}, []string{"lrclib"})
+		if len(warns) != 1 {
+			t.Fatalf("expected 1 sanitized warning, got %v", warns)
+		}
+		if strings.Contains(warns[0], "https://") || strings.Contains(warns[0], "http://") || strings.Contains(warns[0], "%E") {
+			t.Fatalf("warning leaked raw URL or percent-encoding: %q", warns[0])
+		}
+	})
+
+	t.Run("formatScraperError covers TLS timeout, deadline, 503, 429, and URL stripping", func(t *testing.T) {
+		cases := []struct {
+			err  error
+			want string
+		}{
+			{errors.New(`Get "https://lrclib.net/api/get?track_name=%E5%85%B6": net/http: TLS handshake timeout`), "TLS 握手超时，请检查网络或代理设置"},
+			{context.DeadlineExceeded, "上游请求超时，请稍后重试或检查代理设置"},
+			{errors.New(`Get "https://itunes.apple.com/search?term=%E5%85%B6": Client.Timeout exceeded while awaiting headers`), "上游请求超时，请稍后重试或检查代理设置"},
+			{errors.New("HTTP 503"), "服务暂时繁忙或触发限流（HTTP 503），重试后仍失败，请稍后再试"},
+			{model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "上游返回 503"), "服务暂时繁忙或触发限流（HTTP 503），重试后仍失败，请稍后再试"},
+			{errors.New("HTTP 429"), "请求过于频繁（HTTP 429），请稍后再试"},
+			{model.NewError(model.ErrRateLimited, http.StatusTooManyRequests, "上游返回 429"), "请求过于频繁（HTTP 429），请稍后再试"},
+			{errors.New(`Get "https://lrclib.net/api/get?track_name=%E5%85%B6%E4%BB%96": connection reset by peer`), "connection reset by peer"},
+		}
+		for _, tc := range cases {
+			got := formatScraperError(tc.err)
+			if got != tc.want {
+				t.Fatalf("formatScraperError(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+			if strings.Contains(got, "https://") || strings.Contains(got, "%E") {
+				t.Fatalf("sanitized error leaked URL/percent-encoding: %q", got)
+			}
+		}
+	})
+
+	t.Run("searchITunes attaches country and lang by Chinese preference and retries 503", func(t *testing.T) {
+		var calls atomic.Int32
+		var lastCountry, lastLang atomic.Value
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/search" {
+				http.NotFound(w, r)
+				return
+			}
+			lastCountry.Store(r.URL.Query().Get("country"))
+			lastLang.Store(r.URL.Query().Get("lang"))
+			if calls.Add(1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"results": []map[string]any{
+					{
+						"trackId":         9901,
+						"trackName":       "晨风序曲",
+						"artistName":      "自由乐手",
+						"collectionName":  "海风随想",
+						"releaseDate":     "2025-01-01T00:00:00Z",
+						"trackNumber":     1,
+						"discNumber":      1,
+						"trackTimeMillis": 210000,
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+		defer pool.CloseAll()
+		sc := NewScraper(pool, nil, nil, ScraperOptions{ITunesBaseURL: srv.URL})
+
+		cands, warns := sc.Search(ctx, snap, ScrapeReference{
+			Title:   "晨风序曲",
+			Artist:  "自由乐手",
+			Chinese: "simplified",
+		}, []string{"itunes"})
+		if len(warns) != 0 || len(cands) != 1 {
+			t.Fatalf("expected iTunes simplified search success, cands=%+v warns=%v", cands, warns)
+		}
+		if lastCountry.Load() != "CN" || lastLang.Load() != "zh_cn" {
+			t.Fatalf("expected country=CN lang=zh_cn, got country=%v lang=%v", lastCountry.Load(), lastLang.Load())
+		}
+		if calls.Load() != 2 {
+			t.Fatalf("expected iTunes retry after 503 (2 calls), got %d", calls.Load())
+		}
+
+		_, _ = sc.Search(ctx, snap, ScrapeReference{
+			Title:   "晨風序曲",
+			Artist:  "自由樂手",
+			Chinese: "traditional",
+		}, []string{"itunes"})
+		if lastCountry.Load() != "TW" || lastLang.Load() != "zh_tw" {
+			t.Fatalf("expected country=TW lang=zh_tw, got country=%v lang=%v", lastCountry.Load(), lastLang.Load())
+		}
+
+		_, _ = sc.Search(ctx, snap, ScrapeReference{
+			Title:   "晨风序曲",
+			Artist:  "自由乐手",
+			Chinese: "none",
+		}, []string{"itunes"})
+		if lastCountry.Load() != "" || lastLang.Load() != "" {
+			t.Fatalf("expected empty country/lang for none, got country=%v lang=%v", lastCountry.Load(), lastLang.Load())
+		}
+	})
+}
+
+func TestScrapeAndCleanChineseConversionTagsAndLyrics(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+
+	if def := DefaultSettings(); def.Chinese != "none" {
+		t.Fatalf("DefaultSettings().Chinese = %q, want %q", def.Chinese, "none")
+	}
+
+	reg, err := provider.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tradLyrics := "[00:01.00]微風吹過山谷\n\n[00:05.00]歌聲在樹林迴盪"
+	simpLyrics := "[00:01.00]微风吹过山谷\n\n[00:05.00]歌声在树林回荡"
+	customPlugin := &mockMetadataLyricsPlugin{
+		id: "open-neutral-meta",
+		caps: model.Capability{
+			Tier:     "plugin",
+			Search:   true,
+			Metadata: true,
+			Lyrics:   true,
+		},
+		metaItems: []provider.MetadataItem{
+			{
+				SourceID:    "item-trad-1",
+				Title:       "晨風序曲",
+				Artist:      "自由樂手",
+				Album:       "海風隨想",
+				AlbumArtist: "自由樂手",
+				Date:        "2025-03-01",
+				TrackNumber: "1",
+				Duration:    210,
+			},
+		},
+		lyricsText: tradLyrics,
+	}
+	if err := reg.RegisterPlugin(provider.Entry{
+		Provider: customPlugin,
+		Meta:     provider.Metadata{Label: "Open Neutral Meta"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var itunesCountry, itunesLang atomic.Value
+	itunesSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" {
+			http.NotFound(w, r)
+			return
+		}
+		itunesCountry.Store(r.URL.Query().Get("country"))
+		itunesLang.Store(r.URL.Query().Get("lang"))
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+	}))
+	defer itunesSrv.Close()
+
+	tagger := newMemTagger()
+	_, _, svc, root := setupLibraryTestEnvWithProviders(t, tagger, reg, ScraperOptions{
+		ITunesBaseURL: itunesSrv.URL,
+	}, nil, nil)
+
+	audio := filepath.Join(root.CanonicalPath, "breeze.flac")
+	if _, err := files.WriteFileDurable(audio, []byte("AUDIO-BREEZE")); err != nil {
+		t.Fatal(err)
+	}
+	tagger.tags[audio] = helper.AudioTagData{
+		Path:     audio,
+		Editable: true,
+		Duration: 210,
+		Tags: map[string]string{
+			"title":  "晨風序曲",
+			"artist": "自由樂手",
+			"album":  "海風隨想",
+		},
+		Lyrics: tradLyrics,
+	}
+
+	// 1. Default Chinese="none": scrape and clean keep original Traditional Chinese text.
+	scrapeNone, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:  "scrape",
+		Paths:   []string{audio},
+		Sources: []string{"open-neutral-meta"},
+	})
+	if err != nil || scrapeNone.Status != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("scrape(none) failed: status=%s err=%v", scrapeNone.Status, err)
+	}
+	if scrapeNone.Items[0].After["title"] != "晨風序曲" || scrapeNone.Items[0].After["album"] != "海風隨想" {
+		t.Fatalf("expected original traditional tags under none, got %+v", scrapeNone.Items[0].After)
+	}
+	jmScrapeNone, err := svc.loadJobMeta(ctx, scrapeNone.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jmScrapeNone.Items[0].LyricsText == nil || *jmScrapeNone.Items[0].LyricsText != tradLyrics {
+		t.Fatalf("expected original traditional lyrics under none, got %v", jmScrapeNone.Items[0].LyricsText)
+	}
+
+	cleanNone, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action: "clean",
+		Paths:  []string{audio},
+	})
+	if err != nil {
+		t.Fatalf("clean(none) failed: %v", err)
+	}
+	if cleanNone.Items[0].After["title"] != "晨風序曲" {
+		t.Fatalf("expected clean(none) tag unchanged, got %+v", cleanNone.Items[0].After)
+	}
+	jmCleanNone, err := svc.loadJobMeta(ctx, cleanNone.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jmCleanNone.Items[0].LyricsText != nil {
+		t.Fatalf("expected clean(none) LyricsText nil, got %q", *jmCleanNone.Items[0].LyricsText)
+	}
+
+	// 2. Chinese="simplified": scrape, Review, and clean convert both tags and multi-line lyrics.
+	cur, err := svc.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur.Chinese = "simplified"
+	if _, err := svc.SaveSettings(ctx, admin, cur); err != nil {
+		t.Fatalf("SaveSettings(simplified): %v", err)
+	}
+
+	scrapeSimp, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:  "scrape",
+		Paths:   []string{audio},
+		Sources: []string{"open-neutral-meta"},
+	})
+	if err != nil || scrapeSimp.Status != string(model.LibraryJobPreviewReady) {
+		t.Fatalf("scrape(simplified) failed: status=%s err=%v", scrapeSimp.Status, err)
+	}
+	if scrapeSimp.Items[0].After["title"] != "晨风序曲" || scrapeSimp.Items[0].After["artist"] != "自由乐手" || scrapeSimp.Items[0].After["album"] != "海风随想" {
+		t.Fatalf("expected simplified tags after scrape, got %+v", scrapeSimp.Items[0].After)
+	}
+	jmScrapeSimp, err := svc.loadJobMeta(ctx, scrapeSimp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jmScrapeSimp.Items[0].LyricsText == nil || *jmScrapeSimp.Items[0].LyricsText != simpLyrics {
+		t.Fatalf("expected simplified multi-line lyrics after scrape, got %v", jmScrapeSimp.Items[0].LyricsText)
+	}
+
+	// Force Review path (score=100 below minScore? No, use minScore=100 when album mismatches -> needs_review, then Review).
+	audioReview := filepath.Join(root.CanonicalPath, "breeze_review.flac")
+	if _, err := files.WriteFileDurable(audioReview, []byte("AUDIO-REVIEW")); err != nil {
+		t.Fatal(err)
+	}
+	tagger.tags[audioReview] = helper.AudioTagData{
+		Path:     audioReview,
+		Editable: true,
+		Duration: 210,
+		Tags: map[string]string{
+			"title":  "晨風序曲",
+			"artist": "自由樂手",
+			"album":  "不同專輯",
+		},
+	}
+	if reviewJob, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action:        "scrape",
+		Paths:         []string{audioReview},
+		Sources:       []string{"open-neutral-meta"},
+		MinMatchScore: 100,
+	}); err != nil || reviewJob.Status != string(model.LibraryJobNeedsReview) {
+		t.Fatalf("expected needs_review for manual selection test, status=%s err=%v", reviewJob.Status, err)
+	} else {
+		// Verify SearchItemCandidates forwards jobMeta.Settings.Chinese to iTunes query params.
+		if _, sErr := svc.SearchItemCandidates(ctx, admin, reviewJob.ID, reviewJob.Items[0].ID, "晨风序曲", []string{"itunes"}); sErr != nil {
+			t.Fatalf("SearchItemCandidates failed: %v", sErr)
+		}
+		if itunesCountry.Load() != "CN" || itunesLang.Load() != "zh_cn" {
+			t.Fatalf("expected SearchItemCandidates to pass Chinese=simplified (country=CN lang=zh_cn), got country=%v lang=%v", itunesCountry.Load(), itunesLang.Load())
+		}
+		// Re-populate customPlugin candidates and test Review lyrics & tag conversion.
+		if _, sErr := svc.SearchItemCandidates(ctx, admin, reviewJob.ID, reviewJob.Items[0].ID, "", []string{"open-neutral-meta"}); sErr != nil {
+			t.Fatalf("SearchItemCandidates restore failed: %v", sErr)
+		}
+		reviewed, err := svc.Review(ctx, admin, reviewJob.ID, map[string]string{
+			reviewJob.Items[0].ID: reviewJob.Items[0].Candidates[0].ID,
+		})
+		if err != nil || reviewed.Status != string(model.LibraryJobPreviewReady) {
+			t.Fatalf("Review failed: status=%s err=%v", reviewed.Status, err)
+		}
+		if reviewed.Items[0].After["title"] != "晨风序曲" || reviewed.Items[0].After["album"] != "海风随想" {
+			t.Fatalf("expected simplified tags after Review, got %+v", reviewed.Items[0].After)
+		}
+		jmReview, err := svc.loadJobMeta(ctx, reviewJob.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if jmReview.Items[0].LyricsText == nil || *jmReview.Items[0].LyricsText != simpLyrics {
+			t.Fatalf("expected simplified lyrics after Review, got %v", jmReview.Items[0].LyricsText)
+		}
+	}
+
+	// Clean converts both tags and embedded lyrics, and skips LyricsText when already simplified.
+	cleanSimp, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action: "clean",
+		Paths:  []string{audio},
+	})
+	if err != nil {
+		t.Fatalf("clean(simplified) failed: %v", err)
+	}
+	if cleanSimp.Items[0].After["title"] != "晨风序曲" || cleanSimp.Items[0].After["artist"] != "自由乐手" || cleanSimp.Items[0].After["album"] != "海风随想" {
+		t.Fatalf("expected clean(simplified) tags converted, got %+v", cleanSimp.Items[0].After)
+	}
+	jmCleanSimp, err := svc.loadJobMeta(ctx, cleanSimp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jmCleanSimp.Items[0].LyricsText == nil || *jmCleanSimp.Items[0].LyricsText != simpLyrics {
+		t.Fatalf("expected clean(simplified) LyricsText converted, got %v", jmCleanSimp.Items[0].LyricsText)
+	}
+
+	appliedClean, err := svc.Apply(ctx, admin, cleanSimp.ID)
+	if err != nil || appliedClean.Status != string(model.LibraryJobComplete) {
+		t.Fatalf("Apply clean(simplified) failed: status=%s err=%v", appliedClean.Status, err)
+	}
+	lrcBytes, err := os.ReadFile(filepath.Join(root.CanonicalPath, "breeze.lrc"))
+	if err != nil || string(lrcBytes) != simpLyrics {
+		t.Fatalf("expected simplified sidecar lrc written, got %q err=%v", string(lrcBytes), err)
+	}
+
+	// Clean when embedded lyrics are already simplified -> LyricsText stays nil.
+	audioAlreadySimp := filepath.Join(root.CanonicalPath, "already_simp.flac")
+	if _, err := files.WriteFileDurable(audioAlreadySimp, []byte("AUDIO-SIMP")); err != nil {
+		t.Fatal(err)
+	}
+	tagger.tags[audioAlreadySimp] = helper.AudioTagData{
+		Path:     audioAlreadySimp,
+		Editable: true,
+		Duration: 210,
+		Tags:     map[string]string{"title": "晨风序曲", "artist": "自由乐手"},
+		Lyrics:   simpLyrics,
+	}
+	cleanNoop, err := svc.Submit(ctx, admin, SubmitRequest{
+		Action: "clean",
+		Paths:  []string{audioAlreadySimp},
+	})
+	if err != nil {
+		t.Fatalf("clean(already simplified) failed: %v", err)
+	}
+	jmCleanNoop, err := svc.loadJobMeta(ctx, cleanNoop.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jmCleanNoop.Items[0].LyricsText != nil {
+		t.Fatalf("expected clean(already simplified) LyricsText nil when unchanged, got %q", *jmCleanNoop.Items[0].LyricsText)
+	}
+}

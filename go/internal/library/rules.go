@@ -272,6 +272,32 @@ func Transform(value, find, replacement, chinese string, repair bool) string {
 	return value
 }
 
+// TransformLyrics normalizes line endings and converts lyrics line-by-line while preserving timestamps and blank lines.
+func TransformLyrics(lyrics, chinese string, repair bool) string {
+	loadRuleTables()
+	if lyrics == "" {
+		return lyrics
+	}
+	normalized := strings.ReplaceAll(lyrics, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	for i, line := range lines {
+		if repair {
+			if repaired, ok := repairLatin1UTF8(line); ok && repaired != line {
+				line = repaired
+			}
+		}
+		line = normalizeNFC(line)
+		switch chinese {
+		case "simplified":
+			line = t2sTable.convert(line)
+		case "traditional":
+			line = s2tTable.convert(line)
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func repairLatin1UTF8(s string) (string, bool) {
 	if s == "" {
 		return s, false

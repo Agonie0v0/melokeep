@@ -22,6 +22,7 @@ import {
 import { api } from "./api";
 import { AIImport } from "./AIImport";
 import { AIMarkdown } from "./AIMarkdown";
+import { ConfirmDialog } from "./components";
 import type { DownloadJob, PlaylistSummary, Track } from "./types";
 import "./ai.css";
 
@@ -367,6 +368,11 @@ export function AIAssistant({
   const [selectedEvents, setSelectedEvents] = useState<Record<string, boolean>>(
     {},
   );
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | null
+    | { kind: "delete-session"; target: Summary }
+    | { kind: "clear-events" }
+  >(null);
 
   const upload = useRef<HTMLInputElement>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -516,12 +522,13 @@ export function AIAssistant({
     }
   }
 
-  async function removeSession(target: Summary) {
-    if (
-      active(target) ||
-      !window.confirm("删除此对话及执行记录？已创建的歌单和下载任务会保留。")
-    )
-      return;
+  function requestRemoveSession(target: Summary) {
+    if (active(target) || busy) return;
+    setPendingConfirm({ kind: "delete-session", target });
+  }
+
+  async function performRemoveSession(target: Summary) {
+    if (active(target)) return;
     setBusy(true);
     setError("");
     try {
@@ -806,7 +813,7 @@ export function AIAssistant({
                     className="icon-button ai-session-remove"
                     aria-label={`删除对话 ${s.title || "新对话"}`}
                     disabled={busy || active(s) || (isSelected && isRunning)}
-                    onClick={() => void removeSession(s)}
+                    onClick={() => requestRemoveSession(s)}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -912,7 +919,7 @@ export function AIAssistant({
                 aria-label="删除当前 AI 对话"
                 title="删除当前 AI 对话"
                 disabled={!session || isRunning || busy}
-                onClick={() => session && void removeSession(session)}
+                onClick={() => session && requestRemoveSession(session)}
               >
                 <Trash2 size={16} />
               </button>
@@ -1664,13 +1671,8 @@ export function AIAssistant({
                       className="secondary ai-danger-btn"
                       disabled={allEvents.length === 0 || isRunning || busy}
                       onClick={() => {
-                        if (
-                          window.confirm(
-                            "清空当前对话的全部执行记录？已产生的歌单和下载任务不受影响。",
-                          )
-                        ) {
-                          void deleteEvents({ clear_all: true });
-                        }
+                        if (!allEvents.length || isRunning || busy) return;
+                        setPendingConfirm({ kind: "clear-events" });
                       }}
                     >
                       清空全部
@@ -1782,6 +1784,46 @@ export function AIAssistant({
           )}
         </div>
       </div>
+      {pendingConfirm && (
+        <ConfirmDialog
+          title={
+            pendingConfirm.kind === "delete-session"
+              ? "删除 AI 对话"
+              : "清空执行记录"
+          }
+          description={
+            pendingConfirm.kind === "delete-session"
+              ? `确定删除对话「${pendingConfirm.target.title || "新对话"}」及执行记录吗？`
+              : "确定清空当前对话的全部执行记录吗？"
+          }
+          detail={
+            pendingConfirm.kind === "delete-session"
+              ? "已创建的歌单和下载任务会保留，不会受影响。"
+              : "仅移除工具执行日志记录，已产生的歌单和下载任务不受影响。"
+          }
+          confirmLabel={
+            pendingConfirm.kind === "delete-session" ? "确认删除" : "确认清空"
+          }
+          busyLabel={
+            pendingConfirm.kind === "delete-session" ? "正在删除…" : "正在清空…"
+          }
+          busy={busy}
+          tone="danger"
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const target = pendingConfirm;
+            if (!target || busy) return;
+            void (async () => {
+              if (target.kind === "delete-session") {
+                await performRemoveSession(target.target);
+              } else {
+                await deleteEvents({ clear_all: true });
+              }
+              setPendingConfirm(null);
+            })();
+          }}
+        />
+      )}
     </section>
   );
 }

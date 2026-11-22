@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, api } from "./api";
-import { Modal } from "./components";
+import { ConfirmDialog } from "./components";
 import {
   buildKeepExistingChoices,
   countPendingReviewItems,
@@ -1272,7 +1272,7 @@ export function LibraryJobs({
         )
       )}
       {confirmDelete && (
-        <Modal
+        <ConfirmDialog
           title={
             confirmDelete.mode === "single"
               ? "删除整理记录"
@@ -1280,43 +1280,23 @@ export function LibraryJobs({
                 ? "批量删除整理记录"
                 : "清理已完成整理记录"
           }
-          close={busy === "delete" ? undefined : () => setConfirmDelete(null)}
-        >
-          <div className="library-folder-dialog">
-            <p>
-              {confirmDelete.mode === "single"
-                ? `确定要删除这条「${actionNames[confirmDelete.job.action] || confirmDelete.job.action}」整理记录吗？`
-                : confirmDelete.mode === "selected"
-                  ? `确定要删除已选中的 ${confirmDelete.ids.length} 条整理记录吗？运行中任务会自动跳过。`
-                  : "确定要清理所有已结束的整理记录（已完成、部分完成、失败、已取消、已回滚）吗？"}
-            </p>
-            <p className="management-help">
-              仅移除整理记录与预览历史，不会删除磁盘上的任何音乐文件。
-            </p>
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy === "delete"}
-                onClick={() => setConfirmDelete(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="primary danger"
-                disabled={busy === "delete"}
-                onClick={() => void executeDelete()}
-              >
-                {busy === "delete"
-                  ? "正在移除…"
-                  : confirmDelete.mode === "finished"
-                    ? "确认清理"
-                    : "确认删除"}
-              </button>
-            </div>
-          </div>
-        </Modal>
+          description={
+            confirmDelete.mode === "single"
+              ? `确定要删除这条「${actionNames[confirmDelete.job.action] || confirmDelete.job.action}」整理记录吗？`
+              : confirmDelete.mode === "selected"
+                ? `确定要删除已选中的 ${confirmDelete.ids.length} 条整理记录吗？运行中任务会自动跳过。`
+                : "确定要清理所有已结束的整理记录（已完成、部分完成、失败、已取消、已回滚）吗？"
+          }
+          detail="仅移除整理记录与预览历史，不会删除磁盘上的任何音乐文件。"
+          confirmLabel={
+            confirmDelete.mode === "finished" ? "确认清理" : "确认删除"
+          }
+          busyLabel="正在移除…"
+          busy={busy === "delete"}
+          tone="danger"
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => void executeDelete()}
+        />
       )}
     </section>
   );

@@ -4057,7 +4057,10 @@ try {
   );
   await freshContext.close();
   await page.getByRole("button", { name: "切换主题", exact: true }).click();
-  await page.getByRole("button", { name: "重置", exact: true }).click();
+  await page
+    .locator("#theme-picker")
+    .getByRole("button", { name: "重置", exact: true })
+    .click();
   await page.keyboard.press("Escape");
   await expect.poll(() => uiPreferences.appearance?.mode).toBe("system");
   const loginAttempts = [];

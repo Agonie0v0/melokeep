@@ -167,3 +167,50 @@ func TestRulesGoldenParity(t *testing.T) {
 		t.Fatalf("unexpected BuildTargetPath: %s", dst)
 	}
 }
+
+func toTestLatin1Mojibake(utf8Str string) string {
+	var b strings.Builder
+	for _, by := range []byte(utf8Str) {
+		b.WriteRune(rune(by))
+	}
+	return b.String()
+}
+
+func TestTransformLyrics(t *testing.T) {
+	if got := TransformLyrics("", "simplified", true); got != "" {
+		t.Fatalf("empty lyrics should stay empty, got %q", got)
+	}
+
+	// Traditional -> Simplified with CRLF, [mm:ss.xx] timestamps, and blank lines preserved.
+	tradLRC := "[ti:晨風序曲]\r\n[00:01.20]樂團 風景 髮 裡\r\n\r\n[00:08.50]歌聲在山谷迴盪\r\n"
+	wantSimp := "[ti:晨风序曲]\n[00:01.20]乐团 风景 发 里\n\n[00:08.50]歌声在山谷回荡\n"
+	if got := TransformLyrics(tradLRC, "simplified", false); got != wantSimp {
+		t.Fatalf("TransformLyrics(simplified) =\n%q\nwant:\n%q", got, wantSimp)
+	}
+
+	// Simplified -> Traditional with multi-line timestamps and blank lines preserved.
+	simpLRC := "[00:01.20]乐团 风景 发 里\n\n[00:08.50]歌声飘过树林"
+	wantTrad := "[00:01.20]樂團 風景 發 裏\n\n[00:08.50]歌聲飄過樹林"
+	if got := TransformLyrics(simpLRC, "traditional", false); got != wantTrad {
+		t.Fatalf("TransformLyrics(traditional) =\n%q\nwant:\n%q", got, wantTrad)
+	}
+
+	// "none" mode preserves original text, timestamps, spaces, and blank lines.
+	origLRC := "[00:01.00]繁體 歌詞  保留\n\n[00:05.00]简体 歌词"
+	if got := TransformLyrics(origLRC, "none", false); got != origLRC {
+		t.Fatalf("TransformLyrics(none) = %q, want %q", got, origLRC)
+	}
+
+	// Latin1 mojibake repair line-by-line + simplified conversion + NFC composition.
+	mojibakeLine := toTestLatin1Mojibake("[00:02.00]自由樂手")
+	mixedLRC := mojibakeLine + "\r\n\r\n[00:05.00]Cafe\u0301 晨風序曲"
+	wantRepairedSimp := "[00:02.00]自由乐手\n\n[00:05.00]Café 晨风序曲"
+	if got := TransformLyrics(mixedLRC, "simplified", true); got != wantRepairedSimp {
+		t.Fatalf("TransformLyrics(repair+simplified) = %q, want %q", got, wantRepairedSimp)
+	}
+
+	wantRepairedOnly := "[00:02.00]自由樂手\n\n[00:05.00]Café 晨風序曲"
+	if got := TransformLyrics(mixedLRC, "none", true); got != wantRepairedOnly {
+		t.Fatalf("TransformLyrics(repair+none) = %q, want %q", got, wantRepairedOnly)
+	}
+}

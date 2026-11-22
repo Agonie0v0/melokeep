@@ -7,8 +7,10 @@ import {
   MIN_MATCH_SCORE_MIN,
   buildMetadataSourcesSummary,
   describeMinMatchScore,
+  inferToastTone,
   partitionMetadataSources,
   pickBuiltinMetadataSourceIds,
+  pickBuiltinRecommendedMetadataSourceIds,
   pickRecommendedMetadataSourceIds,
   sanitizeMinMatchScore,
 } from "../src/library-utils.ts";
@@ -83,8 +85,11 @@ test("metadata source selection, partitioning, and summary helpers work for buil
   ];
 
   assert.deepEqual(pickRecommendedMetadataSourceIds(sources), [
-    "itunes",
     "custom_lrc",
+    "itunes",
+  ]);
+  assert.deepEqual(pickBuiltinRecommendedMetadataSourceIds(sources), [
+    "itunes",
   ]);
   assert.deepEqual(
     pickRecommendedMetadataSourceIds([
@@ -123,6 +128,183 @@ test("metadata source selection, partitioning, and summary helpers work for buil
   const emptySummary = buildMetadataSourcesSummary([], sources);
   assert.match(emptySummary, /已选 0 \/ 4 个/);
   assert.match(emptySummary, /未选择/);
+});
+
+test("pickRecommendedMetadataSourceIds prioritizes up to 3 plugins and skips musicbrainz when title+album are covered", () => {
+  const catalogWithStructuredPlugins = [
+    {
+      id: "itunes",
+      label: "iTunes",
+      builtin: true,
+      recommended: true,
+      fields: ["title", "artist", "album", "cover"],
+    },
+    {
+      id: "musicbrainz",
+      label: "MusicBrainz",
+      builtin: true,
+      recommended: true,
+      fields: ["title", "artist", "album"],
+    },
+    {
+      id: "lrclib",
+      label: "LRCLIB",
+      builtin: true,
+      recommended: true,
+      fields: ["lyrics"],
+    },
+    {
+      id: "plugin_full_1",
+      label: "Full Plugin 1",
+      builtin: false,
+      recommended: true,
+      fields: ["title", "artist", "album", "cover", "lyrics"],
+    },
+    {
+      id: "plugin_full_2",
+      label: "Full Plugin 2",
+      builtin: false,
+      recommended: true,
+      fields: ["title", "album", "lyrics"],
+    },
+    {
+      id: "plugin_full_3",
+      label: "Full Plugin 3",
+      builtin: false,
+      recommended: true,
+      fields: ["title", "album"],
+    },
+    {
+      id: "plugin_full_4",
+      label: "Full Plugin 4",
+      builtin: false,
+      recommended: true,
+      fields: ["title", "album", "lyrics"],
+    },
+    {
+      id: "plugin_optional",
+      label: "Optional Plugin",
+      builtin: false,
+      recommended: false,
+      fields: ["lyrics"],
+    },
+  ];
+
+  assert.deepEqual(
+    pickRecommendedMetadataSourceIds(catalogWithStructuredPlugins),
+    ["plugin_full_1", "plugin_full_2", "plugin_full_3", "itunes", "lrclib"],
+  );
+  assert.deepEqual(
+    pickRecommendedMetadataSourceIds(catalogWithStructuredPlugins, 2),
+    ["plugin_full_1", "plugin_full_2", "itunes", "lrclib"],
+  );
+  assert.deepEqual(
+    pickBuiltinRecommendedMetadataSourceIds(catalogWithStructuredPlugins),
+    ["itunes", "musicbrainz", "lrclib"],
+  );
+
+  const lyricsOnlyPluginCatalog = [
+    {
+      id: "itunes",
+      label: "iTunes",
+      builtin: true,
+      recommended: true,
+      fields: ["title", "artist"],
+    },
+    {
+      id: "musicbrainz",
+      label: "MusicBrainz",
+      builtin: true,
+      recommended: true,
+      fields: ["title", "album"],
+    },
+    {
+      id: "lrclib",
+      label: "LRCLIB",
+      builtin: true,
+      recommended: true,
+      fields: ["lyrics"],
+    },
+    {
+      id: "custom_lrc",
+      label: "Custom LRC Plugin",
+      builtin: false,
+      recommended: true,
+      fields: ["lyrics"],
+    },
+  ];
+  assert.deepEqual(pickRecommendedMetadataSourceIds(lyricsOnlyPluginCatalog), [
+    "custom_lrc",
+    "itunes",
+    "musicbrainz",
+    "lrclib",
+  ]);
+
+  assert.deepEqual(
+    pickBuiltinRecommendedMetadataSourceIds([
+      { id: "lrclib", label: "LRCLIB", builtin: true },
+      { id: "itunes", label: "iTunes", builtin: true },
+      {
+        id: "plugin_full_1",
+        label: "Full Plugin 1",
+        builtin: false,
+        recommended: true,
+      },
+    ]),
+    ["itunes", "lrclib"],
+  );
+  assert.deepEqual(pickBuiltinRecommendedMetadataSourceIds(undefined), [
+    "itunes",
+    "musicbrainz",
+    "lrclib",
+  ]);
+  assert.deepEqual(pickRecommendedMetadataSourceIds(undefined), [
+    "itunes",
+    "musicbrainz",
+    "lrclib",
+  ]);
+});
+
+test("inferToastTone classifies error, warning, success, and info including composite notices", () => {
+  assert.equal(inferToastTone("部分文件删除失败：demo.flac"), "error");
+  assert.equal(inferToastTone("搜索连接已断开，请重新搜索"), "error");
+  assert.equal(inferToastTone("请求超时，请稍后重试"), "error");
+  assert.equal(inferToastTone("凭证无效或已过期"), "error");
+  assert.equal(inferToastTone("无法播放该曲目"), "error");
+  assert.equal(inferToastTone("处理出现异常，请重试"), "error");
+  assert.equal(inferToastTone("接口返回错误"), "error");
+
+  assert.equal(
+    inferToastTone(
+      "已刷新音乐库：共扫描 10 首，新增/更新 0 首，移除 0 条失效记录（异常目录：/mnt/offline）",
+    ),
+    "warning",
+  );
+  assert.equal(inferToastTone("已自动跳过 3 首付费/需登录曲目"), "warning");
+  assert.equal(inferToastTone("请先同步歌单，再移除歌曲"), "warning");
+  assert.equal(inferToastTone("请输入新歌单名称"), "warning");
+  assert.equal(inferToastTone("正在确认可下载音质…"), "warning");
+  assert.equal(inferToastTone("当前暂不可执行此操作"), "warning");
+  assert.equal(inferToastTone("警告：存在未保存修改"), "warning");
+
+  assert.equal(inferToastTone("已加入 5 首下载任务"), "success");
+  assert.equal(inferToastTone("音乐文件已删除"), "success");
+  assert.equal(inferToastTone("下载记录已移除，已下载文件保留"), "success");
+  assert.equal(inferToastTone("已刷新音乐库"), "success");
+  assert.equal(inferToastTone("操作已完成"), "success");
+  assert.equal(inferToastTone("已保存设置"), "success");
+  assert.equal(inferToastTone("已更新搜索音源（3 个）"), "success");
+  assert.equal(inferToastTone("已关闭睡眠定时"), "success");
+  assert.equal(inferToastTone("已开启睡眠定时：15 分钟后暂停播放"), "success");
+  assert.equal(inferToastTone("已设置：播完本首后停止播放"), "success");
+  assert.equal(inferToastTone("已勾选第 1–10 集"), "success");
+  assert.equal(inferToastTone("已全选当前分集"), "success");
+  assert.equal(inferToastTone("已安排下一首播放：Example Song"), "success");
+  assert.equal(inferToastTone("连接成功"), "success");
+
+  assert.equal(inferToastTone("睡眠定时已结束，已停止播放"), "info");
+  assert.equal(inferToastTone("当前未启用登录认证"), "info");
+  assert.equal(inferToastTone(""), "info");
 });
 
 test("update-utils formats action mode and self-update stages accurately", () => {

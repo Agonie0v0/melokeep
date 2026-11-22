@@ -521,8 +521,14 @@ try {
   assert.equal(submitted.allow_actions, false);
   await page.getByRole("button", { name: "停止本轮" }).click();
   await expect(page.getByText("本轮已停止", { exact: true })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "删除当前 AI 对话" }).click();
+  const deleteSessionDialog = page.getByRole("dialog", {
+    name: "删除 AI 对话",
+  });
+  await expect(deleteSessionDialog).toBeVisible();
+  await deleteSessionDialog
+    .getByRole("button", { name: "确认删除", exact: true })
+    .click();
   await expect(page.getByText("从一句话或一张歌单截图开始")).toBeVisible();
   await page.getByRole("button", { name: "模型设置", exact: true }).click();
   await page.getByRole("tab", { name: "通知与机器人", exact: true }).click();

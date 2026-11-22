@@ -214,6 +214,24 @@
   background: var(--subtle);
   font-size: 12.5px;
 }
+.metadata-sources-hint {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.library-chinese-field > small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
 .metadata-source-groups {
   display: grid;
   gap: 14px;

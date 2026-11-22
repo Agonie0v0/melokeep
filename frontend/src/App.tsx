@@ -1,4 +1,4 @@
-import { Cover, Button, Modal, SongTitle } from "./components";
+import { Cover, Button, ConfirmDialog, Modal, SongTitle } from "./components";
 import { SettingsWorkspace, type SettingsTab } from "./SettingsWorkspace";
 import { Navigation } from "./Navigation";
 import { AIAssistant } from "./AIAssistant";
@@ -38,6 +38,10 @@ import {
   Eye,
   EyeOff,
   CircleAlert,
+  RotateCcw,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { ApiError, api } from "./api";
 import {
@@ -52,7 +56,7 @@ import {
   shouldUseBatchDownloadModal,
   splitDownloadableTracks,
 } from "./audiobook-utils";
-import { formatLibraryRefreshNotice } from "./library-utils";
+import { formatLibraryRefreshNotice, inferToastTone } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
 import {
   formatFileSizeBytes,
@@ -598,6 +602,7 @@ export function App() {
     [],
   );
   const [notice, setNotice] = useState(""),
+    [toastPaused, setToastPaused] = useState(false),
     [authEnabled, setAuthEnabled] = useState(false),
     [loginRequired, setLoginRequired] = useState(false),
     [loginUser, setLoginUser] = useState(""),
@@ -988,10 +993,15 @@ export function App() {
     };
   }, []);
   useEffect(() => {
-    if (!notice) return;
+    if (!notice) {
+      setToastPaused(false);
+    }
+  }, [notice]);
+  useEffect(() => {
+    if (!notice || toastPaused) return;
     const timer = setTimeout(() => setNotice(""), 6500);
     return () => clearTimeout(timer);
-  }, [notice]);
+  }, [notice, toastPaused]);
   const hasActiveDownloads = jobs.some((job) =>
     ["queued", "resolving", "downloading", "enriching"].includes(job.status),
   );
@@ -1124,6 +1134,41 @@ export function App() {
     [categoryFilteredTracks, sourceFilter, filter, sort],
   );
   const lastSearch = useRef("");
+  const hasSearchStateToReset = Boolean(
+    query.trim() ||
+    tracks.length ||
+    searching ||
+    episodeContext ||
+    sourceFilter !== "all" ||
+    searchCategoryFilter !== SOURCE_FILTER_ALL ||
+    filter !== "all" ||
+    sort !== "relevance" ||
+    selected.size > 0 ||
+    Object.keys(statuses).length > 0,
+  );
+  function resetSearchView() {
+    searchGeneration.current++;
+    episodeLoadSeq.current++;
+    eventSource.current?.close();
+    if (searchJob.current) {
+      void api(`/search/jobs/${searchJob.current}`, "DELETE").catch(() => {});
+    }
+    searchJob.current = null;
+    eventSource.current = null;
+    lastSearch.current = "";
+    setQuery("");
+    setTracks([]);
+    setStatuses({});
+    setSearching(false);
+    setFirstMs(null);
+    setEpisodeContext(null);
+    setSourceFilter("all");
+    setSearchCategoryFilter(SOURCE_FILTER_ALL);
+    setFilter("all");
+    setSort("relevance");
+    setSelected(new Set());
+    searchInput.current?.focus();
+  }
   async function search(keyword = query) {
     if (!keyword.trim() || !config) return;
     ++episodeLoadSeq.current;
@@ -3722,6 +3767,17 @@ export function App() {
                           停止搜索
                         </button>
                       )}
+                      {hasSearchStateToReset && (
+                        <button
+                          type="button"
+                          className="scope search-reset-btn"
+                          title="清空当前搜索与筛选"
+                          onClick={resetSearchView}
+                        >
+                          <RotateCcw aria-hidden="true" />
+                          <span>重置</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="scope"
@@ -4669,38 +4725,57 @@ export function App() {
           />
         </main>
       </div>
-      {notice && (
-        <div id="toast" role="status">
-          {notice}
-          <button aria-label="关闭提示" onClick={() => setNotice("")}>
-            <X />
-          </button>
-        </div>
-      )}
+      {notice &&
+        (() => {
+          const toastTone = inferToastTone(notice);
+          const ToastIcon =
+            toastTone === "success"
+              ? CheckCircle2
+              : toastTone === "warning"
+                ? AlertTriangle
+                : toastTone === "error"
+                  ? CircleAlert
+                  : Info;
+          return (
+            <div
+              id="toast"
+              className={`app-toast is-${toastTone}`}
+              role={toastTone === "error" ? "alert" : "status"}
+              onMouseEnter={() => setToastPaused(true)}
+              onMouseLeave={() => setToastPaused(false)}
+              onFocus={() => setToastPaused(true)}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setToastPaused(false);
+                }
+              }}
+            >
+              <span className="app-toast-icon" aria-hidden="true">
+                <ToastIcon />
+              </span>
+              <span className="app-toast-text">{notice}</span>
+              <button
+                type="button"
+                className="app-toast-close"
+                aria-label="关闭提示"
+                onClick={() => setNotice("")}
+              >
+                <X />
+              </button>
+            </div>
+          );
+        })()}
       {confirmation && (
-        <Modal
+        <ConfirmDialog
           title={confirmation.title}
-          close={managing ? undefined : () => setConfirmation(null)}
-        >
-          <p>{confirmation.description}</p>
-          {managementError && <p role="alert">{managementError}</p>}
-          <div className="management-toolbar">
-            <button
-              className="secondary"
-              disabled={managing}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
-            <button
-              className="primary danger"
-              disabled={managing}
-              onClick={() => void confirmation.run()}
-            >
-              {managing ? "正在处理…" : "确认操作"}
-            </button>
-          </div>
-        </Modal>
+          description={confirmation.description}
+          error={managementError}
+          confirmLabel="确认操作"
+          busy={managing}
+          tone="danger"
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => void confirmation.run()}
+        />
       )}
       {qualityTracks && (
         <Modal
