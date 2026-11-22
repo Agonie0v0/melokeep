@@ -132,6 +132,30 @@ func (s *Store) SetRootHealth(ctx context.Context, rootID string, healthy bool, 
 	})
 }
 
+func (s *Store) CountActiveAssetsByRoot(ctx context.Context, rootID string) (int64, error) {
+	var count int64
+	err := s.reader.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM assets WHERE root_id = ? AND status = 'active'
+	`, rootID).Scan(&count)
+	return count, err
+}
+
+func (s *Store) SetRootEnabled(ctx context.Context, rootID string, enabled bool, lastError string) error {
+	now := time.Now().UTC().UnixMilli()
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE roots SET enabled = ?, last_error = ?, updated_at = ? WHERE id = ?
+		`, boolToInt(enabled), lastError, now, rootID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return model.NewError(model.ErrNotFound, http.StatusNotFound, "曲库根目录不存在")
+		}
+		return nil
+	})
+}
+
 // AdvanceScanGeneration finalizes a root scan. Only when completeWithoutErrors is true
 // does it advance scan_generation and mark unseen assets (indexed_generation < generation) as missing.
 func (s *Store) AdvanceScanGeneration(ctx context.Context, rootID string, generation int64, completeWithoutErrors bool, scanErr string) (int64, error) {

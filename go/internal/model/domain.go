@@ -53,6 +53,7 @@ type ProviderTrack struct {
 	Episodes      int            `json:"episodes,omitempty"`
 	PlaylistIndex *int           `json:"playlist_index,omitempty"`
 	Lyrics        string         `json:"lyrics,omitempty"`
+	PayRequired   bool           `json:"pay_required,omitempty"`
 	Variants      []MediaVariant `json:"variants"`
 }
 

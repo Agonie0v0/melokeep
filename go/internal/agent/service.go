@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ type Options struct {
 	PendingReconciler  PendingWriteReconciler
 	ConfigRevisionFunc func() string
 	WaitPollInterval   time.Duration
+	Logger             func(level, message, category, taskID string)
 }
 
 type runningTurn struct {
@@ -48,6 +50,7 @@ type Service struct {
 	pendingReconciler  PendingWriteReconciler
 	configRevisionFunc func() string
 	waitPollInterval   time.Duration
+	logger             func(level, message, category, taskID string)
 
 	baseCtx    context.Context
 	baseCancel context.CancelFunc
@@ -82,10 +85,22 @@ func NewService(st *store.Store, reg *operations.Registry, client *Client, opts 
 		pendingReconciler:  opts.PendingReconciler,
 		configRevisionFunc: opts.ConfigRevisionFunc,
 		waitPollInterval:   poll,
+		logger:             opts.Logger,
 		baseCtx:            baseCtx,
 		baseCancel:         baseCancel,
 		running:            make(map[string]*runningTurn),
 	}
+}
+
+func (s *Service) pushLog(level, message, sessionID string) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	msg := strings.TrimSpace(redactEmbeddedURLs(message))
+	if msg == "" {
+		return
+	}
+	s.logger(level, msg, "ai", sessionID)
 }
 
 // Close stops active turns gracefully and waits for running goroutines to finish.
@@ -234,6 +249,7 @@ func (s *Service) TestCapability(ctx context.Context, capability string, overrid
 		}}
 		msg, err := s.client.Complete(ctx, settings, proxy, s.currentConfigRev(), []LLMMessage{{Role: "user", Content: "请调用 capability_check 工具，不要直接回答。"}}, tools, "", nil)
 		if err != nil {
+			s.pushLog("warning", fmt.Sprintf("AI 能力测试失败 (%s, model=%s): %s", capability, settings.Model, sanitizeAgentLogText(err.Error(), settings.APIKey)), "")
 			return nil, err
 		}
 		matched := false
@@ -244,18 +260,23 @@ func (s *Service) TestCapability(ctx context.Context, capability string, overrid
 			}
 		}
 		if !matched {
+			s.pushLog("warning", fmt.Sprintf("AI 能力测试失败 (%s, model=%s): 模型未返回预期工具调用", capability, settings.Model), "")
 			return nil, model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "模型未返回预期工具调用；请检查模型和服务商支持情况")
 		}
+		s.pushLog("info", fmt.Sprintf("AI 能力测试通过 (%s, model=%s)", capability, settings.Model), "")
 		return map[string]any{"detail": "工具调用测试成功。实际任务的工具使用效果仍取决于模型。"}, nil
 	case "image":
 		tinyPNG := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1kAAAAASUVORK5CYII="
 		msg, err := s.client.Complete(ctx, settings, proxy, s.currentConfigRev(), []LLMMessage{{Role: "user", Content: "请简短描述这张图片。"}}, nil, tinyPNG, nil)
 		if err != nil {
+			s.pushLog("warning", fmt.Sprintf("AI 能力测试失败 (%s, model=%s): %s", capability, settings.Model, sanitizeAgentLogText(err.Error(), settings.APIKey)), "")
 			return nil, err
 		}
 		if strings.TrimSpace(msg.Content) == "" {
+			s.pushLog("warning", fmt.Sprintf("AI 能力测试失败 (%s, model=%s): 模型未返回图片测试回复", capability, settings.Model), "")
 			return nil, model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "模型未返回图片测试回复")
 		}
+		s.pushLog("info", fmt.Sprintf("AI 能力测试通过 (%s, model=%s)", capability, settings.Model), "")
 		return map[string]any{"detail": "图片请求已获得文字回复；这不保证复杂歌单截图的识别准确率。"}, nil
 	default:
 		return nil, model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "不支持的能力检测类型")
@@ -739,6 +760,7 @@ func (s *Service) runTurn(
 	isChannel := actor.Channel != "" && actor.Channel != "web"
 	tools := builtinTools(req.ActionsAllowed() && !actor.ReadOnlyAI, isChannel)
 	observedWatch := ""
+	turnTools := 0
 
 	defer func() {
 		sess.Partial = ""
@@ -753,6 +775,18 @@ func (s *Service) runTurn(
 			sess.Status = StatusInterrupted
 			sess.Checkpoint = "stopped"
 			sess.Detail = "本轮已停止；已执行的操作见记录（已创建的下载继续运行）"
+			s.pushLog(
+				"warning",
+				fmt.Sprintf(
+					"AI 助手轮次已中断 (model=%s, api_type=%s, stream=%v, steps=%d): %s",
+					settings.Model,
+					settings.APIType,
+					settings.Stream,
+					len(sess.Events),
+					sanitizeAgentLogText(ctx.Err().Error(), settings.APIKey),
+				),
+				sess.ID,
+			)
 		}
 		_ = s.saveSession(context.Background(), &sess)
 	}()
@@ -789,8 +823,22 @@ func (s *Service) runTurn(
 			return
 		}
 		if err != nil {
+			detail := safeUserError(err)
 			sess.Status = StatusFailed
-			sess.Detail = safeUserError(err)
+			sess.Detail = detail
+			s.pushLog(
+				"error",
+				fmt.Sprintf(
+					"AI 模型请求失败 (model=%s, api_type=%s, stream=%v, steps=%d): %s | 底层错误: %s",
+					settings.Model,
+					settings.APIType,
+					settings.Stream,
+					len(sess.Events),
+					detail,
+					sanitizeAgentLogText(err.Error(), settings.APIKey),
+				),
+				sess.ID,
+			)
 			return
 		}
 		history = append(history, respMsg)
@@ -853,9 +901,11 @@ func (s *Service) runTurn(
 				sess.Status = StatusNeedsDecision
 				sess.Checkpoint = "needs_decision"
 				sess.Detail = "等待用户确认"
+				s.pushLog("info", fmt.Sprintf("AI 助手等待用户确认 (model=%s, 调用工具=%d)", settings.Model, turnTools), sess.ID)
 			} else {
 				sess.Status = StatusComplete
 				sess.Detail = "本轮对话已完成"
+				s.pushLog("info", fmt.Sprintf("AI 助手本轮对话完成 (model=%s, 调用工具=%d)", settings.Model, turnTools), sess.ID)
 			}
 			return
 		}
@@ -864,6 +914,7 @@ func (s *Service) runTurn(
 			if ctx.Err() != nil {
 				return
 			}
+			turnTools++
 			ev := ExecutionEvent{
 				ID:        model.NewUUID()[:12],
 				TurnID:    turnID,
@@ -882,6 +933,11 @@ func (s *Service) runTurn(
 				result = map[string]any{"error": errMsg}
 				sess.Events[evIdx].Status = "failed"
 				sess.Events[evIdx].Detail = errMsg
+				s.pushLog(
+					"warning",
+					fmt.Sprintf("AI 工具调用失败 (tool=%s): %s | 底层错误: %s", call.Function.Name, errMsg, sanitizeAgentLogText(execErr.Error(), settings.APIKey)),
+					sess.ID,
+				)
 			} else {
 				sanitized := sanitizeForModel(result)
 				result = sanitized
@@ -1326,9 +1382,37 @@ func hasActiveTasks(states []TaskState) bool {
 	return false
 }
 
+var embeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s"'<>，。；、（）()\[\]]+`)
+
+func redactEmbeddedURLs(text string) string {
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "http://") && !strings.Contains(lower, "https://") {
+		return text
+	}
+	return embeddedURLRe.ReplaceAllStringFunc(text, func(raw string) string {
+		return config.RedactURL(raw)
+	})
+}
+
+func sanitizeAgentLogText(text, apiKey string) string {
+	out := redactEmbeddedURLs(text)
+	if key := strings.TrimSpace(apiKey); key != "" && key != config.HiddenPlaceholder {
+		out = strings.ReplaceAll(out, "Bearer "+key, "Bearer "+config.HiddenPlaceholder)
+		if len(key) >= 6 {
+			out = strings.ReplaceAll(out, key, config.HiddenPlaceholder)
+		}
+	}
+	return out
+}
+
 func safeUserError(err error) string {
 	if de, ok := model.AsDomainError(err); ok {
-		return config.RedactURL(de.Detail)
+		if strings.TrimSpace(de.Detail) != "" {
+			return redactEmbeddedURLs(de.Detail)
+		}
 	}
 	return "项目操作失败，请检查运行日志和服务状态"
 }

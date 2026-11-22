@@ -5,9 +5,12 @@ import {
   chunkArray,
   formatEpisodeBadge,
   getEpisodeNumber,
+  getFreeEpisodeBounds,
   isCollectionTrack,
+  isPayRequiredTrack,
   selectEpisodeRange,
   shouldUseBatchDownloadModal,
+  splitDownloadableTracks,
 } from "../src/audiobook-utils.ts";
 
 const makeTrack = (id, overrides = {}) => ({
@@ -186,4 +189,82 @@ test("buildBatchDownloadPayloads generates audiobook and plain music payloads an
   assert.equal(chunks[2].length, 50);
   assert.equal(chunks[2][49], 450);
   assert.deepEqual(chunkArray([]), []);
+});
+
+test("isPayRequiredTrack, splitDownloadableTracks, and getFreeEpisodeBounds filter paid episodes accurately", () => {
+  const free1 = makeTrack("ep-1", {
+    playlist_index: 1,
+    title: "示例免费章节 1",
+  });
+  const free2 = makeTrack("ep-2", {
+    playlist_index: 2,
+    pay_required: false,
+    title: "示例免费章节 2",
+  });
+  const free84 = makeTrack("ep-84", {
+    playlist_index: 84,
+    pay_required: false,
+    title: "示例免费章节 84",
+  });
+  const paid85 = makeTrack("ep-85", {
+    playlist_index: 85,
+    pay_required: true,
+    title: "示例付费章节 85",
+  });
+  const paid86 = makeTrack("ep-86", {
+    playlist_index: 86,
+    pay_required: true,
+    title: "示例付费章节 86",
+  });
+
+  assert.equal(isPayRequiredTrack(free1), false);
+  assert.equal(isPayRequiredTrack(free2), false);
+  assert.equal(isPayRequiredTrack(paid85), true);
+
+  const mixed = [free1, paid85, free2, free84, paid86];
+  const split = splitDownloadableTracks(mixed);
+  assert.deepEqual(
+    split.downloadable.map((t) => t.id),
+    ["ep-1", "ep-2", "ep-84"],
+  );
+  assert.deepEqual(
+    split.payBlocked.map((t) => t.id),
+    ["ep-85", "ep-86"],
+  );
+
+  assert.deepEqual(getFreeEpisodeBounds(mixed), {
+    start: 1,
+    end: 84,
+    freeCount: 3,
+    paidCount: 2,
+  });
+
+  // Fallback index when playlist_index is missing
+  const noPlaylistIdx = [
+    makeTrack("a", { pay_required: true, title: "示例付费章节 A" }),
+    makeTrack("b", { pay_required: false, title: "示例免费章节 B" }),
+    makeTrack("c", { title: "示例免费章节 C" }),
+  ];
+  assert.deepEqual(getFreeEpisodeBounds(noPlaylistIdx), {
+    start: 2,
+    end: 3,
+    freeCount: 2,
+    paidCount: 1,
+  });
+
+  // All paid episodes
+  assert.deepEqual(getFreeEpisodeBounds([paid85, paid86]), {
+    start: 1,
+    end: 1,
+    freeCount: 0,
+    paidCount: 2,
+  });
+
+  // Empty array
+  assert.deepEqual(getFreeEpisodeBounds([]), {
+    start: 1,
+    end: 1,
+    freeCount: 0,
+    paidCount: 0,
+  });
 });

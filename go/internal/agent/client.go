@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -180,7 +181,7 @@ func (c *Client) completeChatStream(
 		payload["tools"] = tools
 		payload["tool_choice"] = "auto"
 	}
-	resp, err := c.openRequest(ctx, http.MethodPost, APIURL(settings.BaseURL, "chat/completions"), settings, proxyURL, configRev, payload, imageDataURL != "")
+	resp, err := c.openRequest(ctx, http.MethodPost, APIURL(settings.BaseURL, "chat/completions"), settings, proxyURL, configRev, payload, imageDataURL != "", true)
 	if err != nil {
 		return LLMMessage{}, err
 	}
@@ -258,6 +259,9 @@ func (c *Client) completeChatStream(
 					finished = true
 				}
 				break
+			}
+			if isTimeoutError(err) {
+				return LLMMessage{}, wrapDeadlineError(err)
 			}
 			if ctx.Err() != nil {
 				return LLMMessage{}, model.NewError(model.ErrCancelled, 499, "AI 流式请求已取消")
@@ -495,6 +499,23 @@ func (c *Client) maxPayloadBytes(hasImage bool) int {
 	return 1 << 20
 }
 
+const aiDeadlineMessage = "上游 AI 接口响应超时，请稍后重试或点击「核对状态并继续任务」（详见运行日志）"
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+func wrapDeadlineError(cause error) *model.DomainError {
+	return model.WrapError(model.ErrDeadline, http.StatusGatewayTimeout, aiDeadlineMessage, cause)
+}
+
 func (c *Client) doJSON(
 	ctx context.Context,
 	method string,
@@ -504,7 +525,7 @@ func (c *Client) doJSON(
 	payload any,
 	hasImage bool,
 ) ([]byte, error) {
-	resp, err := c.openRequest(ctx, method, targetURL, settings, proxyURL, configRev, payload, hasImage)
+	resp, err := c.openRequest(ctx, method, targetURL, settings, proxyURL, configRev, payload, hasImage, false)
 	if err != nil {
 		return nil, err
 	}
@@ -515,6 +536,9 @@ func (c *Client) doJSON(
 	maxBytes := c.maxPayloadBytes(false)
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)+1))
 	if err != nil {
+		if isTimeoutError(err) {
+			return nil, wrapDeadlineError(err)
+		}
 		if ctx.Err() != nil {
 			return nil, model.NewError(model.ErrCancelled, 499, "AI 请求已取消")
 		}
@@ -534,6 +558,7 @@ func (c *Client) openRequest(
 	proxyURL, configRev string,
 	payload any,
 	hasImage bool,
+	streaming bool,
 ) (*http.Response, error) {
 	origin, err := internalOriginForURL(targetURL)
 	if err != nil {
@@ -564,14 +589,21 @@ func (c *Client) openRequest(
 		req.Header.Set("Authorization", "Bearer "+settings.APIKey)
 	}
 	timeout := 20 * time.Second
+	headerTimeout := 20 * time.Second
 	if method == http.MethodPost {
-		timeout = 90 * time.Second
+		headerTimeout = 90 * time.Second
+		if streaming {
+			timeout = 240 * time.Second
+		} else {
+			timeout = 180 * time.Second
+		}
 	}
 	resp, err := c.pool.Do(ctx, req, transport.RequestOptions{
 		Domain:                 transport.DomainConfiguredInternal,
 		ConfigRevision:         configRev,
 		ProxyURL:               proxyURL,
 		Timeout:                timeout,
+		ResponseHeaderTimeout:  headerTimeout,
 		MaxResponseBytes:       int64(c.maxPayloadBytes(false)),
 		AllowedInternalOrigins: []string{origin},
 		Idempotent:             method == http.MethodGet,
@@ -580,7 +612,13 @@ func (c *Client) openRequest(
 	if err != nil {
 		var de *model.DomainError
 		if errors.As(err, &de) {
+			if de.Code == model.ErrDeadline || isTimeoutError(de) {
+				return nil, wrapDeadlineError(de)
+			}
 			return nil, de
+		}
+		if isTimeoutError(err) {
+			return nil, wrapDeadlineError(err)
 		}
 		if ctx.Err() != nil {
 			return nil, model.NewError(model.ErrCancelled, 499, "AI 请求已取消")

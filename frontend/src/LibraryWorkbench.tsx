@@ -8,6 +8,8 @@ export function LibraryWorkbench({
   busy,
   start,
   rules,
+  onCancel,
+  inModal = false,
   initialDirectoryMode,
   initialDirectory,
   initialDirectoryKey,
@@ -19,6 +21,8 @@ export function LibraryWorkbench({
     options: Record<string, unknown>,
   ) => void;
   rules: () => void;
+  onCancel?: () => void;
+  inModal?: boolean;
   initialDirectoryMode?: boolean;
   initialDirectory?: string;
   initialDirectoryKey?: number | string;
@@ -57,16 +61,33 @@ export function LibraryWorkbench({
         : action === "scrape"
           ? "开始刮削标签"
           : "开始整理目录";
+  const Container = inModal ? "div" : "section";
   return (
-    <section className="view library-workbench" aria-label="刮削整理工作台">
-      <div className="library-heading">
-        <div>
-          <h2>处理音乐文件</h2>
+    <Container
+      className={
+        inModal ? "library-workbench is-modal" : "view library-workbench"
+      }
+      aria-label="刮削整理工作台"
+    >
+      {inModal ? (
+        <div className="workbench-modal-top">
+          <p className="workbench-modal-hint">
+            支持按已选歌曲或整个目录批量刮削标签与整理目录结构。
+          </p>
+          <button type="button" className="secondary" onClick={rules}>
+            前往规则设置 <ArrowRight />
+          </button>
         </div>
-        <button className="secondary" onClick={rules}>
-          前往规则设置 <ArrowRight />
-        </button>
-      </div>
+      ) : (
+        <div className="library-heading">
+          <div>
+            <h2>处理音乐文件</h2>
+          </div>
+          <button type="button" className="secondary" onClick={rules}>
+            前往规则设置 <ArrowRight />
+          </button>
+        </div>
+      )}
       {!config && (
         <p role={error ? "alert" : "status"}>
           {error || "正在读取刮削规则…"}{" "}
@@ -179,7 +200,24 @@ export function LibraryWorkbench({
                 ? `目录：${directory.trim() || "音乐根目录"}`
                 : `已选 ${count} 首歌曲`}
             </span>
+            {!count && !directoryMode && (
+              <small>先在歌曲列表中选择需要处理的歌曲</small>
+            )}
+            {action !== "organize" && !config.sources.length && (
+              <small role="status">请选择至少一个刮削来源</small>
+            )}
+            {onCancel && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={onCancel}
+              >
+                取消
+              </button>
+            )}
             <button
+              type="button"
               className="primary"
               disabled={
                 busy ||
@@ -196,15 +234,9 @@ export function LibraryWorkbench({
               <WandSparkles />
               {primaryLabel}
             </button>
-            {!count && !directoryMode && (
-              <small>先在歌曲列表中选择需要处理的歌曲</small>
-            )}
-            {action !== "organize" && !config.sources.length && (
-              <small role="status">请选择至少一个刮削来源</small>
-            )}
           </div>
         </>
       )}
-    </section>
+    </Container>
   );
 }

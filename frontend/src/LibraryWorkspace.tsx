@@ -16,7 +16,11 @@ import type { NavidromeViewPreferences } from "./preferences";
 import type { LibraryFile, LibraryJob } from "./types";
 import "./library.css";
 
-type LibraryProps = ComponentProps<typeof MusicLibrary>;
+type LibraryProps = Omit<
+  ComponentProps<typeof MusicLibrary>,
+  "manage" | "process" | "processDirectory"
+>;
+export type LibraryTab = "local" | "navidrome" | "jobs";
 export type LibraryAction =
   | "scrape"
   | "organize"
@@ -38,46 +42,51 @@ export type LibraryAction =
 
 export function LibraryWorkspace({
   openSettings,
-  mode,
   tab,
   setTab,
   remoteDeleted,
   serverNavidromeView,
-  initialDirectoryMode,
-  initialDirectory,
-  initialDirectoryKey,
   ...props
 }: LibraryProps & {
   openSettings: (tab: "library" | "navidrome") => void;
-  mode: "library" | "processing";
-  tab: string;
-  setTab: (tab: string) => void;
+  tab: LibraryTab;
+  setTab: (tab: LibraryTab) => void;
   remoteDeleted?: (ids: string[]) => void;
   serverNavidromeView?: NavidromeViewPreferences | null;
-  initialDirectoryMode?: boolean;
-  initialDirectory?: string;
-  initialDirectoryKey?: number | string;
 }) {
   const [focus, setFocus] = useState("");
-  const [localDirRequest, setLocalDirRequest] = useState<{
-    mode: boolean;
-    dir: string;
+  const [workbenchModal, setWorkbenchModal] = useState<{
+    directoryMode: boolean;
+    directory: string;
+    files: LibraryFile[];
     key: number;
   } | null>(null);
-  const handleProcessDirectory = (scopeDir: string) => {
-    if (props.processDirectory) {
-      props.processDirectory(scopeDir);
-      return;
-    }
-    setLocalDirRequest((prev) => ({
-      mode: true,
-      dir: scopeDir,
-      key: (prev?.key ?? 0) + 1,
-    }));
-    setTab("workbench");
-  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  function openWorkbenchForFiles(items: LibraryFile[]) {
+    const audio = items.filter((file) => file.track);
+    if (!audio.length) return;
+    setError("");
+    props.setSelected(audio.map((file) => file.path));
+    setWorkbenchModal((prev) => ({
+      directoryMode: false,
+      directory: prev?.directory ?? "incoming",
+      files: audio,
+      key: (prev?.key ?? 0) + 1,
+    }));
+  }
+  function openWorkbenchForDir(scopeDir: string) {
+    setError("");
+    const selectedAudio = props.files.filter(
+      (file) => file.track && props.selected.includes(file.path),
+    );
+    setWorkbenchModal((prev) => ({
+      directoryMode: true,
+      directory: scopeDir,
+      files: selectedAudio,
+      key: (prev?.key ?? 0) + 1,
+    }));
+  }
   const [operation, setOperation] = useState<{
     action: LibraryAction;
     files: LibraryFile[];
@@ -119,6 +128,7 @@ export function LibraryWorkspace({
         ...options,
       });
       setOperation(null);
+      setWorkbenchModal(null);
       setFocus(job.id);
       setTab("jobs");
     } catch (e) {
@@ -163,27 +173,22 @@ export function LibraryWorkspace({
     );
     setOperation({ action, files: audio });
   }
-  const tabs =
-    mode === "library"
-      ? ([
-          ["local", "本地音乐", Folder],
-          ["navidrome", "Navidrome", Library],
-        ] as const)
-      : ([
-          ["workbench", "选择与处理", WandSparkles],
-          ["jobs", "任务与审核", History],
-        ] as const);
-  const workspaceId = mode === "library" ? "library" : "processing";
+  const tabs = [
+    ["local", "本地音乐", Folder],
+    ["navidrome", "Navidrome", Library],
+    ["jobs", "整理与审核", History],
+  ] as const;
+  const workspaceId = "library";
   return (
     <>
       <WorkspaceTabs
         id={workspaceId}
-        label={mode === "library" ? "音乐库" : "刮削整理"}
+        label="音乐库"
         tabs={tabs}
         active={tab}
-        change={setTab}
+        change={(next) => setTab(next as LibraryTab)}
       />
-      {error && !operation && (
+      {error && !operation && !workbenchModal && (
         <p role="alert" className="library-error">
           {error}
         </p>
@@ -196,52 +201,19 @@ export function LibraryWorkspace({
         {tab === "local" && (
           <MusicLibrary
             {...props}
-            processDirectory={handleProcessDirectory}
+            manage={manage}
+            process={openWorkbenchForFiles}
+            processDirectory={openWorkbenchForDir}
             remoteDeleted={remoteDeleted}
             busy={props.busy || busy}
           />
         )}
-        {tab === "workbench" && (
-          <div className="processing-workflow">
-            <MusicLibrary
-              {...props}
-              processDirectory={handleProcessDirectory}
-              remoteDeleted={remoteDeleted}
-              busy={props.busy || busy}
-              manage={manage}
-              processing
-            />
-            <LibraryWorkbench
-              count={
-                props.files.filter(
-                  (file) => file.track && props.selected.includes(file.path),
-                ).length
-              }
-              busy={props.busy || busy}
-              rules={() => openSettings("library")}
-              initialDirectoryMode={
-                localDirRequest?.mode ?? initialDirectoryMode
-              }
-              initialDirectory={localDirRequest?.dir ?? initialDirectory}
-              initialDirectoryKey={
-                localDirRequest
-                  ? `local:${localDirRequest.key}`
-                  : initialDirectoryKey
-              }
-              start={(action, options) =>
-                void submit(
-                  action,
-                  props.files.filter(
-                    (file) => file.track && props.selected.includes(file.path),
-                  ),
-                  options,
-                )
-              }
-            />
-          </div>
-        )}
         {tab === "jobs" && (
-          <LibraryJobs focus={focus} changed={props.refresh} />
+          <LibraryJobs
+            focus={focus}
+            changed={props.refresh}
+            onStartDirectory={() => openWorkbenchForDir("")}
+          />
         )}
         {tab === "navidrome" && (
           <NavidromeLibrary
@@ -254,6 +226,35 @@ export function LibraryWorkspace({
           />
         )}
       </div>
+      {workbenchModal && (
+        <Modal
+          title="刮削与整理"
+          className="workbench-modal"
+          close={busy ? undefined : () => setWorkbenchModal(null)}
+        >
+          <LibraryWorkbench
+            inModal
+            count={workbenchModal.files.length}
+            busy={props.busy || busy}
+            rules={() => {
+              setWorkbenchModal(null);
+              openSettings("library");
+            }}
+            onCancel={() => setWorkbenchModal(null)}
+            initialDirectoryMode={workbenchModal.directoryMode}
+            initialDirectory={workbenchModal.directory}
+            initialDirectoryKey={workbenchModal.key}
+            start={(action, options) =>
+              void submit(action, workbenchModal.files, options)
+            }
+          />
+          {error && (
+            <p role="alert" className="library-error">
+              {error}
+            </p>
+          )}
+        </Modal>
+      )}
       {operation && (
         <Modal
           title={

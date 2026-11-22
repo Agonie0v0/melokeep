@@ -343,7 +343,6 @@ export function MusicLibrary({
   manage,
   process,
   processDirectory,
-  processing = false,
   hasMore = false,
   loadingMore = false,
   indexing = false,
@@ -370,7 +369,6 @@ export function MusicLibrary({
   remoteDeleted?: (ids: string[]) => void;
   changed: (file: LibraryFile) => void;
   manage?: (action: LibraryAction, files: LibraryFile[]) => void;
-  processing?: boolean;
   process?: (files: LibraryFile[]) => void;
   processDirectory?: (scopeDir: string) => void;
   hasMore?: boolean;
@@ -959,7 +957,6 @@ export function MusicLibrary({
     <section className="view music-library">
       <div className="library-heading library-heading-compact">
         <div className="library-heading-meta">
-          {processing && <h2>选择要处理的歌曲</h2>}
           <p className="library-stats">
             {songs} 首歌曲{hasMore ? "+" : ""} · {folders.length} 个文件夹
             {indexing ? " · 正在索引…" : ""}
@@ -1224,26 +1221,25 @@ export function MusicLibrary({
                 : `全选当前结果 (${visible.length} 首)`}
             </label>
             <span>已选 {chosen.length} 项</span>
-            {!processing && (
+            <button
+              className="primary"
+              disabled={!playable.length || busy}
+              onClick={() =>
+                playAll(selectedTracks.length ? selectedTracks : playable)
+              }
+            >
+              <Play />
+              {selectedTracks.length ? "播放选中" : "播放全部"}
+            </button>
+            {process && (
               <button
-                className="primary"
-                disabled={!playable.length || busy}
-                onClick={() =>
-                  playAll(selectedTracks.length ? selectedTracks : playable)
-                }
-              >
-                <Play />
-                {selectedTracks.length ? "播放选中" : "播放全部"}
-              </button>
-            )}
-            {!processing && process && (
-              <button
+                type="button"
                 className="secondary"
                 disabled={!selectedTracks.length || busy}
                 onClick={() => process(chosen)}
               >
                 <WandSparkles />
-                送往刮削整理
+                刮削与整理
               </button>
             )}
             {processDirectory && (
@@ -1253,28 +1249,26 @@ export function MusicLibrary({
                 disabled={busy || (!songs && !hasMore && folders.length === 0)}
                 title={
                   currentScopeDir
-                    ? `将目录「${currentScopeDir}」全部歌曲送往刮削工作台（单次最多 1000 首）`
-                    : "将整个音乐根目录送往刮削工作台（单次最多 1000 首）"
+                    ? `对目录「${currentScopeDir}」全部歌曲发起刮削与整理（单次最多 1000 首）`
+                    : "对整个音乐根目录发起刮削与整理（单次最多 1000 首）"
                 }
                 onClick={() => processDirectory(currentScopeDir)}
               >
                 <FolderInput />
-                整目录送往刮削
+                整目录整理
               </button>
             )}
             <details className="library-batch-actions">
               <summary className="secondary">更多操作</summary>
               <div className="library-batch-options">
-                {!processing && (
-                  <button
-                    className="secondary"
-                    disabled={!selectedTracks.length || busy}
-                    onClick={() => queue(selectedTracks)}
-                  >
-                    加入待播
-                  </button>
-                )}
-                {!processing && savePlaylist && (
+                <button
+                  className="secondary"
+                  disabled={!selectedTracks.length || busy}
+                  onClick={() => queue(selectedTracks)}
+                >
+                  加入待播
+                </button>
+                {savePlaylist && (
                   <button
                     className="secondary"
                     disabled={!selectedTracks.length || busy}
@@ -1282,29 +1276,6 @@ export function MusicLibrary({
                   >
                     <ListMusic />
                     加入歌单
-                  </button>
-                )}
-                {!processing && process && (
-                  <button
-                    className="secondary"
-                    disabled={!selectedTracks.length || busy}
-                    onClick={() => process(chosen)}
-                  >
-                    <WandSparkles />
-                    送往刮削整理
-                  </button>
-                )}
-                {!processing && processDirectory && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={
-                      busy || (!songs && !hasMore && folders.length === 0)
-                    }
-                    onClick={() => processDirectory(currentScopeDir)}
-                  >
-                    <FolderInput />
-                    整目录送往刮削
                   </button>
                 )}
                 {manage && (
@@ -1371,8 +1342,8 @@ export function MusicLibrary({
               role="status"
             >
               当前列表仅展示已加载的前 {visible.length}{" "}
-              首，可点击底部「加载更多」或直接使用「整目录送往刮削」（单次最多
-              1000 首）。
+              首，可点击底部「加载更多」或直接使用「整目录整理」（单次最多 1000
+              首）。
             </p>
           )}
           {error && <p role="alert">{error}</p>}
@@ -1472,20 +1443,22 @@ export function MusicLibrary({
                               : undefined
                           }
                         >
-                          {(processing || process) && (
+                          <Button
+                            label={`编辑歌曲 ${file.track.title}`}
+                            text="编辑歌曲"
+                            disabled={busy || !file.editable}
+                            onClick={() => edit(file)}
+                          >
+                            <Pencil />
+                          </Button>
+                          {process && (
                             <Button
-                              label={
-                                processing
-                                  ? `编辑歌曲 ${file.track.title}`
-                                  : `整理歌曲 ${file.track.title}`
-                              }
-                              text={processing ? "编辑歌曲" : "刮削整理"}
-                              disabled={busy || (processing && !file.editable)}
-                              onClick={() =>
-                                processing ? edit(file) : process?.([file])
-                              }
+                              label={`整理歌曲 ${file.track.title}`}
+                              text="刮削整理"
+                              disabled={busy}
+                              onClick={() => process([file])}
                             >
-                              {processing ? <Pencil /> : <WandSparkles />}
+                              <WandSparkles />
                             </Button>
                           )}
                           <a
@@ -1550,14 +1523,13 @@ export function MusicLibrary({
                 {loadingMore ? "正在加载…" : "加载更多"}
               </button>
               <span className="management-help">
-                已加载 {visible.length}{" "}
-                首（可继续加载或点击上方「整目录送往刮削」）
+                已加载 {visible.length} 首（可继续加载或点击上方「整目录整理」）
               </span>
             </div>
           )}
         </div>
       </div>
-      {!processing && chosen.length > 0 && (
+      {chosen.length > 0 && (
         <div className="selection-bar" role="region" aria-label="已选音乐操作">
           <span>
             已选 <b>{chosen.length}</b> 首
@@ -1601,7 +1573,7 @@ export function MusicLibrary({
                     disabled={busy}
                     onClick={() => process(chosen)}
                   >
-                    送往刮削整理
+                    刮削与整理
                   </button>
                 )}
               </>

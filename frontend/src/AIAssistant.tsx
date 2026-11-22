@@ -328,7 +328,7 @@ export function AIAssistant({
 }: {
   openSettings: () => void;
   changed: () => Promise<void>;
-  navigate: (view: "queue" | "playlists" | "organize") => void;
+  navigate: (view: "queue" | "playlists" | "organize" | "library-jobs") => void;
   play: (track: Track) => void;
   download: (track: Track) => void;
   contextTracks: Track[];
@@ -836,7 +836,7 @@ export function AIAssistant({
               <button
                 type="button"
                 className="ai-shortcut-btn"
-                onClick={() => navigate("organize")}
+                onClick={() => navigate("library-jobs")}
               >
                 <FolderKanban size={14} />
                 审核整理

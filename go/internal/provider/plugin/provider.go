@@ -844,6 +844,7 @@ func (p *Provider) normalizeTrackMap(raw map[string]any) (model.ProviderTrack, b
 	sizeLabel := provider.PtrString(anyToString(firstNonNil(raw["sizeLabel"], raw["size_label"])))
 	episodes := anyToInt(raw["episodes"])
 	lyrics := strings.TrimSpace(anyToString(raw["lyrics"]))
+	payRequired := anyToBool(firstNonNil(raw["payRequired"], raw["pay_required"]))
 
 	var playlistIdx *int
 	if rawIdx := firstNonNil(raw["playlistIndex"], raw["playlist_index"]); rawIdx != nil {
@@ -869,6 +870,7 @@ func (p *Provider) normalizeTrackMap(raw map[string]any) (model.ProviderTrack, b
 		Episodes:      episodes,
 		PlaylistIndex: playlistIdx,
 		Lyrics:        lyrics,
+		PayRequired:   payRequired,
 		Variants:      variants,
 	}, true
 }
@@ -934,18 +936,20 @@ func trackToJSMap(tr model.ProviderTrack) map[string]any {
 		variants = append(variants, item)
 	}
 	out := map[string]any{
-		"publicId":   tr.PublicID,
-		"source":     tr.Source,
-		"sourceId":   tr.SourceID,
-		"source_id":  tr.SourceID,
-		"rootSource": tr.RootSource,
-		"title":      tr.Title,
-		"artist":     tr.Artist,
-		"album":      tr.Album,
-		"duration":   tr.Duration,
-		"cover":      cover,
-		"episodes":   tr.Episodes,
-		"variants":   variants,
+		"publicId":     tr.PublicID,
+		"source":       tr.Source,
+		"sourceId":     tr.SourceID,
+		"source_id":    tr.SourceID,
+		"rootSource":   tr.RootSource,
+		"title":        tr.Title,
+		"artist":       tr.Artist,
+		"album":        tr.Album,
+		"duration":     tr.Duration,
+		"cover":        cover,
+		"episodes":     tr.Episodes,
+		"payRequired":  tr.PayRequired,
+		"pay_required": tr.PayRequired,
+		"variants":     variants,
 	}
 	if tr.PlaylistIndex != nil {
 		out["playlistIndex"] = *tr.PlaylistIndex

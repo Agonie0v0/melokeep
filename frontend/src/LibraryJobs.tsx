@@ -4,6 +4,7 @@ import {
   Check,
   CheckSquare,
   Download,
+  FolderInput,
   History,
   RefreshCw,
   RotateCcw,
@@ -80,9 +81,11 @@ type Version = {
 export function LibraryJobs({
   focus,
   changed,
+  onStartDirectory,
 }: {
   focus: string;
   changed: () => void;
+  onStartDirectory?: () => void;
 }) {
   const [jobs, setJobs] = useState<LibraryJob[]>([]);
   const [selected, setSelected] = useState(focus);
@@ -398,6 +401,17 @@ export function LibraryJobs({
         <div className="library-heading-actions">
           {!selected && (
             <>
+              {onStartDirectory && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={loading || !!busy}
+                  onClick={onStartDirectory}
+                >
+                  <FolderInput />
+                  发起目录整理
+                </button>
+              )}
               <button
                 type="button"
                 className="secondary"
@@ -1222,7 +1236,9 @@ export function LibraryJobs({
                 <h3>
                   {filter !== "all" ? "没有符合条件的任务" : "还没有整理任务"}
                 </h3>
-                <p>在「选择与处理」中选择歌曲即可开始。</p>
+                <p>
+                  在「本地音乐」中选择歌曲，或点击「发起目录整理」即可开始。
+                </p>
               </div>
             )}
             {(offset > 0 || hasMore) && (

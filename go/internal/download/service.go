@@ -277,6 +277,9 @@ func (s *Service) Enqueue(ctx context.Context, actor auth.Actor, snap config.Sna
 	if !ok {
 		return store.CreateDownloadResult{}, model.NewError(model.ErrNotFound, http.StatusNotFound, "曲目记录不存在")
 	}
+	if trackPayRequired(tr.MetadataJSON) {
+		return store.CreateDownloadResult{}, model.NewError(model.ErrForbidden, http.StatusForbidden, "该内容需要对应音源的付费或登录权限，请先在插件设置中配置有效凭证")
+	}
 
 	prefQuality := strings.ToLower(strings.TrimSpace(req.PreferredQuality))
 	layoutOverride := strings.TrimSpace(req.Layout)
@@ -676,6 +679,7 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 			var sizeBytes *int64
 			var sizeLabel *string
 			var playlistIndex *int
+			var payRequired bool
 			var meta map[string]any
 			if tr.MetadataJSON != "" {
 				dec := json.NewDecoder(strings.NewReader(tr.MetadataJSON))
@@ -696,6 +700,7 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 						sizeLabel = &trimmed
 					}
 				}
+				payRequired, _ = meta["pay_required"].(bool)
 			}
 			if sizeBytes == nil {
 				for _, v := range variants {
@@ -733,6 +738,7 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 				SizeBytes:     sizeBytes,
 				SizeLabel:     sizeLabel,
 				PlaylistIndex: playlistIndex,
+				PayRequired:   payRequired,
 				Variants:      variants,
 			}, model.PlaybackDTO{State: "pending", PreviewOnly: false})
 		}
@@ -1643,6 +1649,19 @@ func (s *Service) specForRetry(ctx context.Context, dlID string, snap config.Sna
 	}
 }
 
+func trackPayRequired(metadataJSON string) bool {
+	if strings.TrimSpace(metadataJSON) == "" {
+		return false
+	}
+	var meta struct {
+		PayRequired bool `json:"pay_required"`
+	}
+	if err := json.Unmarshal([]byte(metadataJSON), &meta); err != nil {
+		return false
+	}
+	return meta.PayRequired
+}
+
 func domainTrackFromRecord(publicID string, tr store.ProviderTrackRecord, variants []model.MediaVariant) model.ProviderTrack {
 	var meta map[string]any
 	if tr.MetadataJSON != "" {
@@ -1655,11 +1674,13 @@ func domainTrackFromRecord(publicID string, tr store.ProviderTrackRecord, varian
 		cover = &c
 	}
 	var playlistIndex *int
+	var payRequired bool
 	if meta != nil {
 		if idxPtr := parsePositiveInt64(meta["playlist_index"]); idxPtr != nil {
 			idxVal := int(*idxPtr)
 			playlistIndex = &idxVal
 		}
+		payRequired, _ = meta["pay_required"].(bool)
 	}
 	return model.ProviderTrack{
 		PublicID:      publicID,
@@ -1672,6 +1693,7 @@ func domainTrackFromRecord(publicID string, tr store.ProviderTrackRecord, varian
 		Duration:      float64(tr.DurationMS) / 1000.0,
 		Cover:         cover,
 		PlaylistIndex: playlistIndex,
+		PayRequired:   payRequired,
 		Variants:      variants,
 	}
 }

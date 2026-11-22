@@ -1941,3 +1941,57 @@
     margin-bottom: 4px;
   }
 }
+
+.modal-dialog.workbench-modal {
+  width: min(620px, 100%);
+}
+.library-workbench.is-modal {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.workbench-modal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.workbench-modal-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  flex: 1 1 220px;
+}
+.library-workbench.is-modal .workbench-options {
+  margin: 14px 0;
+  gap: 14px;
+}
+.library-workbench.is-modal .workbench-submit {
+  margin: 14px 0 0;
+  justify-content: flex-end;
+}
+.library-workbench.is-modal .workbench-submit > span {
+  margin-right: auto;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+@media (max-width: 600px) {
+  .modal-dialog.workbench-modal {
+    padding: 20px 16px;
+  }
+  .workbench-modal-top {
+    align-items: stretch;
+  }
+  .library-workbench.is-modal .workbench-submit {
+    justify-content: stretch;
+  }
+  .library-workbench.is-modal .workbench-submit > span {
+    flex: 1 0 100%;
+  }
+}

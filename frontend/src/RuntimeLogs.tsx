@@ -14,6 +14,7 @@ type LogEntry = {
 };
 const categories: Record<string, string> = {
   system: "服务",
+  ai: "AI 助手",
   search: "搜索",
   download: "下载",
   library: "曲库与整理",

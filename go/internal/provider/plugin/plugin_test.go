@@ -1627,3 +1627,138 @@ func TestEpisodesPageNativeAndLegacyCompat(t *testing.T) {
 		t.Fatal("plugin without episodes capability must not implement PagedEpisodeProvider")
 	}
 }
+
+func TestPayRequiredNormalizationAndResolveJSMap(t *testing.T) {
+	ctx := context.Background()
+
+	script := `
+		module.exports = {
+			manifest: {
+				apiVersion: 1,
+				id: "open-podcast",
+				name: "Open Podcast",
+				version: "1.0.0",
+				capabilities: { search: true, episodes: true }
+			},
+			search(ctx, opts) {
+				ctx.emit({
+					sourceId: "book-1",
+					title: "示例有声书",
+					artist: "示例演播",
+					episodes: 2,
+					payRequired: true
+				});
+				ctx.emit({
+					sourceId: "track-free",
+					title: "示例免费单曲",
+					artist: "示例演播",
+					payRequired: false
+				});
+				ctx.emit({
+					sourceId: "track-snake-paid",
+					title: "示例付费单曲",
+					artist: "示例演播",
+					pay_required: true
+				});
+				return { count: 3 };
+			},
+			episodes(ctx, track, opts) {
+				return {
+					episodes: [
+						{
+							sourceId: track.sourceId + "#ep-1",
+							title: "示例免费章节",
+							artist: track.artist,
+							album: "示例有声书",
+							duration: 180,
+							playlistIndex: 1,
+							payRequired: false
+						},
+						{
+							sourceId: track.sourceId + "#ep-2",
+							title: "示例付费章节",
+							artist: track.artist,
+							album: "示例有声书",
+							duration: 240,
+							playlistIndex: 2,
+							payRequired: true
+						}
+					],
+					page: 1,
+					pageSize: 50,
+					total: 2,
+					hasMore: false
+				};
+			},
+			resolve(ctx, track, policy) {
+				return [{
+					variantId: "mp3:128",
+					url: "https://cdn.example.org/audio/" + track.sourceId + ".mp3",
+					codec: "mp3",
+					bitrate: 128,
+					previewOnly: Boolean(track.payRequired),
+					label: "payRequired=" + typeof track.payRequired + ":" + track.payRequired + "|pay_required=" + typeof track.pay_required + ":" + track.pay_required
+				}];
+			}
+		};
+	`
+
+	compiled, err := plugin.ParseAndCompile(script)
+	if err != nil {
+		t.Fatalf("ParseAndCompile: %v", err)
+	}
+	prov, err := plugin.NewProvider(compiled, plugin.ProviderOptions{SkipAudioProbe: true})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	var emitted []model.ProviderTrack
+	if _, err := prov.Search(ctx, model.SearchOptions{Keyword: "示例", Limit: 10}, func(tr model.ProviderTrack) error {
+		emitted = append(emitted, tr)
+		return nil
+	}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(emitted) != 3 {
+		t.Fatalf("expected 3 tracks, got %d", len(emitted))
+	}
+	if !emitted[0].PayRequired || emitted[1].PayRequired || !emitted[2].PayRequired {
+		t.Fatalf("unexpected PayRequired flags from search: [0]=%v [1]=%v [2]=%v",
+			emitted[0].PayRequired, emitted[1].PayRequired, emitted[2].PayRequired)
+	}
+
+	epPage, err := prov.EpisodesPage(ctx, emitted[0], provider.EpisodePageOptions{Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("EpisodesPage: %v", err)
+	}
+	if len(epPage.Items) != 2 {
+		t.Fatalf("expected 2 episodes, got %d", len(epPage.Items))
+	}
+	if epPage.Items[0].PayRequired || !epPage.Items[1].PayRequired {
+		t.Fatalf("unexpected episode PayRequired flags: ep1=%v ep2=%v",
+			epPage.Items[0].PayRequired, epPage.Items[1].PayRequired)
+	}
+
+	eps, err := prov.Episodes(ctx, emitted[0])
+	if err != nil || len(eps) != 2 || eps[0].PayRequired || !eps[1].PayRequired {
+		t.Fatalf("unexpected legacy Episodes result: eps=%+v err=%v", eps, err)
+	}
+
+	resFree, err := prov.Resolve(ctx, epPage.Items[0], model.QualityPolicy{AllowPreview: true})
+	if err != nil || len(resFree) != 1 {
+		t.Fatalf("Resolve free episode: res=%+v err=%v", resFree, err)
+	}
+	wantFreeLabel := "payRequired=boolean:false|pay_required=boolean:false"
+	if resFree[0].Variant.Label != wantFreeLabel {
+		t.Fatalf("free track JS map mismatch: got %q want %q", resFree[0].Variant.Label, wantFreeLabel)
+	}
+
+	resPaid, err := prov.Resolve(ctx, epPage.Items[1], model.QualityPolicy{AllowPreview: true})
+	if err != nil || len(resPaid) != 1 {
+		t.Fatalf("Resolve paid episode: res=%+v err=%v", resPaid, err)
+	}
+	wantPaidLabel := "payRequired=boolean:true|pay_required=boolean:true"
+	if resPaid[0].Variant.Label != wantPaidLabel {
+		t.Fatalf("paid track JS map mismatch: got %q want %q", resPaid[0].Variant.Label, wantPaidLabel)
+	}
+}

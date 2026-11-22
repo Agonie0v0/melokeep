@@ -172,6 +172,7 @@ const manifest = {
     duration: 198,                // 可选：时长（秒，浮点数或整数）
     cover: "https://...",         // 可选：封面图片 URL
     episodes: 0,                  // 可选：合集/有声书集数（正整数为已知总集数；-1 表示合集但搜索时未知总集数；0 或省略表示单曲）
+    payRequired: false,           // 可选：标明曲目或分集当前需要付费或登录凭证才能下载；宿主在下载入队前拦截，但允许在线试听
     variants: [                   // 可选：已知音质列表
       {
         variantId: "mp3:320",
@@ -191,7 +192,7 @@ const manifest = {
 ### 4.2 `resolve(ctx, track, policy)`
 
 - 输入：
-  - `track`：`{ publicId, source, sourceId, title, artist, album, duration, cover, episodes, variants }`
+  - `track`：`{ publicId, source, sourceId, title, artist, album, duration, cover, episodes, payRequired, variants }`
   - `policy`：`{ preferredVariantId, preferredQuality, allowPreview }`
 - 返回值：已解析媒体列表（`ResolvedMedia[]`，**严禁包含内网地址**，仅用于服务端当次受控流式代理与下载，不持久化到长期存储）：
   ```js
@@ -239,6 +240,7 @@ const manifest = {
           album: "书名",
           duration: 620,
           playlistIndex: 1, // 可选：1-based 章节序号；省略时宿主按 (page - 1) * pageSize + i + 1 自动补全
+          payRequired: false, // 可选：同 search 中的 payRequired?: boolean，标明分集需付费或登录凭证才能下载（拦截入队下载，保留在线试听）
         },
       ],
       page: 1,

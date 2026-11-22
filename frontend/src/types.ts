@@ -22,6 +22,7 @@ export interface Track {
   size_bytes?: number | null;
   size_label?: string | null;
   episodes?: number;
+  pay_required?: boolean;
   root_source?: string;
   qualities: Quality[];
   playback: {

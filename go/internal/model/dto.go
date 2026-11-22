@@ -45,6 +45,7 @@ type TrackDTO struct {
 	SizeLabel     *string      `json:"size_label,omitempty"`
 	Episodes      int          `json:"episodes,omitempty"`
 	RootSource    string       `json:"root_source,omitempty"`
+	PayRequired   bool         `json:"pay_required,omitempty"`
 	Qualities     []QualityDTO `json:"qualities"`
 	Playback      PlaybackDTO  `json:"playback"`
 }
@@ -498,6 +499,7 @@ func TrackDTOFromDomain(t ProviderTrack, playback PlaybackDTO) TrackDTO {
 		SizeLabel:     sizeLabel,
 		Episodes:      t.Episodes,
 		RootSource:    t.RootSource,
+		PayRequired:   t.PayRequired,
 		Qualities:     qualities,
 		Playback:      playback,
 	}

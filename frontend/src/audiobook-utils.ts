@@ -27,6 +27,70 @@ export function isCollectionTrack(track: Pick<Track, "episodes">): boolean {
   );
 }
 
+export function isPayRequiredTrack(
+  track: Pick<Track, "pay_required">,
+): boolean {
+  return track.pay_required === true;
+}
+
+export function splitDownloadableTracks<T extends Pick<Track, "pay_required">>(
+  items: T[],
+): { downloadable: T[]; payBlocked: T[] } {
+  const downloadable: T[] = [];
+  const payBlocked: T[] = [];
+  for (const item of items) {
+    if (isPayRequiredTrack(item)) {
+      payBlocked.push(item);
+    } else {
+      downloadable.push(item);
+    }
+  }
+  return { downloadable, payBlocked };
+}
+
+export function getFreeEpisodeBounds<
+  T extends Pick<Track, "playlist_index" | "pay_required">,
+>(
+  items: T[],
+): {
+  start: number;
+  end: number;
+  freeCount: number;
+  paidCount: number;
+} {
+  let minEp = Infinity;
+  let maxEp = -Infinity;
+  let freeCount = 0;
+  let paidCount = 0;
+
+  items.forEach((item, idx) => {
+    if (isPayRequiredTrack(item)) {
+      paidCount++;
+      return;
+    }
+    freeCount++;
+    const epNum = getEpisodeNumber(item, idx);
+    if (epNum < minEp) minEp = epNum;
+    if (epNum > maxEp) maxEp = epNum;
+  });
+
+  if (freeCount === 0) {
+    return {
+      start: 1,
+      end: 1,
+      freeCount: 0,
+      paidCount: items.length,
+    };
+  }
+
+  return {
+    start: minEp,
+    end: maxEp,
+    freeCount,
+    paidCount,
+  };
+}
+
 export function formatEpisodeBadge(episodes?: number): string {
   return episodes && episodes > 0 ? `整部 · ${episodes} 集` : "整部有声书";
 }

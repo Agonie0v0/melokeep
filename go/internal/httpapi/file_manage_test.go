@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -287,5 +288,198 @@ func TestLibraryRefreshRescanAndGhostFolderDelete(t *testing.T) {
 	srv.ServeHTTP(recMissing, reqMissing)
 	if recMissing.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for completely absent folder, got %d %s", recMissing.Code, recMissing.Body.String())
+	}
+}
+
+func TestLibraryRefreshUnhealthyRootReadableLabelAndLog(t *testing.T) {
+	var logBuf *LogBuffer
+	srv, st, _ := newTestServer(t, func(d *Dependencies, _ string) {
+		locks := files.NewAssetLockManager(2 * time.Second)
+		d.Indexer = index.NewIndexer(d.Store, locks, media.NewTagService(nil, nil))
+		logBuf = NewLogBuffer(100)
+		d.Logs = logBuf
+	})
+	ctx := context.Background()
+
+	missingRootID := "11111111-2222-3333-4444-555555555555"
+	missingPath := filepath.Join(t.TempDir(), "absent-library-root")
+	if err := st.UpsertRoot(ctx, store.RootRecord{
+		ID:            missingRootID,
+		CanonicalPath: missingPath,
+		PathCaseMode:  "sensitive",
+		Enabled:       true,
+		Healthy:       true,
+	}); err != nil {
+		t.Fatalf("upsert missing root: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/library/refresh", nil)
+	req.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/library/refresh failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var out libraryRefreshResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode refresh output: %v", err)
+	}
+	if out.RootsScanned != 2 || len(out.UnhealthyRoots) != 1 {
+		t.Fatalf("expected 2 scanned roots and 1 unhealthy root, got %+v", out)
+	}
+	label := out.UnhealthyRoots[0]
+	if !strings.Contains(label, missingPath) || !strings.Contains(label, "目录不存在") {
+		t.Fatalf("expected readable path and reason in unhealthy_roots, got %q", label)
+	}
+	if strings.Contains(label, missingRootID) {
+		t.Fatalf("unhealthy_roots must not expose raw UUID when CanonicalPath exists, got %q", label)
+	}
+
+	foundWarn := false
+	for _, entry := range logBuf.List() {
+		if entry.Category == "library" && entry.Level == "warning" && entry.TaskID == missingRootID {
+			if strings.Contains(entry.Message, missingPath) && strings.Contains(entry.Message, missingRootID) {
+				foundWarn = true
+			}
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected library warning log with path and UUID, got %+v", logBuf.List())
+	}
+
+	// Verify formatUnhealthyRootLabel formatting across error variants.
+	cases := []struct {
+		name   string
+		root   store.RootRecord
+		reason string
+		want   string
+	}{
+		{
+			name:   "posix not exist",
+			root:   store.RootRecord{ID: "uuid-1", CanonicalPath: "/mnt/music"},
+			reason: "open /mnt/music: no such file or directory",
+			want:   "/mnt/music (目录不存在)",
+		},
+		{
+			name:   "windows cannot find path",
+			root:   store.RootRecord{ID: "uuid-2", CanonicalPath: `D:\Music\Old`},
+			reason: `GetFileAttributesEx D:\Music\Old: The system cannot find the path specified.`,
+			want:   `D:\Music\Old (目录不存在)`,
+		},
+		{
+			name:   "permission denied",
+			root:   store.RootRecord{ID: "uuid-3", CanonicalPath: "/mnt/locked"},
+			reason: "open /mnt/locked: permission denied",
+			want:   "/mnt/locked (无访问权限)",
+		},
+		{
+			name:   "empty canonical path fallback to id",
+			root:   store.RootRecord{ID: "uuid-fallback", CanonicalPath: ""},
+			reason: "disk read failed",
+			want:   "uuid-fallback (disk read failed)",
+		},
+	}
+	for _, tc := range cases {
+		if got := formatUnhealthyRootLabel(tc.root, tc.reason); got != tc.want {
+			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestStoreCountActiveAssetsAndDisableEmptyRemovedRootPolicy(t *testing.T) {
+	srv, st, _ := newTestServer(t, func(d *Dependencies, _ string) {
+		locks := files.NewAssetLockManager(2 * time.Second)
+		d.Indexer = index.NewIndexer(d.Store, locks, media.NewTagService(nil, nil))
+	})
+	ctx := context.Background()
+
+	emptyRemovedID := "root-empty-removed"
+	emptyRemovedPath := filepath.Join(t.TempDir(), "old-removed-root")
+	offlineWithTrackID := "root-offline-with-track"
+	offlineWithTrackPath := filepath.Join(t.TempDir(), "offline-nas-root")
+
+	for _, r := range []store.RootRecord{
+		{ID: emptyRemovedID, CanonicalPath: emptyRemovedPath, PathCaseMode: "sensitive", Enabled: true, Healthy: true},
+		{ID: offlineWithTrackID, CanonicalPath: offlineWithTrackPath, PathCaseMode: "sensitive", Enabled: true, Healthy: true},
+	} {
+		if err := st.UpsertRoot(ctx, r); err != nil {
+			t.Fatalf("UpsertRoot %s: %v", r.ID, err)
+		}
+	}
+
+	// Non-active rows (missing / deleted) in emptyRemovedID must not prevent auto-disable.
+	for idx, status := range []string{"missing", "deleted"} {
+		rel := "old/" + status + ".wav"
+		if _, err := st.UpsertAsset(ctx, store.AssetRecord{
+			RootID: emptyRemovedID, RelPath: rel, PathKey: rel, Folder: "old", Name: status + ".wav",
+			Status: status, Size: int64(idx + 1), Title: status,
+		}, 0, false); err != nil {
+			t.Fatalf("seed non-active asset: %v", err)
+		}
+	}
+	// Active asset in offlineWithTrackID must protect it from auto-disable.
+	if _, err := st.UpsertAsset(ctx, store.AssetRecord{
+		RootID: offlineWithTrackID, RelPath: "Artist/keep.wav", PathKey: "Artist/keep.wav", Folder: "Artist", Name: "keep.wav",
+		Status: "active", Size: 100, Title: "Keep Track",
+	}, 0, false); err != nil {
+		t.Fatalf("seed active asset: %v", err)
+	}
+
+	cntEmpty, err := st.CountActiveAssetsByRoot(ctx, emptyRemovedID)
+	if err != nil || cntEmpty != 0 {
+		t.Fatalf("expected 0 active assets in emptyRemovedID, got count=%d err=%v", cntEmpty, err)
+	}
+	cntOffline, err := st.CountActiveAssetsByRoot(ctx, offlineWithTrackID)
+	if err != nil || cntOffline != 1 {
+		t.Fatalf("expected 1 active asset in offlineWithTrackID, got count=%d err=%v", cntOffline, err)
+	}
+
+	// Simulate startup cleanup rule: only disable missing root when active count == 0.
+	roots, err := st.ListRoots(ctx)
+	if err != nil {
+		t.Fatalf("ListRoots: %v", err)
+	}
+	const autoDisableMsg = "目录已不存在且无有效曲目，已自动停用"
+	for _, rt := range roots {
+		if !rt.Enabled {
+			continue
+		}
+		if _, statErr := os.Stat(rt.CanonicalPath); os.IsNotExist(statErr) {
+			n, cErr := st.CountActiveAssetsByRoot(ctx, rt.ID)
+			if cErr != nil {
+				t.Fatalf("CountActiveAssetsByRoot(%s): %v", rt.ID, cErr)
+			}
+			if n == 0 {
+				if err := st.SetRootEnabled(ctx, rt.ID, false, autoDisableMsg); err != nil {
+					t.Fatalf("SetRootEnabled(%s): %v", rt.ID, err)
+				}
+			}
+		}
+	}
+
+	emptyRec, ok, err := st.GetRoot(ctx, emptyRemovedID)
+	if err != nil || !ok || emptyRec.Enabled || emptyRec.LastError != autoDisableMsg {
+		t.Fatalf("expected emptyRemovedID disabled with reason, got ok=%v rec=%+v err=%v", ok, emptyRec, err)
+	}
+	offlineRec, ok, err := st.GetRoot(ctx, offlineWithTrackID)
+	if err != nil || !ok || !offlineRec.Enabled {
+		t.Fatalf("expected offlineWithTrackID preserved as enabled, got ok=%v rec=%+v err=%v", ok, offlineRec, err)
+	}
+
+	// Subsequent library refresh skips disabled emptyRemovedID and only flags offlineWithTrackID.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/library/refresh", nil)
+	req.Header.Set("X-MeloKeep-Request", "1")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/library/refresh failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var out libraryRefreshResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode refresh output: %v", err)
+	}
+	if out.RootsScanned != 2 || len(out.UnhealthyRoots) != 1 || !strings.Contains(out.UnhealthyRoots[0], offlineWithTrackPath) {
+		t.Fatalf("expected disabled empty root skipped and only offlineWithTrackPath flagged, got %+v", out)
 	}
 }

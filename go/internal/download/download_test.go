@@ -1442,3 +1442,114 @@ func TestAudiobookLazyResolveTagsRetryAndDedupe(t *testing.T) {
 		t.Fatalf("expected both standard and highest PreferredQuality passed to Resolve, got std=%v high=%v", seenStdPolicy.Load(), seenHighPolicy.Load())
 	}
 }
+
+func TestEnqueueRejectsPayRequiredTrack(t *testing.T) {
+	payload := sampleMP3Bytes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	var resolveCalls atomic.Int32
+	prov := &stubProvider{
+		id: "open-podcast",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			resolveCalls.Add(1)
+			return []model.ResolvedMedia{{
+				VariantID: track.SourceID + "_mp3",
+				Variant:   model.MediaVariant{VariantID: track.SourceID + "_mp3", Label: "MP3 128k", Codec: "mp3"},
+				URL:       srv.URL + "/audio.mp3",
+				Codec:     "mp3",
+			}}, nil
+		},
+	}
+
+	st, svc, _, _ := setupDownloadEnv(t, prov, nil)
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	snap := config.NewSnapshot(config.DefaultRuntimeConfig(), config.DefaultResourceBudgets())
+
+	seedWithMeta := func(locator, title, metaJSON string) string {
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source:       "open-podcast",
+			Locator:      locator,
+			RootSource:   "StubMusicClient",
+			Title:        title,
+			Artist:       "示例演播",
+			Album:        "示例有声书",
+			DurationMS:   60000,
+			MetadataJSON: metaJSON,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pubID := "pub-" + locator
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: pubID,
+			Kind:     "candidate",
+			TargetID: trID,
+			Source:   "open-podcast",
+			SourceID: locator,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+		return pubID
+	}
+
+	paidPubID := seedWithMeta("ep-paid", "示例付费章节", `{"pay_required":true,"playlist_index":10}`)
+	freePubID := seedWithMeta("ep-free", "示例免费章节", `{"pay_required":false,"playlist_index":1}`)
+	emptyMetaPubID := seedWithMeta("ep-empty", "示例兼容章节", "")
+
+	// 1. pay_required=true must fail with 403 and create NO row in downloads table.
+	_, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID: paidPubID,
+	})
+	if err == nil {
+		t.Fatal("expected Enqueue to reject pay_required=true track")
+	}
+	de, ok := model.AsDomainError(err)
+	if !ok || de.Code != model.ErrForbidden || de.Status != http.StatusForbidden {
+		t.Fatalf("expected 403 ErrForbidden domain error, got %v", err)
+	}
+	if !strings.Contains(de.Detail, "付费或登录权限") {
+		t.Fatalf("unexpected error detail: %q", de.Detail)
+	}
+	var count int
+	if qErr := st.Reader().QueryRowContext(ctx, `SELECT COUNT(1) FROM downloads`).Scan(&count); qErr != nil {
+		t.Fatalf("query downloads count: %v", qErr)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 rows in downloads after pay_required rejection, got %d", count)
+	}
+	if resolveCalls.Load() != 0 {
+		t.Fatalf("expected resolve not called for rejected track, got %d", resolveCalls.Load())
+	}
+
+	// 2. pay_required=false enqueues and completes normally.
+	freeRes, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID: freePubID,
+	})
+	if err != nil || !freeRes.Created {
+		t.Fatalf("expected pay_required=false track to enqueue cleanly, err=%v res=%+v", err, freeRes)
+	}
+	waitForStatus(t, svc, freeRes.Download.ID, model.DownloadComplete, 5*time.Second)
+
+	// 3. Empty MetadataJSON (missing pay_required) also remains compatible and enqueues normally.
+	emptyRes, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID: emptyMetaPubID,
+	})
+	if err != nil || !emptyRes.Created {
+		t.Fatalf("expected empty MetadataJSON track to enqueue cleanly, err=%v res=%+v", err, emptyRes)
+	}
+	waitForStatus(t, svc, emptyRes.Download.ID, model.DownloadComplete, 5*time.Second)
+
+	if qErr := st.Reader().QueryRowContext(ctx, `SELECT COUNT(1) FROM downloads`).Scan(&count); qErr != nil {
+		t.Fatalf("query downloads count: %v", qErr)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 download rows (free + empty metadata), got %d", count)
+	}
+}

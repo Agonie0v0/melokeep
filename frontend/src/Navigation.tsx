@@ -15,7 +15,6 @@ import {
   Search,
   Settings,
   ScrollText,
-  WandSparkles,
   X,
 } from "lucide-react";
 
@@ -26,7 +25,6 @@ const items = [
   ["playlists", "歌单", ListMusic],
   ["queue", "下载队列", Download],
   ["files", "音乐库", Folder],
-  ["organize", "刮削整理", WandSparkles],
   ["logs", "运行日志", ScrollText],
   ["settings", "设置", Settings],
 ] as const;

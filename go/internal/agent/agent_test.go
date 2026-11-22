@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -590,5 +592,290 @@ func TestStopPreservesDownloadsAndStartupRecoveryNeedsDecision(t *testing.T) {
 	}
 	if _, err := svc.Resume(ctx, auth.WebAdminActor("admin"), crashed.ID); err == nil {
 		t.Fatalf("expected Resume to reject unresolved unknown write")
+	}
+}
+
+func TestSafeUserErrorAndRedactEmbeddedURLs(t *testing.T) {
+	timeoutErr := model.NewError(model.ErrDeadline, http.StatusGatewayTimeout, "上游请求超时")
+	if got := safeUserError(timeoutErr); got != "上游请求超时" {
+		t.Fatalf("expected Chinese text preserved without percent-encoding, got %q", got)
+	}
+
+	colonErr := model.NewError(model.ErrInvalidResponse, http.StatusBadGateway, "上游错误：连接失败")
+	if got := safeUserError(colonErr); got != "上游错误：连接失败" {
+		t.Fatalf("expected Chinese text with colon preserved, got %q", got)
+	}
+
+	embeddedErr := model.NewError(
+		model.ErrTransport,
+		http.StatusBadGateway,
+		"请求 https://user:secretpass@api.example.com/v1/chat?api_key=sk-secret123&ok=1 失败（请检查 https://proxy:pw@127.0.0.1:7890?token=tok999）。",
+	)
+	got := safeUserError(embeddedErr)
+	if strings.Contains(got, "secretpass") || strings.Contains(got, "sk-secret123") || strings.Contains(got, "pw@") || strings.Contains(got, "tok999") {
+		t.Fatalf("expected embedded URL credentials redacted, got %q", got)
+	}
+	if !strings.HasPrefix(got, "请求 https://user:%2A%2A%2A@api.example.com/v1/chat?") || !strings.Contains(got, "ok=1") || !strings.Contains(got, "失败（请检查 https://proxy:%2A%2A%2A@127.0.0.1:7890?") {
+		t.Fatalf("expected surrounding Chinese text and non-secret query preserved, got %q", got)
+	}
+
+	if generic := safeUserError(errors.New("internal raw error")); generic != "项目操作失败，请检查运行日志和服务状态" {
+		t.Fatalf("unexpected generic error message: %q", generic)
+	}
+}
+
+func TestClientTimeoutPreservesCauseAndStreamTimeouts(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "non_stream"
+		if stream {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			unblock := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.WriteHeader(http.StatusOK)
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+				select {
+				case <-r.Context().Done():
+				case <-unblock:
+				}
+			}))
+			defer srv.Close()
+			defer close(unblock)
+
+			pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+			defer pool.CloseAll()
+			client := NewClient(pool, config.DefaultResourceBudgets())
+			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+			defer cancel()
+
+			_, err := client.Complete(
+				ctx,
+				Settings{
+					Enabled:   true,
+					BaseURL:   srv.URL + "/v1",
+					Model:     "gpt-slow",
+					APIKey:    "sk-timeout-secret",
+					APIType:   "chat_completions",
+					ProxyMode: "direct",
+					Stream:    stream,
+				},
+				"",
+				"rev-1",
+				[]LLMMessage{{Role: "user", Content: "hello"}},
+				nil,
+				"",
+				func(string) {},
+			)
+			de, ok := model.AsDomainError(err)
+			if !ok || de.Code != model.ErrDeadline {
+				t.Fatalf("expected ErrDeadline, got %v", err)
+			}
+			if de.Detail != aiDeadlineMessage {
+				t.Fatalf("unexpected deadline detail: %q", de.Detail)
+			}
+			if de.Cause == nil || !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected underlying DeadlineExceeded cause preserved, got cause=%v err=%v", de.Cause, err)
+			}
+		})
+	}
+}
+
+type capturedAgentLog struct {
+	level    string
+	message  string
+	category string
+	taskID   string
+}
+
+func TestRunTurnLogsModelFailureToolFailureCompletionAndNoPlaintextKey(t *testing.T) {
+	const secretAPIKey = "sk-live-super-secret-key-98765"
+
+	var mu sync.Mutex
+	var logs []capturedAgentLog
+	logger := func(level, message, category, taskID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		logs = append(logs, capturedAgentLog{
+			level:    level,
+			message:  message,
+			category: category,
+			taskID:   taskID,
+		})
+	}
+	snapshotLogs := func() []capturedAgentLog {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]capturedAgentLog, len(logs))
+		copy(out, logs)
+		return out
+	}
+
+	// 1. Model request failure emits category="ai", level="error", and never leaks APIKey.
+	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"upstream failed"}`)
+	}))
+	defer failSrv.Close()
+
+	st, reg, pool := openTestEnv(t)
+	svc := NewService(st, reg, NewClient(pool, config.DefaultResourceBudgets()), Options{
+		Logger: logger,
+	})
+	defer svc.Close()
+
+	ctx := context.Background()
+	_, err := svc.PutSettings(ctx, Settings{
+		Enabled: true,
+		BaseURL: failSrv.URL + "/v1",
+		Model:   "gpt-fail-test",
+		APIKey:  secretAPIKey,
+		APIType: "chat_completions",
+		Stream:  true,
+	})
+	if err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	sessFail, err := svc.CreateSession(ctx)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := svc.StartTurn(ctx, auth.WebAdminActor("admin"), sessFail.ID, TurnRequest{Message: "测试报错日志"}); err != nil {
+		t.Fatalf("StartTurn fail: %v", err)
+	}
+	doneFail := waitForTerminalSession(t, svc, sessFail.ID, 5*time.Second)
+	if doneFail.Status != StatusFailed {
+		t.Fatalf("expected StatusFailed, got %s", doneFail.Status)
+	}
+	if strings.Contains(doneFail.Detail, "%E4") || strings.Contains(doneFail.Detail, secretAPIKey) {
+		t.Fatalf("unexpected detail: %q", doneFail.Detail)
+	}
+
+	foundModelErr := false
+	for _, entry := range snapshotLogs() {
+		if strings.Contains(entry.message, secretAPIKey) {
+			t.Fatalf("plaintext API key leaked into log: %+v", entry)
+		}
+		if entry.category == "ai" && entry.level == "error" && entry.taskID == sessFail.ID {
+			if strings.Contains(entry.message, "gpt-fail-test") &&
+				strings.Contains(entry.message, "chat_completions") &&
+				strings.Contains(entry.message, "stream=true") &&
+				strings.Contains(entry.message, "steps=0") {
+				foundModelErr = true
+			}
+		}
+	}
+	if !foundModelErr {
+		t.Fatalf("expected ai error log with model metadata, got %+v", snapshotLogs())
+	}
+
+	// 2. Tool failure emits warning and completion emits info.
+	var step atomic.Int32
+	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if step.Add(1) == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{
+					"message": map[string]any{
+						"tool_calls": []map[string]any{{
+							"id":   "call_bad_tool",
+							"type": "function",
+							"function": map[string]any{
+								"name":      "read_playlist",
+								"arguments": `{"playlist_id":""}`,
+							},
+						}},
+					},
+				}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]any{"content": "处理完毕"},
+			}},
+		})
+	}))
+	defer okSrv.Close()
+
+	_, _ = svc.PutSettings(ctx, Settings{
+		Enabled: true,
+		BaseURL: okSrv.URL + "/v1",
+		Model:   "gpt-ok-test",
+		APIKey:  secretAPIKey,
+		APIType: "chat_completions",
+		Stream:  false,
+	})
+	sessOK, _ := svc.CreateSession(ctx)
+	if _, err := svc.StartTurn(ctx, auth.WebAdminActor("admin"), sessOK.ID, TurnRequest{Message: "测试工具日志"}); err != nil {
+		t.Fatalf("StartTurn ok: %v", err)
+	}
+	doneOK := waitForTerminalSession(t, svc, sessOK.ID, 5*time.Second)
+	if doneOK.Status != StatusComplete {
+		t.Fatalf("expected StatusComplete, got %s (%s)", doneOK.Status, doneOK.Detail)
+	}
+
+	foundToolWarn := false
+	foundDoneInfo := false
+	for _, entry := range snapshotLogs() {
+		if strings.Contains(entry.message, secretAPIKey) {
+			t.Fatalf("plaintext API key leaked into log: %+v", entry)
+		}
+		if entry.taskID == sessOK.ID && entry.category == "ai" {
+			if entry.level == "warning" && strings.Contains(entry.message, "read_playlist") {
+				foundToolWarn = true
+			}
+			if entry.level == "info" && strings.Contains(entry.message, "1") {
+				foundDoneInfo = true
+			}
+		}
+	}
+	if !foundToolWarn || !foundDoneInfo {
+		t.Fatalf("expected tool warning and completion info logs, got %+v", snapshotLogs())
+	}
+
+	// 3. Cancellation / Stop emits warning log.
+	started := make(chan struct{})
+	var startOnce sync.Once
+	stopUnblock := make(chan struct{})
+	stopSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startOnce.Do(func() { close(started) })
+		select {
+		case <-r.Context().Done():
+		case <-stopUnblock:
+		}
+	}))
+	defer stopSrv.Close()
+	defer close(stopUnblock)
+
+	_, _ = svc.PutSettings(ctx, Settings{
+		Enabled: true,
+		BaseURL: stopSrv.URL + "/v1",
+		Model:   "gpt-stop-test",
+		APIKey:  secretAPIKey,
+		APIType: "chat_completions",
+		Stream:  false,
+	})
+	sessStop, _ := svc.CreateSession(ctx)
+	if _, err := svc.StartTurn(ctx, auth.WebAdminActor("admin"), sessStop.ID, TurnRequest{Message: "测试中断"}); err != nil {
+		t.Fatalf("StartTurn stop: %v", err)
+	}
+	<-started
+	stopped, err := svc.Stop(ctx, sessStop.ID)
+	if err != nil || stopped.Status != StatusInterrupted {
+		t.Fatalf("expected StatusInterrupted after Stop, got status=%s err=%v", stopped.Status, err)
+	}
+	foundStopWarn := false
+	for _, entry := range snapshotLogs() {
+		if entry.taskID == sessStop.ID && entry.category == "ai" && entry.level == "warning" {
+			foundStopWarn = true
+		}
+	}
+	if !foundStopWarn {
+		t.Fatalf("expected warning log when turn interrupted, got %+v", snapshotLogs())
 	}
 }

@@ -668,6 +668,7 @@ func (s *Service) persistTracks(ctx context.Context, tracks []model.ProviderTrac
 			"episodes":       tr.Episodes,
 			"playlist_index": tr.PlaylistIndex,
 			"lyrics":         tr.Lyrics,
+			"pay_required":   tr.PayRequired,
 		}); mErr == nil {
 			metaJSON = string(rawMeta)
 		}

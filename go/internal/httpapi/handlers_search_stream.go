@@ -163,6 +163,7 @@ func (s *Server) loadDomainTrack(ctx context.Context, sid string) (model.Provide
 		Episodes      int     `json:"episodes"`
 		PlaylistIndex *int    `json:"playlist_index"`
 		Lyrics        string  `json:"lyrics"`
+		PayRequired   bool    `json:"pay_required"`
 	}
 	_ = json.Unmarshal([]byte(tr.MetadataJSON), &meta)
 	return model.ProviderTrack{
@@ -180,6 +181,7 @@ func (s *Server) loadDomainTrack(ctx context.Context, sid string) (model.Provide
 		Episodes:      meta.Episodes,
 		PlaylistIndex: meta.PlaylistIndex,
 		Lyrics:        meta.Lyrics,
+		PayRequired:   meta.PayRequired,
 		Variants:      variants,
 	}, nil, true, nil
 }
@@ -643,6 +645,7 @@ func (s *Server) persistEpisodeTracks(ctx context.Context, snapRevision string, 
 				"episodes":       ep.Episodes,
 				"playlist_index": ep.PlaylistIndex,
 				"lyrics":         ep.Lyrics,
+				"pay_required":   ep.PayRequired,
 			})
 			trID, uErr := s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
 				Source:       ep.Source,
@@ -753,6 +756,7 @@ func (s *Server) resolveTrackEpisodes(ctx context.Context, sid string) ([]model.
 				"episode_ids":    epIDs,
 				"playlist_index": tr.PlaylistIndex,
 				"lyrics":         tr.Lyrics,
+				"pay_required":   tr.PayRequired,
 			})
 			_, _ = s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
 				ID:           ref.TargetID,
@@ -1197,10 +1201,11 @@ func (s *Server) handlePlaylistImport(w http.ResponseWriter, r *http.Request) {
 		seen[pt.PublicID] = true
 		if s.deps.Store != nil {
 			metaBytes, _ := json.Marshal(map[string]any{
-				"cover":      pt.Cover,
-				"size_bytes": pt.SizeBytes,
-				"size_label": pt.SizeLabel,
-				"episodes":   pt.Episodes,
+				"cover":        pt.Cover,
+				"size_bytes":   pt.SizeBytes,
+				"size_label":   pt.SizeLabel,
+				"episodes":     pt.Episodes,
+				"pay_required": pt.PayRequired,
 			})
 			trID, uErr := s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
 				Source:       pt.Source,

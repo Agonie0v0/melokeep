@@ -350,6 +350,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		},
 		TaskLookup:        a.lookupAgentTasks,
 		PendingReconciler: a.reconcileAgentPendingWrite,
+		Logger:            a.Logs.Push,
 	})
 	if err := agent.RegisterAgentHandlers(a.Operations, a.Agent); err != nil {
 		return nil, err
@@ -801,6 +802,14 @@ func (a *App) reconcileRoots(ctx context.Context, absRoots []string) ([]files.Ro
 			if root, _, rErr := files.RegisterRoot(rec.CanonicalPath, rec.ID); rErr == nil {
 				out = append(out, root)
 				seenID[rec.ID] = true
+			}
+		} else if !a.Cfg.ReadOnly && rec.Enabled && errors.Is(statErr, os.ErrNotExist) {
+			activeCount, countErr := a.Store.CountActiveAssetsByRoot(ctx, rec.ID)
+			if countErr == nil && activeCount == 0 {
+				const reason = "目录已不存在且无有效曲目，已自动停用"
+				if disErr := a.Store.SetRootEnabled(ctx, rec.ID, false, reason); disErr == nil && a.Logs != nil {
+					a.Logs.Push("info", fmt.Sprintf("已自动停用无效曲库旧目录：%s (id=%s)", rec.CanonicalPath, rec.ID), "library", rec.ID)
+				}
 			}
 		}
 	}

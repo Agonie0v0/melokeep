@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -219,6 +220,51 @@ type libraryRefreshResult struct {
 	UnhealthyRoots []string `json:"unhealthy_roots"`
 }
 
+func simplifyRootErrorReason(reason string) string {
+	trimmed := strings.TrimSpace(reason)
+	if trimmed == "" {
+		return "目录不可访问"
+	}
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.Contains(trimmed, "目录不存在"),
+		strings.Contains(lower, "no such file"),
+		strings.Contains(lower, "cannot find the file"),
+		strings.Contains(lower, "cannot find the path"),
+		strings.Contains(lower, "file does not exist"):
+		return "目录不存在"
+	case strings.Contains(trimmed, "无访问权限"),
+		strings.Contains(lower, "permission denied"),
+		strings.Contains(lower, "access is denied"):
+		return "无访问权限"
+	}
+	singleLine := strings.Join(strings.Fields(trimmed), " ")
+	runes := []rune(singleLine)
+	if len(runes) > 120 {
+		return string(runes[:120]) + "…"
+	}
+	return singleLine
+}
+
+func formatUnhealthyRootLabel(rt store.RootRecord, reason string) string {
+	target := strings.TrimSpace(rt.CanonicalPath)
+	if target == "" {
+		target = strings.TrimSpace(rt.ID)
+	}
+	summary := simplifyRootErrorReason(reason)
+	if target == "" {
+		return summary
+	}
+	return fmt.Sprintf("%s (%s)", target, summary)
+}
+
+func rootDisplayName(rt store.RootRecord) string {
+	if p := strings.TrimSpace(rt.CanonicalPath); p != "" {
+		return p
+	}
+	return rt.ID
+}
+
 func (s *Server) rescanLibraryRoots(ctx context.Context) (libraryRefreshResult, error) {
 	res := libraryRefreshResult{
 		UnhealthyRoots: []string{},
@@ -240,12 +286,23 @@ func (s *Server) rescanLibraryRoots(ctx context.Context) (libraryRefreshResult, 
 		res.RootsScanned++
 		stats, scanErr := s.deps.Indexer.ScanRoot(ctx, rt)
 		if scanErr != nil {
-			res.UnhealthyRoots = append(res.UnhealthyRoots, rt.ID)
-			s.pushLog("warning", fmt.Sprintf("手动刷新曲库目录失败 (%s): %v", rt.ID, scanErr), "library", rt.ID)
+			reason := scanErr.Error()
+			if errors.Is(scanErr, os.ErrNotExist) {
+				reason = "目录不存在"
+			} else if errors.Is(scanErr, os.ErrPermission) {
+				reason = "无访问权限"
+			}
+			res.UnhealthyRoots = append(res.UnhealthyRoots, formatUnhealthyRootLabel(rt, reason))
+			s.pushLog("warning", fmt.Sprintf("手动刷新曲库目录失败：%s (id=%s, 原因=%v)", rootDisplayName(rt), rt.ID, scanErr), "library", rt.ID)
 			continue
 		}
 		if !stats.Healthy {
-			res.UnhealthyRoots = append(res.UnhealthyRoots, rt.ID)
+			reason := strings.TrimSpace(stats.StructuralError)
+			if reason == "" {
+				reason = "目录状态异常"
+			}
+			res.UnhealthyRoots = append(res.UnhealthyRoots, formatUnhealthyRootLabel(rt, reason))
+			s.pushLog("warning", fmt.Sprintf("曲库目录异常：%s (id=%s, 原因=%s)", rootDisplayName(rt), rt.ID, reason), "library", rt.ID)
 		}
 		res.ScannedFiles += stats.ScannedFiles
 		res.UnchangedFiles += stats.UnchangedFiles

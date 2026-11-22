@@ -4,7 +4,7 @@ import { Navigation } from "./Navigation";
 import { AIAssistant } from "./AIAssistant";
 import { ThemePicker } from "./ThemePicker";
 import { RuntimeLogs } from "./RuntimeLogs";
-import { LibraryWorkspace } from "./LibraryWorkspace";
+import { LibraryWorkspace, type LibraryTab } from "./LibraryWorkspace";
 import { processingLabels } from "./LibrarySettings";
 import { PlaylistLibrary } from "./PlaylistLibrary";
 import { PlayerDock } from "./PlayerDock";
@@ -45,9 +45,12 @@ import {
   chunkArray,
   formatEpisodeBadge,
   getEpisodeNumber,
+  getFreeEpisodeBounds,
   isCollectionTrack,
+  isPayRequiredTrack,
   selectEpisodeRange,
   shouldUseBatchDownloadModal,
+  splitDownloadableTracks,
 } from "./audiobook-utils";
 import { formatLibraryRefreshNotice } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
@@ -143,7 +146,6 @@ const views = {
   queue: "下载队列",
   favorites: "我的收藏",
   files: "音乐库",
-  organize: "刮削整理",
   logs: "运行日志",
   settings: "设置",
 } as const;
@@ -440,14 +442,8 @@ export function App() {
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [queueStatus, setQueueStatus] = useState("all");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [workbenchTarget, setWorkbenchTarget] = useState<{
-    directoryMode: boolean;
-    directory: string;
-    nonce: number;
-  } | null>(null);
   const [assistantTracks, setAssistantTracks] = useState<Track[]>([]);
-  const [libraryTab, setLibraryTab] = useState("local");
-  const [processingTab, setProcessingTab] = useState("workbench");
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("local");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("engine");
   const [updateInfo, setUpdateInfo] = useState<SystemUpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -1046,8 +1042,7 @@ export function App() {
     };
   }, [loginRequired, hasActiveDownloads]);
   useEffect(() => {
-    if (view === "files" || view === "organize")
-      void loadLibraryFiles({ cursor: null });
+    if (view === "files") void loadLibraryFiles({ cursor: null });
   }, [view]);
   useEffect(() => {
     const element = audio.current;
@@ -1617,14 +1612,19 @@ export function App() {
       if (seq !== episodeLoadSeq.current) return;
       const pageData = normalizeEpisodePage(raw, 1, 100);
       setTracks(pageData.items);
+      const freeBounds = getFreeEpisodeBounds(pageData.items);
       const lastEp = pageData.items.length
         ? getEpisodeNumber(
             pageData.items[pageData.items.length - 1],
             pageData.items.length - 1,
           )
         : 100;
-      setEpRangeStart("1");
-      setEpRangeEnd(String(lastEp));
+      setEpRangeStart(
+        freeBounds.freeCount > 0 ? String(freeBounds.start) : "1",
+      );
+      setEpRangeEnd(
+        freeBounds.freeCount > 0 ? String(freeBounds.end) : String(lastEp),
+      );
       setEpisodeContext((prev) =>
         prev
           ? {
@@ -1772,10 +1772,22 @@ export function App() {
         ? rawEnd
         : getEpisodeNumber(tracks[tracks.length - 1], tracks.length - 1);
     const matched = selectEpisodeRange(tracks, start, end);
-    setSelected(new Set(matched.map((item) => item.id)));
     if (!matched.length) {
+      setSelected(new Set());
       setNotice(
         `当前已加载分集中没有第 ${Math.min(start, end)}–${Math.max(start, end)} 集`,
+      );
+      return;
+    }
+    const { downloadable, payBlocked } = splitDownloadableTracks(matched);
+    setSelected(new Set(downloadable.map((item) => item.id)));
+    if (!downloadable.length && payBlocked.length) {
+      setNotice(
+        `第 ${Math.min(start, end)}–${Math.max(start, end)} 集共 ${payBlocked.length} 集均需付费或登录权限，未勾选下载（可在线试听）`,
+      );
+    } else if (payBlocked.length) {
+      setNotice(
+        `已勾选区间内 ${downloadable.length} 集免费章节（已跳过 ${payBlocked.length} 集付费/需登录章节）`,
       );
     }
   }
@@ -1786,6 +1798,14 @@ export function App() {
     batchDownloadAbortRef.current = null;
     setBatchDownload(null);
   }
+  const episodeFreeStats = useMemo(
+    () => (episodeContext ? getFreeEpisodeBounds(tracks) : null),
+    [episodeContext, tracks],
+  );
+  const batchFreeStats = useMemo(
+    () => (batchDownload ? getFreeEpisodeBounds(batchDownload.items) : null),
+    [batchDownload],
+  );
   const batchMatchedItems = useMemo(() => {
     if (!batchDownload) return [];
     if (!batchDownload.isAudiobook) return batchDownload.items;
@@ -1795,6 +1815,15 @@ export function App() {
     if (rawStart <= 0 && rawEnd <= 0) return [];
     return selectEpisodeRange(batchDownload.items, rawStart, rawEnd);
   }, [batchDownload]);
+  const { downloadable: freeMatchedItems, payBlocked: paidSkippedInRange } =
+    useMemo(
+      () => splitDownloadableTracks(batchMatchedItems),
+      [batchMatchedItems],
+    );
+  const { downloadable: freeBatchItems } = useMemo(
+    () => splitDownloadableTracks(batchDownload?.items ?? []),
+    [batchDownload],
+  );
   async function startWholeBookDownload(parent: Track) {
     const seq = ++batchDownloadSeqRef.current;
     batchDownloadAbortRef.current?.abort();
@@ -1811,6 +1840,7 @@ export function App() {
     if (canReuseLoaded) {
       const totalEp =
         episodeContext!.total > 0 ? episodeContext!.total : tracks.length;
+      const freeBounds = getFreeEpisodeBounds(tracks);
       setBatchDownload({
         title: `下载整部：${parent.title}`,
         isAudiobook: true,
@@ -1825,8 +1855,10 @@ export function App() {
         audiobookLayout: true,
         skipAutoOrganize: true,
         bookTitle,
-        rangeStart: "1",
-        rangeEnd: String(tracks.length),
+        rangeStart: String(freeBounds.start),
+        rangeEnd: String(
+          freeBounds.freeCount > 0 ? freeBounds.end : tracks.length,
+        ),
         submitting: false,
         submitDone: 0,
         submitTotal: 0,
@@ -1917,6 +1949,7 @@ export function App() {
         return;
       }
       const finalTotal = knownTotal > 0 ? knownTotal : allItems.length;
+      const freeBounds = getFreeEpisodeBounds(allItems);
       setBatchDownload((prev) =>
         prev
           ? {
@@ -1925,8 +1958,10 @@ export function App() {
               totalEpisodes: finalTotal,
               loading: false,
               loadedCount: allItems.length,
-              rangeStart: "1",
-              rangeEnd: String(allItems.length),
+              rangeStart: String(freeBounds.start),
+              rangeEnd: String(
+                freeBounds.freeCount > 0 ? freeBounds.end : allItems.length,
+              ),
             }
           : null,
       );
@@ -1951,8 +1986,8 @@ export function App() {
       return;
     }
     const targets = batchDownload.isAudiobook
-      ? batchMatchedItems
-      : batchDownload.items;
+      ? freeMatchedItems
+      : freeBatchItems;
     if (!targets.length) return;
     const payloads = buildBatchDownloadPayloads(targets, {
       preferredQuality: batchDownload.preferredQuality,
@@ -2010,13 +2045,13 @@ export function App() {
     }
   }
   async function chooseDownload(items: Track[]) {
-    const skippedCount = items.filter(
+    const skippedLibraryCount = items.filter(
       (track) => track.source === "navidrome" || track.source === "local",
     ).length;
-    const downloadable = items.filter(
+    const remoteItems = items.filter(
       (track) => track.source !== "navidrome" && track.source !== "local",
     );
-    if (!downloadable.length) {
+    if (!remoteItems.length) {
       if (items.some((track) => track.source === "navidrome")) {
         setNotice("Navidrome 已提供原文件，可通过曲目旁的下载按钮保存到本机。");
       } else if (items.some((track) => track.source === "local")) {
@@ -2026,8 +2061,23 @@ export function App() {
       }
       return;
     }
-    if (skippedCount > 0) {
-      setNotice(`已自动跳过 ${skippedCount} 首已在本地/Navidrome 的曲目`);
+    const { downloadable, payBlocked } = splitDownloadableTracks(remoteItems);
+    if (!downloadable.length) {
+      setNotice(
+        "该内容需要对应音源的付费或登录权限，请先在插件设置中配置有效凭证；免费章节可直接下载",
+      );
+      return;
+    }
+    if (skippedLibraryCount > 0 && payBlocked.length > 0) {
+      setNotice(
+        `已自动跳过 ${skippedLibraryCount} 首本地/Navidrome 曲目及 ${payBlocked.length} 首付费/需登录曲目`,
+      );
+    } else if (payBlocked.length > 0) {
+      setNotice(`已自动跳过 ${payBlocked.length} 首付费/需登录曲目`);
+    } else if (skippedLibraryCount > 0) {
+      setNotice(
+        `已自动跳过 ${skippedLibraryCount} 首已在本地/Navidrome 的曲目`,
+      );
     }
     if (downloadable.length === 1 && isCollectionTrack(downloadable[0])) {
       await startWholeBookDownload(downloadable[0]);
@@ -2088,10 +2138,12 @@ export function App() {
       ) &&
       !t.qualities.some((q) => q.evidence === "engine");
     try {
-      if (items.some(needsVersionResolve)) {
-        setNotice("正在确认可下载音质…");
-      } else if (items.some(needsSizeProbe) && skippedCount === 0) {
-        setNotice("正在获取音质文件大小…");
+      if (skippedLibraryCount === 0 && payBlocked.length === 0) {
+        if (items.some(needsVersionResolve)) {
+          setNotice("正在确认可下载音质…");
+        } else if (items.some(needsSizeProbe)) {
+          setNotice("正在获取音质文件大小…");
+        }
       }
       const prepared: Track[] = [];
       for (let offset = 0; offset < items.length; offset += 4) {
@@ -2793,6 +2845,9 @@ export function App() {
       </span>
     </div>
   );
+  const selectableDisplay = display.filter(
+    (t) => isCollectionTrack(t) || !isPayRequiredTrack(t),
+  );
   const trackTable = (
     <>
       <section className="results">
@@ -2820,6 +2875,9 @@ export function App() {
                       : episodeContext.total > 0
                         ? `已加载 ${tracks.length} / ${episodeContext.total} 集`
                         : `已加载 ${tracks.length} 集`}
+                    {episodeFreeStats && episodeFreeStats.paidCount > 0
+                      ? ` · 可免费下载 ${episodeFreeStats.freeCount} 集（付费 ${episodeFreeStats.paidCount} 集仅支持试听/需凭证）`
+                      : ""}
                   </span>
                 </div>
               </div>
@@ -2910,7 +2968,20 @@ export function App() {
                 type="button"
                 className="secondary"
                 disabled={!tracks.length || episodeContext.loading}
-                onClick={() => setSelected(new Set(tracks.map((t) => t.id)))}
+                onClick={() => {
+                  const { downloadable, payBlocked } =
+                    splitDownloadableTracks(tracks);
+                  setSelected(new Set(downloadable.map((t) => t.id)));
+                  if (!downloadable.length && payBlocked.length) {
+                    setNotice(
+                      `当前已加载的 ${payBlocked.length} 集均需付费或登录权限；仍可直接点击单集试听`,
+                    );
+                  } else if (payBlocked.length) {
+                    setNotice(
+                      `已勾选 ${downloadable.length} 集免费章节（已自动跳过 ${payBlocked.length} 集付费/需登录章节）`,
+                    );
+                  }
+                }}
               >
                 全选已加载
               </button>
@@ -2977,16 +3048,30 @@ export function App() {
                   aria-label="全选当前结果"
                   type="checkbox"
                   checked={
-                    display.length > 0 &&
-                    display.every((t) => selected.has(t.id))
+                    selectableDisplay.length > 0 &&
+                    selectableDisplay.every((t) => selected.has(t.id))
                   }
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked
-                        ? new Set(display.map((t) => t.id))
-                        : new Set(),
-                    )
-                  }
+                  onChange={(e) => {
+                    if (!e.target.checked) {
+                      setSelected(new Set());
+                      return;
+                    }
+                    if (!selectableDisplay.length && display.length > 0) {
+                      setNotice(
+                        "当前结果均需付费或登录权限；仍可直接点击试听或单独勾选加入歌单",
+                      );
+                      setSelected(new Set());
+                      return;
+                    }
+                    setSelected(new Set(selectableDisplay.map((t) => t.id)));
+                    const blockedCount =
+                      display.length - selectableDisplay.length;
+                    if (blockedCount > 0) {
+                      setNotice(
+                        `已全选 ${selectableDisplay.length} 首可下载曲目（已跳过 ${blockedCount} 首付费/需登录曲目）`,
+                      );
+                    }
+                  }}
                 />
               </th>
               <th className="col-title">曲目</th>
@@ -3006,6 +3091,8 @@ export function App() {
                 : null;
               const extraCount = Math.max(0, track.qualities.length - 1);
               const sizeText = resolveTrackDisplaySize(track);
+              const isPaywallRow =
+                !isCollectionTrack(track) && isPayRequiredTrack(track);
               return (
                 <tr
                   key={`${track.id}:${index}`}
@@ -3038,6 +3125,11 @@ export function App() {
                             track={track}
                             onPlay={() => void play(track, display)}
                           />
+                          {isPaywallRow && (
+                            <span className="pay-required-badge">
+                              需登录 / 付费
+                            </span>
+                          )}
                         </div>
                         {isCollectionTrack(track) && (
                           <div className="episode-inline-actions">
@@ -3107,6 +3199,22 @@ export function App() {
                       >
                         <span className="quality-inline is-collection">
                           整部合集
+                        </span>
+                      </button>
+                    ) : isPaywallRow ? (
+                      <button
+                        type="button"
+                        className="quality quality-paywall"
+                        aria-label={`${track.title} 需登录或付费`}
+                        title="付费或需登录内容，请先在插件设置中配置有效凭证"
+                        onClick={() =>
+                          setNotice(
+                            "该内容需要对应音源的付费或登录权限，请先在插件设置中配置有效凭证；免费章节可直接下载",
+                          )
+                        }
+                      >
+                        <span className="quality-inline is-paywall">
+                          需登录 / 付费
                         </span>
                       </button>
                     ) : (
@@ -3208,7 +3316,14 @@ export function App() {
                         <button
                           className="icon-button"
                           aria-label={`下载 ${track.title}`}
-                          title={isCollectionTrack(track) ? "整部下载" : "下载"}
+                          disabled={isPaywallRow}
+                          title={
+                            isCollectionTrack(track)
+                              ? "整部下载"
+                              : isPaywallRow
+                                ? "付费或需登录内容，请先在插件设置中配置有效凭证"
+                                : "下载"
+                          }
                           onClick={() =>
                             isCollectionTrack(track)
                               ? void startWholeBookDownload(track)
@@ -4351,34 +4466,11 @@ export function App() {
               </form>
             </section>
           )}
-          {(view === "files" || view === "organize") && (
+          {view === "files" && (
             <LibraryWorkspace
-              mode={view === "files" ? "library" : "processing"}
-              tab={view === "files" ? libraryTab : processingTab}
-              setTab={view === "files" ? setLibraryTab : setProcessingTab}
+              tab={libraryTab}
+              setTab={setLibraryTab}
               openSettings={openSettings}
-              initialDirectoryMode={workbenchTarget?.directoryMode}
-              initialDirectory={workbenchTarget?.directory}
-              initialDirectoryKey={workbenchTarget?.nonce}
-              process={(items) => {
-                setSelectedFiles(items.map((file) => file.path));
-                setWorkbenchTarget((prev) => ({
-                  directoryMode: false,
-                  directory: prev?.directory ?? "incoming",
-                  nonce: (prev?.nonce ?? 0) + 1,
-                }));
-                setProcessingTab("workbench");
-                setView("organize");
-              }}
-              processDirectory={(scopeDir) => {
-                setWorkbenchTarget((prev) => ({
-                  directoryMode: true,
-                  directory: scopeDir,
-                  nonce: (prev?.nonce ?? 0) + 1,
-                }));
-                setProcessingTab("workbench");
-                setView("organize");
-              }}
               files={files}
               selected={selectedFiles}
               setSelected={setSelectedFiles}
@@ -4505,7 +4597,14 @@ export function App() {
             <AIAssistant
               openSettings={() => openSettings("ai")}
               changed={load}
-              navigate={setView}
+              navigate={(target) => {
+                if (target === "organize" || target === "library-jobs") {
+                  setLibraryTab("jobs");
+                  setView("files");
+                } else {
+                  setView(target);
+                }
+              }}
               play={(track) => void play(track)}
               download={(track) => void chooseDownload([track])}
               contextTracks={assistantTracks}
@@ -4735,7 +4834,9 @@ export function App() {
                   </span>
                   <small>
                     {batchDownload.isAudiobook
-                      ? `共 ${batchDownload.items.length} 集可用 · 下载时自动按策略解析`
+                      ? batchFreeStats && batchFreeStats.paidCount > 0
+                        ? `共 ${batchDownload.items.length} 集（可免登录下载 ${batchFreeStats.freeCount} 集 · 付费 ${batchFreeStats.paidCount} 集）· 下载时自动按策略解析`
+                        : `共 ${batchDownload.items.length} 集可用 · 下载时自动按策略解析`
                       : "跳过逐首预探测，直接按策略解析入队"}
                   </small>
                 </div>
@@ -4835,10 +4936,35 @@ export function App() {
                       />
                       <span>集</span>
                       <span className="batch-range-matched">
-                        已匹配 {batchMatchedItems.length} 集
+                        {paidSkippedInRange.length > 0
+                          ? `可下载 ${freeMatchedItems.length} 集（已拦截 ${paidSkippedInRange.length} 集）`
+                          : `已匹配 ${freeMatchedItems.length} 集`}
                       </span>
                     </div>
                   )}
+                {batchDownload.isAudiobook &&
+                  batchDownload.items.length > 0 &&
+                  batchFreeStats &&
+                  (batchFreeStats.freeCount === 0 ? (
+                    <p className="batch-pay-notice is-blocked" role="status">
+                      整部共 {batchDownload.items.length}{" "}
+                      集均需对应音源的付费或登录权限，暂无可免登录下载的免费章节；请先在插件设置中配置有效凭证，或返回分集列表在线试听。
+                    </p>
+                  ) : paidSkippedInRange.length > 0 ? (
+                    <p className="batch-pay-notice" role="status">
+                      当前区间内可免登录下载 {freeMatchedItems.length}{" "}
+                      集（已自动拦截 {paidSkippedInRange.length}{" "}
+                      集付费/需登录章节，不会加入失败队列）
+                    </p>
+                  ) : batchFreeStats.paidCount > 0 ? (
+                    <p className="batch-pay-notice" role="status">
+                      全书共 {batchDownload.items.length} 集，其中{" "}
+                      {batchFreeStats.freeCount} 集可免登录下载（已自动定位至第{" "}
+                      {batchFreeStats.start}–{batchFreeStats.end} 集），另有{" "}
+                      {batchFreeStats.paidCount}{" "}
+                      集付费/需登录章节不会加入失败队列。
+                    </p>
+                  ) : null)}
                 <div className="batch-toggles">
                   <label className="batch-toggle-item">
                     <input
@@ -4901,13 +5027,15 @@ export function App() {
                       className="primary"
                       disabled={
                         batchDownload.submitting ||
-                        (batchDownload.isAudiobook && !batchMatchedItems.length)
+                        (batchDownload.isAudiobook
+                          ? !freeMatchedItems.length
+                          : !freeBatchItems.length)
                       }
                       onClick={() => void submitBatchDownload()}
                     >
                       {batchDownload.submitting
                         ? `正在加入 (${batchDownload.submitDone}/${batchDownload.submitTotal})…`
-                        : `加入下载队列（${batchDownload.isAudiobook ? batchMatchedItems.length : batchDownload.items.length}）`}
+                        : `加入下载队列（${batchDownload.isAudiobook ? freeMatchedItems.length : freeBatchItems.length}）`}
                     </button>
                   ) : (
                     batchDownload.parentTrack && (
