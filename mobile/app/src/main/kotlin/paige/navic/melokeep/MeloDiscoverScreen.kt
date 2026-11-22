@@ -893,9 +893,11 @@ private fun DiscoverSearchModeBody(
 		}
 
 		// 底部多选批处理坞（避让底栏，有正在播放的悬浮播放舱时自动抬升）
+		val preferenceManager = koinInject<PreferenceManager>()
+		val showPlayerDeck = (currentSongId != null && !isPlayerPaused) || !preferenceManager.hideIfIdle
 		val multiSelectBottomPadding = when {
 			nested -> 16.dp
-			currentSongId != null -> MeloBottomChromeClearance
+			showPlayerDeck -> MeloBottomChromeClearance
 			else -> 86.dp
 		}
 		AnimatedVisibility(

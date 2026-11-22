@@ -2275,7 +2275,7 @@ internal fun SettingsInterfaceGesturesPanel(
 					MeloHairlineDivider(startIndent = 16.dp)
 					SettingsToggleRow(
 						title = "无播放时隐藏播放栏",
-						subtitle = "当前没有正在播放的歌曲时自动隐藏底部播放栏",
+						subtitle = "未播放或暂停时自动隐藏底部播放栏",
 						checked = preferenceManager.hideIfIdle,
 						onCheckedChange = { preferenceManager.hideIfIdle = it }
 					)

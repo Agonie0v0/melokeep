@@ -1846,6 +1846,46 @@ internal fun IosSettingsThemeAppearanceSheet(
 								),
 							)
 						}
+						IosHairlineDivider(startIndent = 16.dp)
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clickable {
+									subsonicManager.updatePrefs {
+										it.copy(hidePlayerIfIdle = !it.hidePlayerIfIdle)
+									}
+								}
+								.padding(horizontal = 16.dp, vertical = 12.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "无播放时隐藏播放栏",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.Medium,
+									color = MaterialTheme.colorScheme.onSurface,
+								)
+								Text(
+									text = "未播放或暂停时自动隐藏底部播放栏",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Switch(
+								checked = prefs.hidePlayerIfIdle,
+								onCheckedChange = { checked ->
+									subsonicManager.updatePrefs { it.copy(hidePlayerIfIdle = checked) }
+								},
+								colors = SwitchDefaults.colors(
+									checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+									checkedTrackColor = MaterialTheme.colorScheme.primary,
+								),
+							)
+						}
 					}
 				}
 			}

@@ -151,6 +151,7 @@ data class IosPlaybackPrefs(
 	val themeMode: IosThemeMode = IosThemeMode.SYSTEM,
 	val amoledBlack: Boolean = false,
 	val hideBottomBarOnScroll: Boolean = true,
+	val hidePlayerIfIdle: Boolean = true,
 )
 
 internal fun normalizeIosLyricsHexOrEmpty(raw: String): String {

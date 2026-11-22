@@ -541,7 +541,9 @@ class IosAudioPlayer(
 
 	fun clearQueue() {
 		loadJob?.cancel()
+		loadJob = null
 		lyricsJob?.cancel()
+		lyricsJob = null
 		runOnMain {
 			queuePlayer.pause()
 			queuePlayer.removeAllItems()
@@ -1234,7 +1236,12 @@ class IosAudioPlayer(
 			try {
 				val nsUrl = resolvePlayableNsUrl(track)
 					?: throw IllegalStateException("无法获取该曲目的播放地址")
+				val launchedJob = this@launch.coroutineContext[Job]
+				if (!isActive) return@launch
 				runOnMain {
+					if (launchedJob?.isCancelled == true || loadJob !== launchedJob || _state.value.currentTrack?.id != track.id) {
+						return@runOnMain
+					}
 					configureAudioSessionOnMain()
 					val item = AVPlayerItem(uRL = nsUrl)
 					queuePlayer.removeAllItems()
@@ -1303,6 +1310,7 @@ class IosAudioPlayer(
 			_state.update {
 				it.copy(
 					isPlaying = false,
+					isLoading = false,
 					sleepTimer = IosSleepTimerState(),
 					noticeMessage = "本首播放完毕，已停止",
 				)
@@ -1329,9 +1337,12 @@ class IosAudioPlayer(
 			_state.update { it.copy(currentIndex = nextIndex) }
 			loadAndPlayTrackAt(nextIndex)
 		} else {
+			loadJob?.cancel()
+			loadJob = null
+			queuePlayer.pause()
 			val finalDur = _progressFlow.value.durationMs.coerceAtLeast(current.durationMs)
 			_progressFlow.value = IosPlaybackProgress(positionMs = finalDur, durationMs = finalDur)
-			_state.update { it.copy(isPlaying = false, positionMs = finalDur) }
+			_state.update { it.copy(isPlaying = false, isLoading = false, positionMs = finalDur) }
 			updateNowPlayingMetadata()
 		}
 	}
@@ -1360,7 +1371,7 @@ class IosAudioPlayer(
 	}
 
 	private fun togglePlayPauseOnMain() {
-		if (_state.value.isPlaying) {
+		if (_state.value.isPlaying || _state.value.isLoading) {
 			pauseOnMain()
 		} else {
 			resumeOnMain()
@@ -1368,8 +1379,10 @@ class IosAudioPlayer(
 	}
 
 	private fun pauseOnMain() {
+		loadJob?.cancel()
+		loadJob = null
 		queuePlayer.pause()
-		_state.update { it.copy(isPlaying = false) }
+		_state.update { it.copy(isPlaying = false, isLoading = false) }
 		updateNowPlayingMetadata()
 	}
 

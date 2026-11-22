@@ -245,6 +245,8 @@ fun MeloKeepIosApp(
 	}
 
 	val currentTrack = playerState.currentTrack
+	val showMiniPlayer = currentTrack != null &&
+		(!prefs.hidePlayerIfIdle || playerState.isPlaying || playerState.isLoading)
 	val activeCoverUrl = currentTrack?.coverUrl ?: subsonicManager.buildCoverUrl(currentTrack?.coverArtId, size = 256)
 	val seedColor = rememberExtractedSeedColor(activeCoverUrl, subsonicManager)
 
@@ -317,7 +319,7 @@ fun MeloKeepIosApp(
 		CompositionLocalProvider(LocalIosMeloSettingsStore provides settingsStore) {
 			val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 			val chromeBottomPadding = PaddingValues(
-				bottom = navBottom + if (currentTrack != null) MeloBottomChromeClearance else 88.dp,
+				bottom = navBottom + if (showMiniPlayer) MeloBottomChromeClearance else 88.dp,
 			)
 			val scrollThresholdPx = with(LocalDensity.current) { 52.dp.toPx() }
 			val bottomBarScrollManager = remember(scrollThresholdPx) {
@@ -452,6 +454,7 @@ fun MeloKeepIosApp(
 			) {
 				IosPersistentBottomOverlay(
 					currentTrack = currentTrack,
+					showMiniPlayer = showMiniPlayer,
 					isPlaying = playerState.isPlaying,
 					isLoading = playerState.isLoading,
 					progressFlow = audioPlayer.progressFlow,
@@ -539,7 +542,7 @@ fun MeloKeepIosApp(
 				nowPlayingExpanded -> navBottom + 24.dp
 				showOnboarding -> navBottom + 84.dp
 				bottomChromeHiddenByScroll -> navBottom + 16.dp
-				currentTrack != null -> navBottom + MeloBottomChromeClearance + 4.dp
+				showMiniPlayer -> navBottom + MeloBottomChromeClearance + 4.dp
 				else -> navBottom + 90.dp
 			}
 			SnackbarHost(
@@ -631,6 +634,7 @@ private class IosBottomBarScrollManager(thresholdPx: Float) {
 @Composable
 private fun IosPersistentBottomOverlay(
 	currentTrack: IosTrackItem?,
+	showMiniPlayer: Boolean,
 	isPlaying: Boolean,
 	isLoading: Boolean,
 	progressFlow: StateFlow<IosPlaybackProgress>,
@@ -689,7 +693,7 @@ private fun IosPersistentBottomOverlay(
 			verticalArrangement = Arrangement.spacedBy(8.dp),
 		) {
 			AnimatedVisibility(
-				visible = currentTrack != null,
+				visible = showMiniPlayer,
 				enter = fadeIn(tween(160)) + slideInVertically(tween(180)) { it / 2 },
 				exit = fadeOut(tween(120)) + slideOutVertically(tween(140)) { it / 2 },
 			) {

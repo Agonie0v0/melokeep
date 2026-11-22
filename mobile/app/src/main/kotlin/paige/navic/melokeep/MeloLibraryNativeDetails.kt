@@ -2808,9 +2808,13 @@ internal fun rememberBatchDockBottomClearance(
 	val player = koinInject<MediaPlayer>()
 	val preferenceManager = koinInject<PreferenceManager>()
 	val sizeClass = LocalSizeClass.current
-	val hasCurrentSong by remember(player) {
-		player.uiState.map { it.currentSong != null }.distinctUntilChanged()
-	}.collectAsStateWithLifecycle(initialValue = false)
+	val isPlaybackActive by remember(player) {
+		player.uiState
+			.map { it.currentSong != null && !it.isPaused }
+			.distinctUntilChanged()
+	}.collectAsStateWithLifecycle(
+		initialValue = player.uiState.value.let { it.currentSong != null && !it.isPaused }
+	)
 
 	val topEntry = backStack.lastOrNull()
 	val isAtRootShell = topEntry is Screen.Library
@@ -2820,7 +2824,7 @@ internal fun rememberBatchDockBottomClearance(
 		preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens
 	val hasPlayerDeck = !isFullscreenNoPlayer &&
 		allowPlayerOnScreen &&
-		(hasCurrentSong || !preferenceManager.hideIfIdle)
+		(isPlaybackActive || !preferenceManager.hideIfIdle)
 	val hasNavDock = isAtRootShell && isCompact
 
 	return when {

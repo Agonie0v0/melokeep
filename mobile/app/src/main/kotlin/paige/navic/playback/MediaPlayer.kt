@@ -133,6 +133,8 @@ class MediaPlayer(
 					shuffleOrder = order,
 					currentIndex = if (songs.isEmpty()) -1 else index,
 					currentSong = songs.getOrNull(index),
+					isPaused = songs.isEmpty(),
+					isLoading = if (songs.isEmpty()) false else state.isLoading,
 					progress = 0f
 				)
 			}
@@ -360,6 +362,10 @@ class MediaPlayer(
 
 				override fun onPlaybackStateChanged(playbackState: Int) {
 					_uiState.update { it.copy(isLoading = playbackState == Player.STATE_BUFFERING) }
+					updatePlaybackState()
+				}
+
+				override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
 					updatePlaybackState()
 				}
 
@@ -819,7 +825,9 @@ class MediaPlayer(
 				queue = newQueue,
 				shuffleOrder = newOrder,
 				currentIndex = newIndex,
-				currentSong = if (newIndex == -1) null else newQueue[newIndex]
+				currentSong = if (newIndex == -1) null else newQueue[newIndex],
+				isPaused = if (newIndex == -1) true else it.isPaused,
+				isLoading = if (newIndex == -1) false else it.isLoading
 			)
 		}
 		controller?.removeMediaItem(normalIndex)
@@ -872,6 +880,8 @@ class MediaPlayer(
 				shuffleOrder = emptyList(),
 				currentSong = null,
 				currentIndex = -1,
+				isPaused = true,
+				isLoading = false,
 				progress = 0f
 			)
 		}
@@ -888,6 +898,14 @@ class MediaPlayer(
 		controller?.let { player ->
 			if (normalIndex in 0 until player.mediaItemCount) {
 				_progressFlow.value = 0f
+				_uiState.update {
+					it.copy(
+						currentIndex = normalIndex,
+						currentSong = it.queue.getOrNull(normalIndex),
+						isPaused = false,
+						progress = 0f
+					)
+				}
 				player.seekTo(normalIndex, 0L)
 				player.play()
 			}
@@ -1009,6 +1027,7 @@ class MediaPlayer(
 				shuffleOrder = if (state.isShuffleEnabled) listOf(0) else emptyList(),
 				currentIndex = 0,
 				currentSong = dummyRadioSong,
+				isPaused = false,
 				progress = 0f,
 				isLoading = true
 			)
@@ -1033,6 +1052,7 @@ class MediaPlayer(
 				shuffleOrder = order,
 				currentIndex = startIndex,
 				currentSong = songs[startIndex],
+				isPaused = false,
 				isShuffleEnabled = true,
 				progress = 0f
 			)
@@ -1048,6 +1068,7 @@ class MediaPlayer(
 	}
 
 	fun pause() = launch(Dispatchers.Main.immediate) {
+		_uiState.update { it.copy(isPaused = true, isLoading = false) }
 		controller?.pause()
 	}
 
@@ -1055,6 +1076,9 @@ class MediaPlayer(
 		controller?.let { player ->
 			if (player.playbackState == Player.STATE_ENDED) {
 				player.seekTo(uiState.value.shuffleOrder.firstOrNull() ?: 0, 0L)
+			}
+			if (player.mediaItemCount > 0 && uiState.value.currentSong != null) {
+				_uiState.update { it.copy(isPaused = false) }
 			}
 			player.play()
 		}

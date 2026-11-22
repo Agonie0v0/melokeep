@@ -168,10 +168,11 @@ fun MiniPlayer(
 	}
 
 	val hasSong = song != null
+	val isPlaybackActive = hasSong && !miniState.isPaused
 	val isInteractive = enabled && hasSong
 
 	AnimatedVisibility(
-		visible = hasSong || !preferenceManager.hideIfIdle,
+		visible = isPlaybackActive || !preferenceManager.hideIfIdle,
 		modifier = modifier
 	) {
 		Swiper(

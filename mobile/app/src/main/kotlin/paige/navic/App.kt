@@ -193,11 +193,13 @@ fun App() {
 	val sessionState by sessionManager.sessionState.collectAsStateWithLifecycle()
 	val meloConfig by meloSettingsStore.config.collectAsStateWithLifecycle()
 	val onboardingDismissed by meloSettingsStore.onboardingDismissed.collectAsStateWithLifecycle()
-	val hasCurrentSong by remember(player) {
+	val isPlaybackActive by remember(player) {
 		player.uiState
-			.map { it.currentSong != null }
+			.map { it.currentSong != null && !it.isPaused }
 			.distinctUntilChanged()
-	}.collectAsStateWithLifecycle(initialValue = player.uiState.value.currentSong != null)
+	}.collectAsStateWithLifecycle(
+		initialValue = player.uiState.value.let { it.currentSong != null && !it.isPaused }
+	)
 
 	LaunchedEffect(meloConfig.isAuthenticated) {
 		if (meloConfig.isAuthenticated) {
@@ -290,7 +292,7 @@ fun App() {
 		topEntry is Screen.DailyMix
 	val showPlayerDeck = !isOverlayOrFullscreen &&
 		(isAtRootShell || preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens) &&
-		(hasCurrentSong || !preferenceManager.hideIfIdle)
+		(isPlaybackActive || !preferenceManager.hideIfIdle)
 
 	val selectRootTab: (MeloRootTab) -> Unit = remember(backStack, rootViewModel, scrollManager) {
 		{ targetTab ->
