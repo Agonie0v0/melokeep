@@ -130,7 +130,7 @@ fun IosHubProfileRoute(
 	LaunchedEffect(appVersion) {
 		if (latestRelease == null) {
 			try {
-				latestRelease = MeloAppUpdateChecker.fetchLatestRelease()
+				latestRelease = MeloAppUpdateChecker.fetchLatestIosRelease()
 			} catch (e: CancellationException) {
 				throw e
 			} catch (_: Throwable) {

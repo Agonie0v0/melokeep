@@ -2369,6 +2369,228 @@ class MeloKeepSharedTest {
 	}
 
 	@Test
+	fun updateCheckerSelectsLatestStableReleaseMatchingPlatformAssetAndFallsBackCleanly() = runTest {
+		val requestedUrls = mutableListOf<String>()
+		val capturedAccepts = mutableListOf<String?>()
+		val capturedUas = mutableListOf<String?>()
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+
+		// Case 1: draft (v1.0.13 w/ apk+ipa), prerelease (v1.0.12-rc.1 w/ apk+ipa),
+		// stable w/o assets (v1.0.11), stable w/ apk+ipa (v1.0.10), older stable w/ apk+ipa (v1.0.8)
+		var responseMode = "mixed"
+		val engine = MockEngine { request ->
+			val url = request.url.toString()
+			requestedUrls += url
+			capturedAccepts += request.headers[HttpHeaders.Accept]
+			capturedUas += request.headers[HttpHeaders.UserAgent]
+			when {
+				url.endsWith("/releases?per_page=20") && responseMode == "mixed" -> respond(
+					content = """
+						[
+						  {
+						    "tag_name": "v1.0.13",
+						    "name": "Draft 1.0.13",
+						    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.13",
+						    "draft": true,
+						    "prerelease": false,
+						    "assets": [
+						      {
+						        "name": "MeloKeep-v1.0.13-android-release.apk",
+						        "browser_download_url": "https://example.com/v1.0.13.apk",
+						        "size": 16000000
+						      },
+						      {
+						        "name": "MeloKeep-v1.0.13-ios.ipa",
+						        "browser_download_url": "https://example.com/v1.0.13.ipa",
+						        "size": 22000000
+						      }
+						    ]
+						  },
+						  {
+						    "tag_name": "v1.0.12-rc.1",
+						    "name": "RC 1.0.12-rc.1",
+						    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.12-rc.1",
+						    "draft": false,
+						    "prerelease": true,
+						    "assets": [
+						      {
+						        "name": "MeloKeep-v1.0.12-rc.1-android-release.apk",
+						        "browser_download_url": "https://example.com/v1.0.12-rc.1.apk",
+						        "size": 16000000
+						      },
+						      {
+						        "name": "MeloKeep-v1.0.12-rc.1-ios.ipa",
+						        "browser_download_url": "https://example.com/v1.0.12-rc.1.ipa",
+						        "size": 22000000
+						      }
+						    ]
+						  },
+						  {
+						    "tag_name": "v1.0.11",
+						    "name": "Stable 1.0.11 without assets",
+						    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.11",
+						    "draft": false,
+						    "prerelease": false,
+						    "assets": []
+						  },
+						  {
+						    "tag_name": "v1.0.10",
+						    "name": "Stable 1.0.10",
+						    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.10",
+						    "draft": false,
+						    "prerelease": false,
+						    "assets": [
+						      {
+						        "name": "MeloKeep-v1.0.10-android-release.apk",
+						        "browser_download_url": "https://example.com/v1.0.10.apk",
+						        "size": 15000000
+						      },
+						      {
+						        "name": "MeloKeep-v1.0.10-ios.ipa",
+						        "browser_download_url": "https://example.com/v1.0.10.ipa",
+						        "size": 21000000
+						      }
+						    ]
+						  },
+						  {
+						    "tag_name": "v1.0.8",
+						    "name": "Stable 1.0.8",
+						    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.8",
+						    "draft": false,
+						    "prerelease": false,
+						    "assets": [
+						      {
+						        "name": "MeloKeep-v1.0.8-android-release.apk",
+						        "browser_download_url": "https://example.com/v1.0.8.apk",
+						        "size": 14000000
+						      },
+						      {
+						        "name": "MeloKeep-v1.0.8-ios.ipa",
+						        "browser_download_url": "https://example.com/v1.0.8.ipa",
+						        "size": 20000000
+						      }
+						    ]
+						  }
+						]
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+
+				url.endsWith("/releases?per_page=20") && responseMode == "no_stable_assets" -> respond(
+					content = """
+						[
+						  {
+						    "tag_name": "v1.0.13",
+						    "draft": true,
+						    "prerelease": false,
+						    "assets": [
+						      { "name": "MeloKeep-v1.0.13.apk", "browser_download_url": "https://example.com/v1.0.13.apk" },
+						      { "name": "MeloKeep-v1.0.13.ipa", "browser_download_url": "https://example.com/v1.0.13.ipa" }
+						    ]
+						  },
+						  {
+						    "tag_name": "v1.0.12-rc.1",
+						    "draft": false,
+						    "prerelease": true,
+						    "assets": [
+						      { "name": "MeloKeep-v1.0.12-rc.1.apk", "browser_download_url": "https://example.com/v1.0.12-rc.1.apk" },
+						      { "name": "MeloKeep-v1.0.12-rc.1.ipa", "browser_download_url": "https://example.com/v1.0.12-rc.1.ipa" }
+						    ]
+						  },
+						  {
+						    "tag_name": "v1.0.10",
+						    "draft": false,
+						    "prerelease": false,
+						    "assets": []
+						  },
+						  {
+						    "tag_name": "v1.0.11",
+						    "draft": false,
+						    "prerelease": false,
+						    "assets": [
+						      { "name": "source.tar.gz", "browser_download_url": "https://example.com/source.tar.gz" }
+						    ]
+						  }
+						]
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+
+				url.endsWith("/releases?per_page=20") && responseMode == "no_stable" -> respond(
+					content = """
+						[
+						  { "tag_name": "v1.0.13", "draft": true, "prerelease": false, "assets": [] },
+						  { "tag_name": "v1.0.12-rc.1", "draft": false, "prerelease": true, "assets": [] }
+						]
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+
+				url.endsWith("/releases/latest") -> respond(
+					content = """
+						{
+						  "tag_name": "v1.0.9",
+						  "name": "Fallback Latest",
+						  "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v1.0.9",
+						  "assets": []
+						}
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+
+				else -> respond(
+					content = """{"message":"Not Found"}""",
+					status = HttpStatusCode.NotFound,
+					headers = jsonHeaders,
+				)
+			}
+		}
+
+		val httpClient = HttpClient(engine) { expectSuccess = false }
+		val androidRelease = MeloAppUpdateChecker.fetchLatestAndroidRelease(httpClient)
+		assertEquals("v1.0.10", androidRelease.tagName)
+		assertNotNull(androidRelease.findAndroidApkAsset())
+		assertEquals("MeloKeep-v1.0.10-android-release.apk", androidRelease.findAndroidApkAsset()?.name)
+
+		val iosRelease = MeloAppUpdateChecker.fetchLatestIosRelease(httpClient)
+		assertEquals("v1.0.10", iosRelease.tagName)
+		assertNotNull(iosRelease.findIosIpaAsset())
+		assertEquals("MeloKeep-v1.0.10-ios.ipa", iosRelease.findIosIpaAsset()?.name)
+
+		assertTrue(requestedUrls.all { it == "https://api.github.com/repos/Agonie0v0/melokeep/releases?per_page=20" })
+		assertTrue(capturedAccepts.all { it == "application/vnd.github+json" })
+		assertTrue(capturedUas.all { it == "MeloKeep-Mobile" })
+
+		// Also verify MeloKeepApiClient convenience delegates
+		val apiClient = MeloKeepApiClient(MeloSettingsStore(InMemorySettings()), engine)
+		assertEquals("v1.0.10", apiClient.fetchLatestAndroidGitHubRelease().tagName)
+		assertEquals("v1.0.10", apiClient.fetchLatestIosGitHubRelease().tagName)
+		apiClient.close()
+
+		// Case 2: No stable release carries matching platform asset -> falls back to highest-version stable release (v1.0.11)
+		responseMode = "no_stable_assets"
+		val androidFallback = MeloAppUpdateChecker.fetchLatestAndroidRelease(httpClient)
+		assertEquals("v1.0.11", androidFallback.tagName)
+		assertNull(androidFallback.findAndroidApkAsset())
+
+		val iosFallback = MeloAppUpdateChecker.fetchLatestIosRelease(httpClient)
+		assertEquals("v1.0.11", iosFallback.tagName)
+		assertNull(iosFallback.findIosIpaAsset())
+
+		// Case 3: No stable releases at all -> falls back to /releases/latest
+		responseMode = "no_stable"
+		val latestFallback = MeloAppUpdateChecker.fetchLatestIosRelease(httpClient)
+		assertEquals("v1.0.9", latestFallback.tagName)
+		assertEquals("https://api.github.com/repos/Agonie0v0/melokeep/releases/latest", requestedUrls.last())
+
+		httpClient.close()
+	}
+
+	@Test
 	fun qualityDeserializesSizeFieldsAndFormatsFriendlyPresentations() {
 		// 1. Deserialize MeloQuality with and without size_bytes / size_label
 		val trackWithSizesJson = """

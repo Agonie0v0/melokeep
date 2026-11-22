@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -46,8 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
@@ -55,6 +58,7 @@ import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloGitHubAsset
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
 import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
@@ -66,6 +70,7 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,6 +83,7 @@ import org.koin.compose.viewmodel.koinViewModel
 import paige.navic.R
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.model.settings.UpdateCheckFrequency
+import paige.navic.generated.BuildInfo
 import paige.navic.ui.component.common.Markdown
 import paige.navic.ui.component.dialog.LinkConfirmationDialog
 import paige.navic.ui.theme.defaultFont
@@ -118,6 +124,11 @@ sealed interface ApkUpdateInstallState {
 internal fun compareSemVer(remoteTag: String, currentVersion: String): Int =
 	MeloSemVer.compare(remoteTag, currentVersion)
 
+internal fun formatReleaseTag(tag: String): String? {
+	val cleaned = tag.trim().removePrefix("v").removePrefix("V")
+	return if (cleaned.isNotEmpty()) "v$cleaned" else null
+}
+
 class ChangelogViewModel(
 	private val appContext: Context,
 	private val preferenceManager: PreferenceManager
@@ -135,12 +146,16 @@ class ChangelogViewModel(
 	val release: StateFlow<MeloGitHubRelease?>
 		field = MutableStateFlow<MeloGitHubRelease?>(null)
 
+	val latestRelease: StateFlow<MeloGitHubRelease?>
+		field = MutableStateFlow<MeloGitHubRelease?>(null)
+
 	val checkFeedback: StateFlow<UpdateCheckFeedback>
 		field = MutableStateFlow<UpdateCheckFeedback>(UpdateCheckFeedback.Idle)
 
 	val installState: StateFlow<ApkUpdateInstallState>
 		field = MutableStateFlow<ApkUpdateInstallState>(ApkUpdateInstallState.Idle)
 
+	private var checkJob: Job? = null
 	private var downloadJob: Job? = null
 
 	private val updateClient = HttpClient {
@@ -173,36 +188,39 @@ class ChangelogViewModel(
 
 	fun checkForUpdates(
 		currentVersion: String = appVersionName,
-		manual: Boolean = false
+		manual: Boolean = false,
+		showSheet: Boolean = true
 	) {
-		viewModelScope.launch {
+		if (!manual && checkFeedback.value is UpdateCheckFeedback.Checking) {
+			return
+		}
+		checkJob?.cancel()
+		checkJob = viewModelScope.launch {
 			if (manual) {
 				checkFeedback.value = UpdateCheckFeedback.Checking
 			}
 			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestRelease(updateClient)
+				val fetched = MeloAppUpdateChecker.fetchLatestAndroidRelease(updateClient)
 				preferenceManager.lastUpdateCheckTimeMs = System.currentTimeMillis()
+				latestRelease.value = fetched
+				updateInstallStateForRelease(fetched)
+
 				val isNewer = MeloSemVer.isNewer(fetched.tagName, currentVersion)
 				if (isNewer) {
-					if (!manual && fetched.tagName == preferenceManager.ignoredUpdateTag) {
-						release.value = null
-						return@launch
-					}
-					release.value = fetched
 					checkFeedback.value = UpdateCheckFeedback.UpdateAvailable(fetched.tagName)
-					val cachedFile = resolveCachedApkFile(fetched)
-					if (cachedFile != null) {
-						installState.value = ApkUpdateInstallState.ReadyToInstall(
-							apkFile = cachedFile,
-							tag = fetched.tagName
-						)
-					} else if (installState.value !is ApkUpdateInstallState.Downloading) {
-						installState.value = ApkUpdateInstallState.Idle
+					if (showSheet && (manual || fetched.tagName != preferenceManager.ignoredUpdateTag)) {
+						release.value = fetched
 					}
 				} else {
 					release.value = null
 					if (manual) {
 						checkFeedback.value = UpdateCheckFeedback.UpToDate
+					} else if (
+						checkFeedback.value is UpdateCheckFeedback.Checking ||
+						checkFeedback.value is UpdateCheckFeedback.UpdateAvailable ||
+						checkFeedback.value is UpdateCheckFeedback.Error
+					) {
+						checkFeedback.value = UpdateCheckFeedback.Idle
 					}
 				}
 			} catch (e: CancellationException) {
@@ -215,6 +233,32 @@ class ChangelogViewModel(
 					)
 				}
 			}
+		}
+	}
+
+	private fun updateInstallStateForRelease(fetched: MeloGitHubRelease) {
+		val currentInstall = installState.value
+		if (currentInstall is ApkUpdateInstallState.Downloading) {
+			return
+		}
+		val cachedFile = resolveCachedApkFile(fetched)
+		installState.value = if (cachedFile != null) {
+			if (
+				currentInstall is ApkUpdateInstallState.NeedInstallPermission &&
+				currentInstall.tag == fetched.tagName &&
+				currentInstall.apkFile.absolutePath == cachedFile.absolutePath &&
+				Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+				!appContext.packageManager.canRequestPackageInstalls()
+			) {
+				currentInstall
+			} else {
+				ApkUpdateInstallState.ReadyToInstall(
+					apkFile = cachedFile,
+					tag = fetched.tagName
+				)
+			}
+		} else {
+			ApkUpdateInstallState.Idle
 		}
 	}
 
@@ -231,6 +275,9 @@ class ChangelogViewModel(
 	}
 
 	fun startDownloadAndInstall(targetRelease: MeloGitHubRelease) {
+		if (downloadJob?.isActive == true) {
+			return
+		}
 		val asset = targetRelease.findAndroidApkAsset()
 		if (asset == null || asset.downloadUrl.isBlank()) {
 			installState.value = ApkUpdateInstallState.Error("该版本暂无 APK 安装包，请前往 GitHub 页面下载")
@@ -242,7 +289,6 @@ class ChangelogViewModel(
 			return
 		}
 
-		downloadJob?.cancel()
 		downloadJob = viewModelScope.launch {
 			val safeTag = sanitizeTag(targetRelease.tagName)
 			val updatesDir = File(appContext.cacheDir, "apk_updates")
@@ -312,14 +358,16 @@ class ChangelogViewModel(
 				}
 				proceedWithInstall(finalFile, targetRelease.tagName)
 			} catch (e: CancellationException) {
-				withContext(Dispatchers.IO) {
+				withContext(NonCancellable + Dispatchers.IO) {
 					runCatching { if (partFile.exists()) partFile.delete() }
 				}
-				installState.value = ApkUpdateInstallState.Idle
+				if (installState.value is ApkUpdateInstallState.Downloading) {
+					installState.value = ApkUpdateInstallState.Idle
+				}
 				throw e
 			} catch (e: Exception) {
 				Logger.e("ChangelogViewModel", "Failed to download APK update", e)
-				withContext(Dispatchers.IO) {
+				withContext(NonCancellable + Dispatchers.IO) {
 					runCatching { if (partFile.exists()) partFile.delete() }
 				}
 				installState.value = ApkUpdateInstallState.Error(
@@ -330,9 +378,12 @@ class ChangelogViewModel(
 	}
 
 	fun cancelDownload() {
-		downloadJob?.cancel()
+		val jobToCancel = downloadJob
 		downloadJob = null
-		installState.value = ApkUpdateInstallState.Idle
+		jobToCancel?.cancel()
+		if (installState.value is ApkUpdateInstallState.Downloading) {
+			installState.value = ApkUpdateInstallState.Idle
+		}
 	}
 
 	fun openInstallPermissionSettings() {
@@ -391,14 +442,307 @@ class ChangelogViewModel(
 	}
 
 	fun clearRelease() {
-		cancelDownload()
 		release.value = null
 	}
 
 	override fun onCleared() {
+		checkJob?.cancel()
 		downloadJob?.cancel()
 		updateClient.close()
 		super.onCleared()
+	}
+}
+
+@Composable
+internal fun MeloReleaseNotesContent(
+	body: String,
+	modifier: Modifier = Modifier,
+	maxHeight: Dp = 240.dp
+) {
+	Markdown(
+		text = body.ifBlank { "包含体验优化与问题修复。" },
+		modifier = modifier
+			.heightIn(max = maxHeight)
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(12.dp))
+			.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+			.verticalScroll(rememberScrollState())
+			.padding(12.dp)
+	)
+}
+
+@Composable
+internal fun MeloApkUpdateActionSection(
+	release: MeloGitHubRelease,
+	apkAsset: MeloGitHubAsset?,
+	installState: ApkUpdateInstallState,
+	isNewerVersion: Boolean,
+	allowDirectInstall: Boolean = !BuildInfo.FDROID,
+	buttonShape: Shape = CircleShape,
+	primaryDownloadLabel: String = "下载并安装",
+	onStartDownload: () -> Unit,
+	onCancelDownload: () -> Unit,
+	onProceedInstall: (File, String) -> Unit,
+	onOpenPermissionSettings: () -> Unit,
+	onOpenGitHubUrl: (String) -> Unit,
+	modifier: Modifier = Modifier
+) {
+	val releaseHtmlUrl = release.htmlUrl.ifBlank { FALLBACK_RELEASES_HTML_URL }
+
+	Column(
+		modifier = modifier.fillMaxWidth(),
+		verticalArrangement = Arrangement.spacedBy(8.dp)
+	) {
+		if (!allowDirectInstall) {
+			if (isNewerVersion) {
+				Button(
+					onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "前往 GitHub 页面",
+						fontFamily = defaultFont(100)
+					)
+				}
+			} else {
+				OutlinedButton(
+					onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "前往 GitHub 页面",
+						fontFamily = defaultFont(100)
+					)
+				}
+			}
+			return@Column
+		}
+
+		when (val state = installState) {
+			is ApkUpdateInstallState.Downloading -> {
+				Surface(
+					shape = RoundedCornerShape(14.dp),
+					color = MaterialTheme.colorScheme.surfaceContainerHigh,
+					modifier = Modifier.fillMaxWidth()
+				) {
+					Column(
+						modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp)
+					) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically
+						) {
+							Text(
+								text = "正在下载安装包…",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium
+							)
+							Text(
+								text = "${(state.progress * 100).toInt()}%",
+								style = MaterialTheme.typography.labelMedium.tabularNums(),
+								color = MaterialTheme.colorScheme.primary
+							)
+						}
+						if (state.totalBytes > 0L) {
+							LinearProgressIndicator(
+								progress = { state.progress.coerceIn(0f, 1f) },
+								modifier = Modifier
+									.fillMaxWidth()
+									.height(5.dp)
+									.clip(CircleShape)
+							)
+						} else {
+							LinearProgressIndicator(
+								modifier = Modifier
+									.fillMaxWidth()
+									.height(5.dp)
+									.clip(CircleShape)
+							)
+						}
+						Text(
+							text = if (state.totalBytes > 0L) {
+								"${state.downloadedBytes.toFileSize()} / ${state.totalBytes.toFileSize()}"
+							} else {
+								"已下载 ${state.downloadedBytes.toFileSize()}"
+							},
+							style = MaterialTheme.typography.labelSmall.tabularNums(),
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+					}
+				}
+
+				OutlinedButton(
+					onClick = onCancelDownload,
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "取消下载",
+						fontFamily = defaultFont(100)
+					)
+				}
+			}
+
+			is ApkUpdateInstallState.NeedInstallPermission -> {
+				Surface(
+					shape = RoundedCornerShape(14.dp),
+					color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+					modifier = Modifier.fillMaxWidth()
+				) {
+					Text(
+						text = "更新包已下载完成！首次应用内更新请先开启「允许安装未知应用」权限，授权后返回点击下方按钮即可直接覆盖安装。",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSecondaryContainer,
+						modifier = Modifier.padding(12.dp)
+					)
+				}
+
+				Button(
+					onClick = { onProceedInstall(state.apkFile, state.tag) },
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "已完成授权，立即安装",
+						fontFamily = defaultFont(100)
+					)
+				}
+
+				OutlinedButton(
+					onClick = onOpenPermissionSettings,
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "前往系统设置授权",
+						fontFamily = defaultFont(100)
+					)
+				}
+			}
+
+			is ApkUpdateInstallState.ReadyToInstall -> {
+				Button(
+					onClick = { onProceedInstall(state.apkFile, state.tag) },
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "立即安装 (${state.apkFile.length().toFileSize()})",
+						fontFamily = defaultFont(100)
+					)
+				}
+
+				TextButton(
+					onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+					modifier = Modifier.fillMaxWidth(),
+					shape = buttonShape
+				) {
+					Text(
+						text = "前往 GitHub 页面",
+						fontFamily = defaultFont(100)
+					)
+				}
+			}
+
+			is ApkUpdateInstallState.Idle,
+			is ApkUpdateInstallState.Error -> {
+				if (state is ApkUpdateInstallState.Error) {
+					Text(
+						text = state.message,
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.error,
+						modifier = Modifier.padding(horizontal = 4.dp)
+					)
+				}
+
+				if (apkAsset != null) {
+					val sizeLabel = apkAsset.size.takeIf { it > 0L }?.let { " (${it.toFileSize()})" }.orEmpty()
+					when {
+						state is ApkUpdateInstallState.Error -> {
+							Button(
+								onClick = onStartDownload,
+								modifier = Modifier.fillMaxWidth(),
+								shape = buttonShape
+							) {
+								Text(
+									text = "重试下载并更新$sizeLabel",
+									fontFamily = defaultFont(100)
+								)
+							}
+						}
+						isNewerVersion -> {
+							Button(
+								onClick = onStartDownload,
+								modifier = Modifier.fillMaxWidth(),
+								shape = buttonShape
+							) {
+								Text(
+									text = "$primaryDownloadLabel$sizeLabel",
+									fontFamily = defaultFont(100)
+								)
+							}
+						}
+						else -> {
+							FilledTonalButton(
+								onClick = onStartDownload,
+								modifier = Modifier.fillMaxWidth(),
+								shape = buttonShape
+							) {
+								Text(
+									text = "重新下载安装包$sizeLabel",
+									fontFamily = defaultFont(100)
+								)
+							}
+						}
+					}
+
+					TextButton(
+						onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+						modifier = Modifier.fillMaxWidth(),
+						shape = buttonShape
+					) {
+						Text(
+							text = "前往 GitHub 页面",
+							fontFamily = defaultFont(100)
+						)
+					}
+				} else {
+					Text(
+						text = "该版本暂未附带 APK 安装包，请前往 GitHub 页面查看或手动下载。",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						modifier = Modifier.padding(horizontal = 4.dp)
+					)
+					if (isNewerVersion) {
+						Button(
+							onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+							modifier = Modifier.fillMaxWidth(),
+							shape = buttonShape
+						) {
+							Text(
+								text = "前往 GitHub 页面",
+								fontFamily = defaultFont(100)
+							)
+						}
+					} else {
+						OutlinedButton(
+							onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+							modifier = Modifier.fillMaxWidth(),
+							shape = buttonShape
+						) {
+							Text(
+								text = "前往 GitHub 页面",
+								fontFamily = defaultFont(100)
+							)
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -418,14 +762,9 @@ fun ChangelogSheet() {
 	release?.let { activeRelease ->
 		val apkAsset = remember(activeRelease) { activeRelease.findAndroidApkAsset() }
 		val isDownloading = installState is ApkUpdateInstallState.Downloading
-		val releaseHtmlUrl = activeRelease.htmlUrl.ifBlank { FALLBACK_RELEASES_HTML_URL }
 
 		ModalBottomSheet(
-			onDismissRequest = {
-				if (!isDownloading) {
-					viewModel.clearRelease()
-				}
-			},
+			onDismissRequest = { viewModel.clearRelease() },
 			sheetState = rememberBottomSheetState(
 				initialValue = SheetValue.Hidden,
 				enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
@@ -448,206 +787,34 @@ fun ChangelogSheet() {
 						style = MaterialTheme.typography.titleLarge,
 						fontFamily = defaultFont(round = 100f)
 					)
-					val displayTag = "v" + activeRelease.tagName.trim().removePrefix("v").removePrefix("V")
+					val displayTag = formatReleaseTag(activeRelease.tagName) ?: activeRelease.tagName
 					Text(
 						text = stringResource(R.string.info_update, displayTag),
 						style = MaterialTheme.typography.bodyMedium
 					)
 				}
 
-				Markdown(
-					text = activeRelease.body.ifBlank { "包含体验优化与问题修复。" },
-					modifier = Modifier
-						.heightIn(max = 360.dp)
-						.fillMaxWidth()
-						.clip(MaterialTheme.shapes.large)
-						.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-						.verticalScroll(rememberScrollState())
-						.padding(10.dp)
+				MeloReleaseNotesContent(
+					body = activeRelease.body,
+					maxHeight = 360.dp
 				)
 
 				Spacer(Modifier.height(4.dp))
 
-				when (val state = installState) {
-					is ApkUpdateInstallState.Downloading -> {
-						Surface(
-							shape = RoundedCornerShape(14.dp),
-							color = MaterialTheme.colorScheme.surfaceContainerHigh,
-							modifier = Modifier.fillMaxWidth()
-						) {
-							Column(
-								modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-								verticalArrangement = Arrangement.spacedBy(8.dp)
-							) {
-								Row(
-									modifier = Modifier.fillMaxWidth(),
-									horizontalArrangement = Arrangement.SpaceBetween,
-									verticalAlignment = Alignment.CenterVertically
-								) {
-									Text(
-										text = "正在下载安装包…",
-										style = MaterialTheme.typography.bodyMedium,
-										fontWeight = FontWeight.Medium
-									)
-									Text(
-										text = "${(state.progress * 100).toInt()}%",
-										style = MaterialTheme.typography.labelMedium.tabularNums(),
-										color = MaterialTheme.colorScheme.primary
-									)
-								}
-								if (state.totalBytes > 0L) {
-									LinearProgressIndicator(
-										progress = { state.progress.coerceIn(0f, 1f) },
-										modifier = Modifier
-											.fillMaxWidth()
-											.height(5.dp)
-											.clip(CircleShape)
-									)
-								} else {
-									LinearProgressIndicator(
-										modifier = Modifier
-											.fillMaxWidth()
-											.height(5.dp)
-											.clip(CircleShape)
-									)
-								}
-								Text(
-									text = if (state.totalBytes > 0L) {
-										"${state.downloadedBytes.toFileSize()} / ${state.totalBytes.toFileSize()}"
-									} else {
-										"已下载 ${state.downloadedBytes.toFileSize()}"
-									},
-									style = MaterialTheme.typography.labelSmall.tabularNums(),
-									color = MaterialTheme.colorScheme.onSurfaceVariant
-								)
-							}
-						}
-
-						OutlinedButton(
-							onClick = { viewModel.cancelDownload() },
-							modifier = Modifier.fillMaxWidth(),
-							shape = CircleShape
-						) {
-							Text(
-								text = "取消下载",
-								fontFamily = defaultFont(100)
-							)
-						}
-					}
-
-					is ApkUpdateInstallState.NeedInstallPermission -> {
-						Surface(
-							shape = RoundedCornerShape(14.dp),
-							color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
-							modifier = Modifier.fillMaxWidth()
-						) {
-							Text(
-								text = "更新包已下载完成！首次应用内更新请先开启「允许安装未知应用」权限，授权后返回点击下方按钮即可直接覆盖安装。",
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.onSecondaryContainer,
-								modifier = Modifier.padding(12.dp)
-							)
-						}
-
-						Button(
-							onClick = { viewModel.proceedWithInstall(state.apkFile, state.tag) },
-							modifier = Modifier.fillMaxWidth(),
-							shape = CircleShape
-						) {
-							Text(
-								text = "已完成授权，立即安装",
-								fontFamily = defaultFont(100)
-							)
-						}
-
-						OutlinedButton(
-							onClick = { viewModel.openInstallPermissionSettings() },
-							modifier = Modifier.fillMaxWidth(),
-							shape = CircleShape
-						) {
-							Text(
-								text = "前往系统设置授权",
-								fontFamily = defaultFont(100)
-							)
-						}
-					}
-
-					is ApkUpdateInstallState.ReadyToInstall -> {
-						Button(
-							onClick = { viewModel.proceedWithInstall(state.apkFile, state.tag) },
-							modifier = Modifier.fillMaxWidth(),
-							shape = CircleShape
-						) {
-							Text(
-								text = "立即安装 (${state.apkFile.length().toFileSize()})",
-								fontFamily = defaultFont(100)
-							)
-						}
-
-						TextButton(
-							onClick = { linkToOpen = releaseHtmlUrl },
-							modifier = Modifier.fillMaxWidth(),
-							shape = CircleShape
-						) {
-							Text(
-								text = "前往 GitHub 页面",
-								fontFamily = defaultFont(100)
-							)
-						}
-					}
-
-					is ApkUpdateInstallState.Idle,
-					is ApkUpdateInstallState.Error -> {
-						if (state is ApkUpdateInstallState.Error) {
-							Text(
-								text = state.message,
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.error,
-								modifier = Modifier.padding(horizontal = 4.dp)
-							)
-						}
-
-						if (apkAsset != null) {
-							val sizeLabel = apkAsset.size.takeIf { it > 0L }?.let { " (${it.toFileSize()})" }.orEmpty()
-							Button(
-								onClick = { viewModel.startDownloadAndInstall(activeRelease) },
-								modifier = Modifier.fillMaxWidth(),
-								shape = CircleShape
-							) {
-								Text(
-									text = if (state is ApkUpdateInstallState.Error) {
-										"重试下载并更新$sizeLabel"
-									} else {
-										"立即更新$sizeLabel"
-									},
-									fontFamily = defaultFont(100)
-								)
-							}
-
-							TextButton(
-								onClick = { linkToOpen = releaseHtmlUrl },
-								modifier = Modifier.fillMaxWidth(),
-								shape = CircleShape
-							) {
-								Text(
-									text = "前往 GitHub 页面",
-									fontFamily = defaultFont(100)
-								)
-							}
-						} else {
-							Button(
-								onClick = { linkToOpen = releaseHtmlUrl },
-								modifier = Modifier.fillMaxWidth(),
-								shape = CircleShape
-							) {
-								Text(
-									text = "前往 GitHub 页面",
-									fontFamily = defaultFont(100)
-								)
-							}
-						}
-					}
-				}
+				MeloApkUpdateActionSection(
+					release = activeRelease,
+					apkAsset = apkAsset,
+					installState = installState,
+					isNewerVersion = true,
+					allowDirectInstall = !BuildInfo.FDROID,
+					buttonShape = CircleShape,
+					primaryDownloadLabel = "立即更新",
+					onStartDownload = { viewModel.startDownloadAndInstall(activeRelease) },
+					onCancelDownload = { viewModel.cancelDownload() },
+					onProceedInstall = { file, tag -> viewModel.proceedWithInstall(file, tag) },
+					onOpenPermissionSettings = { viewModel.openInstallPermissionSettings() },
+					onOpenGitHubUrl = { url -> linkToOpen = url }
+				)
 
 				if (!isDownloading) {
 					OutlinedButton(
@@ -668,6 +835,17 @@ fun ChangelogSheet() {
 					) {
 						Text(
 							text = "稍后提醒",
+							fontFamily = defaultFont(100)
+						)
+					}
+				} else {
+					TextButton(
+						onClick = { viewModel.clearRelease() },
+						modifier = Modifier.fillMaxWidth(),
+						shape = CircleShape
+					) {
+						Text(
+							text = "后台继续下载",
 							fontFamily = defaultFont(100)
 						)
 					}

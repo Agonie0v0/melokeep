@@ -2942,7 +2942,7 @@ internal fun IosAppUpdateDialog(
 			launchFeedback = null
 			scope.launch {
 				try {
-					val fetched = MeloAppUpdateChecker.fetchLatestRelease()
+					val fetched = MeloAppUpdateChecker.fetchLatestIosRelease()
 					release = fetched
 					onReleaseLoaded(fetched)
 				} catch (e: CancellationException) {
@@ -2959,7 +2959,7 @@ internal fun IosAppUpdateDialog(
 	LaunchedEffect(Unit) {
 		if (release == null) {
 			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestRelease()
+				val fetched = MeloAppUpdateChecker.fetchLatestIosRelease()
 				release = fetched
 				onReleaseLoaded(fetched)
 			} catch (e: CancellationException) {
@@ -2995,7 +2995,9 @@ internal fun IosAppUpdateDialog(
 		},
 		text = {
 			Column(
-				modifier = Modifier.fillMaxWidth(),
+				modifier = Modifier
+					.fillMaxWidth()
+					.verticalScroll(rememberScrollState()),
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
 				Row(
@@ -3131,6 +3133,7 @@ internal fun IosAppUpdateDialog(
 											}
 										},
 										shape = RoundedCornerShape(10.dp),
+										contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
 										modifier = Modifier.weight(1f),
 									) {
 										Text("直接下载 IPA", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -3142,6 +3145,7 @@ internal fun IosAppUpdateDialog(
 											onShowNotice("已复制 IPA 下载链接")
 										},
 										shape = RoundedCornerShape(10.dp),
+										contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
 										modifier = Modifier.weight(1f),
 									) {
 										Text("复制链接", maxLines = 1, overflow = TextOverflow.Ellipsis)

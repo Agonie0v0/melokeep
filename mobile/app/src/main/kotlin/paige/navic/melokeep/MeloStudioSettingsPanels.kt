@@ -81,8 +81,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.ImageLoader
+import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,8 +117,13 @@ import paige.navic.domain.sync.SyncCoordinator
 import paige.navic.generated.BuildInfo
 import paige.navic.playback.exoplayer.ExoStateHolder
 import paige.navic.ui.component.common.VerticalSlider
+import paige.navic.ui.component.dialog.LinkConfirmationDialog
+import paige.navic.ui.component.sheet.ApkUpdateInstallState
 import paige.navic.ui.component.sheet.ChangelogViewModel
+import paige.navic.ui.component.sheet.MeloApkUpdateActionSection
+import paige.navic.ui.component.sheet.MeloReleaseNotesContent
 import paige.navic.ui.component.sheet.UpdateCheckFeedback
+import paige.navic.ui.component.sheet.formatReleaseTag
 import paige.navic.ui.core.LoginUiState
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Add
@@ -2658,13 +2665,32 @@ internal fun SettingsVersionUpdatePanel(
 ) {
 	val preferenceManager = koinInject<PreferenceManager>()
 	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
-	val availableRelease by changelogViewModel.release.collectAsStateWithLifecycle()
+	val latestRelease by changelogViewModel.latestRelease.collectAsStateWithLifecycle()
+	val installState by changelogViewModel.installState.collectAsStateWithLifecycle()
 	val positiveColor = rememberThemePositiveColor()
+	var linkToOpen by rememberSaveable { mutableStateOf<String?>(null) }
 
 	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
-	val updateTag = (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag
-		?: availableRelease?.tagName?.takeIf { it.isNotBlank() }
-	val normalizedNewTag = updateTag?.let { "v" + it.trim().removePrefix("v").removePrefix("V") }
+	val hasUpdate = remember(latestRelease, appVersionName) {
+		latestRelease?.let { MeloSemVer.isNewer(it.tagName, appVersionName) } == true
+	}
+	val apkAsset = remember(latestRelease) { latestRelease?.findAndroidApkAsset() }
+	val updateTag = latestRelease
+		?.takeIf { hasUpdate }
+		?.tagName
+		?.takeIf { it.isNotBlank() }
+		?: (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag?.takeIf { it.isNotBlank() }
+	val normalizedNewTag = updateTag?.let(::formatReleaseTag)
+
+	LaunchedEffect(Unit) {
+		if (latestRelease == null && !isChecking) {
+			changelogViewModel.checkForUpdates(
+				currentVersion = appVersionName,
+				manual = false,
+				showSheet = false
+			)
+		}
+	}
 
 	LazyColumn(
 		modifier = modifier.background(MaterialTheme.colorScheme.background),
@@ -2686,7 +2712,8 @@ internal fun SettingsVersionUpdatePanel(
 							.clickable(enabled = !isChecking) {
 								changelogViewModel.checkForUpdates(
 									currentVersion = appVersionName,
-									manual = true
+									manual = true,
+									showSheet = false
 								)
 							}
 							.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -2702,14 +2729,22 @@ internal fun SettingsVersionUpdatePanel(
 								style = MaterialTheme.typography.bodyMedium,
 								fontWeight = FontWeight.Medium
 							)
+							val newVersionHint = if (BuildInfo.FDROID) {
+								"可在下方查看更新说明"
+							} else {
+								"可在下方直接下载安装"
+							}
 							Text(
 								text = when (val fb = checkFeedback) {
 									is UpdateCheckFeedback.Checking -> "正在向 GitHub Releases 查询最新版本…"
 									is UpdateCheckFeedback.UpToDate -> "当前已是最新版本 (v$appVersionName)"
 									is UpdateCheckFeedback.Error -> fb.message
-									is UpdateCheckFeedback.UpdateAvailable -> "发现新版本 $normalizedNewTag，点击查看详情并安装"
+									is UpdateCheckFeedback.UpdateAvailable -> {
+										val tagLabel = normalizedNewTag ?: formatReleaseTag(fb.tag) ?: fb.tag
+										"发现新版本 $tagLabel，$newVersionHint"
+									}
 									UpdateCheckFeedback.Idle -> if (normalizedNewTag != null) {
-										"发现新版本 $normalizedNewTag，点击查看详情并安装"
+										"发现新版本 $normalizedNewTag，$newVersionHint"
 									} else {
 										"点击手动检测是否有新版本发布"
 									}
@@ -2805,6 +2840,118 @@ internal fun SettingsVersionUpdatePanel(
 			}
 		}
 
+		latestRelease?.let { activeRelease ->
+			item(key = "update-release-card") {
+				val displayTag = formatReleaseTag(activeRelease.tagName) ?: activeRelease.tagName
+				val sizeText = apkAsset?.size?.takeIf { it > 0L }?.toFileSize()
+				val accentColor = if (hasUpdate) MaterialTheme.colorScheme.primary else positiveColor
+
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					MeloSectionLabel(
+						title = if (hasUpdate) "可用更新" else "版本详情",
+						trailing = if (sizeText != null) {
+							{
+								Text(
+									text = "APK · $sizeText",
+									style = MaterialTheme.typography.labelSmall.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant
+								)
+							}
+						} else {
+							null
+						}
+					)
+
+					MeloGroupedCard {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(16.dp),
+							verticalArrangement = Arrangement.spacedBy(12.dp)
+						) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp)
+								) {
+									Text(
+										text = if (hasUpdate) {
+											"发现新版本 $displayTag"
+										} else {
+											"当前最新版本 $displayTag"
+										},
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.SemiBold,
+										color = MaterialTheme.colorScheme.onSurface
+									)
+									val releaseMeta = listOfNotNull(
+										activeRelease.name.trim().takeIf {
+											it.isNotEmpty() &&
+												!it.equals(displayTag, ignoreCase = true) &&
+												!it.equals(activeRelease.tagName.trim(), ignoreCase = true)
+										},
+										apkAsset?.name?.takeIf { it.isNotBlank() }
+									).joinToString(" · ")
+									if (releaseMeta.isNotEmpty()) {
+										Text(
+											text = releaseMeta,
+											style = MaterialTheme.typography.bodySmall,
+											color = MaterialTheme.colorScheme.onSurfaceVariant,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis
+										)
+									}
+								}
+
+								Spacer(Modifier.width(8.dp))
+
+								Surface(
+									shape = CircleShape,
+									color = accentColor.copy(alpha = 0.13f),
+									border = BorderStroke(
+										width = MeloHairlineWidth,
+										color = accentColor.copy(alpha = 0.34f)
+									)
+								) {
+									Text(
+										text = if (hasUpdate) "新版本" else "已最新",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.SemiBold,
+										color = accentColor,
+										modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+									)
+								}
+							}
+
+							MeloReleaseNotesContent(
+								body = activeRelease.body,
+								maxHeight = 220.dp
+							)
+
+							MeloApkUpdateActionSection(
+								release = activeRelease,
+								apkAsset = apkAsset,
+								installState = installState,
+								isNewerVersion = hasUpdate,
+								allowDirectInstall = !BuildInfo.FDROID,
+								buttonShape = RoundedCornerShape(12.dp),
+								primaryDownloadLabel = "下载并安装",
+								onStartDownload = { changelogViewModel.startDownloadAndInstall(activeRelease) },
+								onCancelDownload = { changelogViewModel.cancelDownload() },
+								onProceedInstall = { file, tag -> changelogViewModel.proceedWithInstall(file, tag) },
+								onOpenPermissionSettings = { changelogViewModel.openInstallPermissionSettings() },
+								onOpenGitHubUrl = { url -> linkToOpen = url }
+							)
+						}
+					}
+				}
+			}
+		}
+
 		item(key = "update-about-info") {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 				MeloSectionLabel(title = "版本信息")
@@ -2823,6 +2970,11 @@ internal fun SettingsVersionUpdatePanel(
 			}
 		}
 	}
+
+	LinkConfirmationDialog(
+		linkToOpen = linkToOpen,
+		onDismissRequest = { linkToOpen = null }
+	)
 }
 
 @Composable

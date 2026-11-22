@@ -87,6 +87,14 @@ class MeloKeepApiClient(
 		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
 	): MeloGitHubRelease = MeloAppUpdateChecker.fetchLatestRelease(httpClient, repo)
 
+	suspend fun fetchLatestAndroidGitHubRelease(
+		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
+	): MeloGitHubRelease = MeloAppUpdateChecker.fetchLatestAndroidRelease(httpClient, repo)
+
+	suspend fun fetchLatestIosGitHubRelease(
+		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
+	): MeloGitHubRelease = MeloAppUpdateChecker.fetchLatestIosRelease(httpClient, repo)
+
 	suspend fun authStatus(baseUrl: String? = null, bearerToken: String? = null): MeloAuthStatus {
 		val url = buildUrl("/api/auth/status", baseUrl)
 		val response = httpClient.get(url) {

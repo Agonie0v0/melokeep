@@ -31,6 +31,8 @@ data class MeloGitHubRelease(
 	@SerialName("published_at")
 	val publishedAt: String = "",
 	val assets: List<MeloGitHubAsset> = emptyList(),
+	val draft: Boolean = false,
+	val prerelease: Boolean = false,
 )
 
 fun MeloGitHubRelease.findAndroidApkAsset(): MeloGitHubAsset? {
@@ -160,12 +162,13 @@ object MeloSemVer {
 object MeloAppUpdateChecker {
 	const val DEFAULT_REPO = "Agonie0v0/melokeep"
 
-	suspend fun fetchLatestRelease(
+	private fun normalizeRepo(repo: String): String = repo.trim().trim('/').ifBlank { DEFAULT_REPO }
+
+	private suspend fun <T> fetchGitHubJson(
 		httpClient: HttpClient,
-		repo: String = DEFAULT_REPO,
-	): MeloGitHubRelease {
-		val normalizedRepo = repo.trim().trim('/').ifBlank { DEFAULT_REPO }
-		val url = "https://api.github.com/repos/$normalizedRepo/releases/latest"
+		url: String,
+		decode: (String) -> T,
+	): T {
 		val response = try {
 			httpClient.get(url) {
 				header(HttpHeaders.Accept, "application/vnd.github+json")
@@ -193,7 +196,7 @@ object MeloAppUpdateChecker {
 			)
 		}
 		return try {
-			meloJson.decodeFromString<MeloGitHubRelease>(text)
+			decode(text)
 		} catch (e: CancellationException) {
 			throw e
 		} catch (e: Throwable) {
@@ -204,16 +207,71 @@ object MeloAppUpdateChecker {
 		}
 	}
 
-	suspend fun fetchLatestRelease(
-		repo: String = DEFAULT_REPO,
-	): MeloGitHubRelease {
+	private suspend fun <T> withTransientHttpClient(block: suspend (HttpClient) -> T): T {
 		val client = HttpClient(createPlatformHttpClientEngine()) {
 			expectSuccess = false
 		}
 		return try {
-			fetchLatestRelease(client, repo)
+			block(client)
 		} finally {
 			client.close()
 		}
+	}
+
+	suspend fun fetchLatestRelease(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease {
+		val normalizedRepo = normalizeRepo(repo)
+		val url = "https://api.github.com/repos/$normalizedRepo/releases/latest"
+		return fetchGitHubJson(httpClient, url) { text ->
+			meloJson.decodeFromString<MeloGitHubRelease>(text)
+		}
+	}
+
+	suspend fun fetchLatestRelease(
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease = withTransientHttpClient { client ->
+		fetchLatestRelease(client, repo)
+	}
+
+	suspend fun fetchLatestReleaseForAsset(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+		assetMatcher: (MeloGitHubRelease) -> MeloGitHubAsset?,
+	): MeloGitHubRelease {
+		val normalizedRepo = normalizeRepo(repo)
+		val url = "https://api.github.com/repos/$normalizedRepo/releases?per_page=20"
+		val releases = fetchGitHubJson(httpClient, url) { text ->
+			meloJson.decodeFromString<List<MeloGitHubRelease>>(text)
+		}
+		val stableReleases = releases.filter { !it.draft && !it.prerelease }
+		return stableReleases
+			.filter { assetMatcher(it) != null }
+			.maxWithOrNull { a, b -> MeloSemVer.compare(a.tagName, b.tagName) }
+			?: stableReleases.maxWithOrNull { a, b -> MeloSemVer.compare(a.tagName, b.tagName) }
+			?: fetchLatestRelease(httpClient, repo)
+	}
+
+	suspend fun fetchLatestAndroidRelease(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease = fetchLatestReleaseForAsset(httpClient, repo) { it.findAndroidApkAsset() }
+
+	suspend fun fetchLatestAndroidRelease(
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease = withTransientHttpClient { client ->
+		fetchLatestAndroidRelease(client, repo)
+	}
+
+	suspend fun fetchLatestIosRelease(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease = fetchLatestReleaseForAsset(httpClient, repo) { it.findIosIpaAsset() }
+
+	suspend fun fetchLatestIosRelease(
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease = withTransientHttpClient { client ->
+		fetchLatestIosRelease(client, repo)
 	}
 }

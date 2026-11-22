@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import coil3.ImageLoader
+import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -93,6 +94,7 @@ import paige.navic.domain.model.settings.ThemeMode
 import paige.navic.domain.model.settings.UpdateCheckFrequency
 import paige.navic.ui.component.sheet.ChangelogViewModel
 import paige.navic.ui.component.sheet.UpdateCheckFeedback
+import paige.navic.ui.component.sheet.formatReleaseTag
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.filled.BottomNavigation
 import paige.navic.ui.icons.filled.Headphones
@@ -184,7 +186,7 @@ internal fun MeloProfileHubBody(
 	val syncState by syncManager.syncState.collectAsStateWithLifecycle()
 	val eqConfig by equalizerManager.config.collectAsStateWithLifecycle()
 	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
-	val availableRelease by changelogViewModel.release.collectAsStateWithLifecycle()
+	val latestRelease by changelogViewModel.latestRelease.collectAsStateWithLifecycle()
 	val appVersionName = rememberMeloVersionName()
 	val positiveColor = rememberThemePositiveColor()
 
@@ -242,10 +244,13 @@ internal fun MeloProfileHubBody(
 
 	val tempCacheBytes = streamCacheBytes + imageCacheBytes
 	val cacheDisplayText = if (cacheSizeLoaded) tempCacheBytes.toFileSize() else "…"
-	val updateTag = (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag
-		?: availableRelease?.tagName?.takeIf { it.isNotBlank() }
+	val updateTag = latestRelease
+		?.takeIf { MeloSemVer.isNewer(it.tagName, appVersionName) }
+		?.tagName
+		?.takeIf { it.isNotBlank() }
+		?: (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag?.takeIf { it.isNotBlank() }
 	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
-	val normalizedNewTag = updateTag?.let { "v" + it.trim().removePrefix("v").removePrefix("V") }
+	val normalizedNewTag = updateTag?.let(::formatReleaseTag)
 
 	val navidromeConnected = sessionState !is SessionState.Unauthenticated
 	val navidromeStatusText = when (sessionState) {
