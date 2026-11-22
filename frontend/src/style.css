@@ -45,7 +45,7 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 9px 14px;
-  flex: 0 1 420px;
+  flex: 0 1 240px;
   transition:
     background 150ms,
     border-color 150ms,
@@ -1940,9 +1940,9 @@ tr.current {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 260px;
+  flex: 1 1 220px;
   min-width: 220px;
-  max-width: 380px;
+  max-width: 280px;
   height: 38px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -2810,7 +2810,7 @@ tr.current {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: min(100%, 300px);
+  width: min(100%, 230px);
   height: 36px;
   padding: 0 12px;
   background: var(--subtle);
@@ -5647,7 +5647,7 @@ tr.current {
   margin: 0;
 }
 .update-meta-grid > div {
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: var(--subtle);
   border: 1px solid var(--line-soft);
@@ -5659,7 +5659,7 @@ tr.current {
 }
 .update-meta-grid dd {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -5908,8 +5908,10 @@ tr.current {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
   background: var(--subtle);
@@ -6026,6 +6028,10 @@ tr.current {
 }
 
 @media (max-width: 600px) {
+  .update-command-row {
+    width: 100%;
+  }
+
   .navidrome-library .music-table.is-multi-select tbody tr {
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 4px 8px;

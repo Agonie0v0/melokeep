@@ -82,7 +82,7 @@ export function EngineSettings({
           .join("; ");
   if (!config)
     return (
-      <div className="engine-settings-stack">
+      <div className="engine-settings-stack engine-settings">
         <section className="settings-section">
           <p role={error ? "alert" : "status"}>
             {error || "正在读取完整设置…"}
@@ -106,7 +106,7 @@ export function EngineSettings({
       </div>
     );
   return (
-    <div className="engine-settings-stack">
+    <div className="engine-settings-stack engine-settings">
       <form
         className="settings-form"
         onChange={() => setMessage("")}
@@ -145,7 +145,7 @@ export function EngineSettings({
         <section className="settings-section settings-basics">
           <h2>基础设置</h2>
           <div className="field-row">
-            <label className="field-md">
+            <label className="field-sm">
               下载目录
               <input
                 value={String(config.global_client_cfg.work_dir || "")}
@@ -241,7 +241,7 @@ export function EngineSettings({
                 max="300"
                 required
                 aria-label="请求超时"
-                placeholder="秒，0 表示不限"
+                placeholder="0 不限"
                 title="单位：秒，0 表示不限"
                 value={config.request_timeout}
                 onChange={(e) =>

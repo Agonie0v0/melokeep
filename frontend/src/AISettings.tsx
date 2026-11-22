@@ -196,26 +196,37 @@ export function AISettings() {
           }}
         >
           <fieldset disabled={busy}>
-            <label className="ready-filter">
-              <input
-                name="enabled"
-                type="checkbox"
-                checked={config.enabled}
-                onChange={(e) => update("enabled", e.target.checked)}
-              />
-              启用 AI 助手
-            </label>
-            <label className="field-lg">
-              API 基础地址
-              <input
-                name="base_url"
-                type="url"
-                placeholder="https://api.example.com/v1"
-                value={config.base_url}
-                onChange={(e) => update("base_url", e.target.value)}
-              />
-            </label>
+            <div className="ai-toggle-row">
+              <label className="ready-filter">
+                <input
+                  name="enabled"
+                  type="checkbox"
+                  checked={config.enabled}
+                  onChange={(e) => update("enabled", e.target.checked)}
+                />
+                启用 AI 助手
+              </label>
+              <label className="ready-filter">
+                <input
+                  name="stream"
+                  type="checkbox"
+                  checked={!!config.stream}
+                  onChange={(e) => update("stream", e.target.checked)}
+                />{" "}
+                流式显示回复
+              </label>
+            </div>
             <div className="field-row">
+              <label className="field-lg">
+                API 基础地址
+                <input
+                  name="base_url"
+                  type="url"
+                  placeholder="https://api.example.com/v1"
+                  value={config.base_url}
+                  onChange={(e) => update("base_url", e.target.value)}
+                />
+              </label>
               <label className="field-sm">
                 接口类型
                 <select
@@ -252,90 +263,85 @@ export function AISettings() {
               !config.project_proxy_configured && (
                 <small>项目代理尚未配置，请先在「音源与下载」填写。</small>
               )}
-            <label className="ready-filter">
-              <input
-                name="stream"
-                type="checkbox"
-                checked={!!config.stream}
-                onChange={(e) => update("stream", e.target.checked)}
-              />{" "}
-              流式显示回复
-            </label>
-            <label className="field-lg">
-              API Key
-              <input
-                name="api_key"
-                type="password"
-                autoComplete="new-password"
-                value={key}
-                disabled={clearKey}
-                placeholder={
-                  config.key_configured
-                    ? "已配置，留空保留"
-                    : "本地无鉴权服务可留空"
-                }
-                onChange={(e) => {
-                  setKey(e.target.value);
-                  setError("");
-                  setNotice("");
-                }}
-              />
-            </label>
-            {config.key_configured && (
-              <label className="ready-filter">
-                <input
-                  name="clear_key"
-                  type="checkbox"
-                  checked={clearKey}
-                  onChange={(e) => setClearKey(e.target.checked)}
-                />
-                清除已保存的密钥
-              </label>
-            )}
-            <div className="ai-actions">
-              <button
-                type="button"
-                className="secondary"
-                disabled={modelsBusy}
-                onClick={() => void fetchModels(draft())}
-              >
-                {modelsBusy ? "正在获取模型…" : "获取模型列表"}
-              </button>
+            <div className="field-row">
+              <div className="bot-secret field-lg">
+                <label>
+                  API Key
+                  <input
+                    name="api_key"
+                    type="password"
+                    autoComplete="new-password"
+                    value={key}
+                    disabled={clearKey}
+                    placeholder={
+                      config.key_configured
+                        ? "已配置，留空保留"
+                        : "本地无鉴权服务可留空"
+                    }
+                    onChange={(e) => {
+                      setKey(e.target.value);
+                      setError("");
+                      setNotice("");
+                    }}
+                  />
+                </label>
+                {config.key_configured && (
+                  <label className="ready-filter">
+                    <input
+                      name="clear_key"
+                      type="checkbox"
+                      checked={clearKey}
+                      onChange={(e) => setClearKey(e.target.checked)}
+                    />
+                    清除已保存的密钥
+                  </label>
+                )}
+              </div>
+              {models.length > 0 && (
+                <label className="field-md">
+                  选择可用模型
+                  <select
+                    aria-label="选择可用模型"
+                    value={models.includes(config.model) ? config.model : ""}
+                    onChange={(e) => {
+                      if (e.target.value) update("model", e.target.value);
+                    }}
+                  >
+                    <option value="">请选择模型，或在下方手动填写</option>
+                    {models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <div className="ai-model-group">
+                <label className="field-md">
+                  模型名称
+                  <input
+                    name="model"
+                    placeholder="选择模型或手动填写模型 ID"
+                    value={config.model}
+                    maxLength={200}
+                    onChange={(e) => update("model", e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary ai-fetch-btn"
+                  disabled={modelsBusy}
+                  onClick={() => void fetchModels(draft())}
+                >
+                  {modelsBusy ? "正在获取模型…" : "获取模型列表"}
+                </button>
+              </div>
             </div>
             {modelsNotice && (
               <p className="muted" aria-live="polite">
                 {modelsNotice}
               </p>
             )}
-            {models.length > 0 && (
-              <label className="field-md">
-                选择可用模型
-                <select
-                  aria-label="选择可用模型"
-                  value={models.includes(config.model) ? config.model : ""}
-                  onChange={(e) => {
-                    if (e.target.value) update("model", e.target.value);
-                  }}
-                >
-                  <option value="">请选择模型，或在下方手动填写</option>
-                  {models.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <label className="field-md">
-              模型名称
-              <input
-                name="model"
-                placeholder="选择模型或手动填写模型 ID"
-                value={config.model}
-                maxLength={200}
-                onChange={(e) => update("model", e.target.value)}
-              />
-            </label>
             <label className="field-xl">
               音乐偏好
               <textarea

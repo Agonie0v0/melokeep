@@ -270,7 +270,7 @@ export function BotSettings() {
             "bot_sources",
             "机器人音源",
             "留空跟随 Web 设置，逗号分隔",
-            "field-sm",
+            "field-md",
           )}
         </div>
       </section>
@@ -348,6 +348,8 @@ export function BotSettings() {
             "数字用户 ID，多个用逗号分隔",
             "field-md",
           )}
+        </div>
+        <div className="field-row">
           {!config.tg_local_enabled &&
             field(
               "tg_api_url",
@@ -395,20 +397,22 @@ export function BotSettings() {
                 "tg_local_api_id",
                 "Telegram API ID",
                 "my.telegram.org 的应用 API ID",
-                "field-sm",
+                "field-md",
               )}
               {secret("tg_local_api_hash", "Telegram API Hash", "field-md")}
             </div>
           </div>
         )}
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => void test("tg")}
-        >
-          测试 Telegram 连接
-        </button>
+        <div className="bot-card-actions">
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => void test("tg")}
+          >
+            测试 Telegram 连接
+          </button>
+        </div>
         {feedback("tg")}
       </section>
       <section className="settings-section settings-sources">
@@ -433,6 +437,14 @@ export function BotSettings() {
         <div className="field-row">
           {field("wecom_corp_id", "企业微信 CorpID", "", "field-md")}
           {field("wecom_agent_id", "企业微信 AgentID", "", "field-sm")}
+          {field(
+            "wecom_allowed_users",
+            "企业微信用户白名单",
+            "留空允许全员；限制填 UserID，逗号分隔",
+            "field-lg",
+          )}
+        </div>
+        <div className="field-row">
           {secret("wecom_secret", "企业微信 Secret", "field-lg")}
           {field(
             "wecom_api_url",
@@ -440,14 +452,10 @@ export function BotSettings() {
             "https://qyapi.weixin.qq.com",
             "field-lg",
           )}
+        </div>
+        <div className="field-row">
           {secret("wecom_token", "企业微信回调 Token", "field-md")}
           {secret("wecom_aes_key", "企业微信 EncodingAESKey", "field-lg")}
-          {field(
-            "wecom_allowed_users",
-            "企业微信用户白名单",
-            "留空允许全部成员；限制时填 UserID，逗号分隔",
-            "field-md",
-          )}
         </div>
         <label className="field-lg">
           企业微信回调地址
@@ -462,14 +470,16 @@ export function BotSettings() {
             }
           />
         </label>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy}
-          onClick={() => void test("wecom")}
-        >
-          测试企业微信连接
-        </button>
+        <div className="bot-card-actions">
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => void test("wecom")}
+          >
+            测试企业微信连接
+          </button>
+        </div>
         {feedback("wecom")}
       </section>
       <section className="settings-section settings-sources">
@@ -596,9 +606,9 @@ export function BotSettings() {
                 channel === "feishu"
                   ? "Open ID，逗号分隔"
                   : channel === "dingtalk"
-                    ? "企业 UserID / senderStaffId，逗号分隔"
+                    ? "UserID / senderStaffId，逗号分隔"
                     : "数字用户 ID，逗号分隔",
-                "field-md",
+                channel === "dingtalk" ? "field-lg" : "field-md",
               )}
             </div>
             <label className="field-lg">

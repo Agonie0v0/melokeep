@@ -373,8 +373,8 @@ export function LibrarySettings({
                 <h2>刮削与归档默认规则</h2>
               </div>
             </div>
-            <div className="library-switches">
-              <label className="library-switch">
+            <div className="settings-toggle-row">
+              <label className="ready-filter">
                 <input
                   type="checkbox"
                   checked={config.auto_scrape}
@@ -384,7 +384,7 @@ export function LibrarySettings({
                   <strong>下载后自动刮削</strong>
                 </span>
               </label>
-              <label className="library-switch">
+              <label className="ready-filter">
                 <input
                   type="checkbox"
                   checked={config.auto_organize}
@@ -428,7 +428,7 @@ export function LibrarySettings({
               </label>
             </div>
             <div className="field-row">
-              <label className="field-sm">
+              <label className="field-md">
                 歌词保存方式
                 <select
                   value={config.lyrics_mode}
@@ -440,7 +440,7 @@ export function LibrarySettings({
                   <option value="none">不补全歌词</option>
                 </select>
               </label>
-              <label className="field-sm">
+              <label className="field-md">
                 封面保存方式
                 <select
                   value={config.cover_mode}
@@ -462,7 +462,7 @@ export function LibrarySettings({
                   min="0"
                   max="365"
                   aria-label="原文件恢复期限"
-                  placeholder="天，0 不备份"
+                  placeholder="0 不备份"
                   title="单位：天，设为 0 不保存原文件备份"
                   value={config.backup_days}
                   onChange={(e) =>
@@ -832,20 +832,29 @@ export function LibrarySettings({
             }}
           >
             <h2>音频指纹识别</h2>
-            <label className="field-md">
-              AcoustID 应用 Key
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={acoustidKey}
-                onChange={(e) => setAcoustidKey(e.target.value)}
-                placeholder={
-                  config.has_acoustid_key
-                    ? "已配置；输入新 Key 可替换"
-                    : "填写 acoustid.org 申请的应用 Key"
-                }
-              />
-            </label>
+            <div className="acoustid-inline-row">
+              <label className="field-md">
+                AcoustID 应用 Key
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={acoustidKey}
+                  onChange={(e) => setAcoustidKey(e.target.value)}
+                  placeholder={
+                    config.has_acoustid_key
+                      ? "已配置；输入新 Key 可替换"
+                      : "填写 acoustid.org 应用 Key"
+                  }
+                />
+              </label>
+              <button className="primary" disabled={!!busy || !acoustidKey}>
+                保存指纹配置
+              </button>
+              <span className="acoustid-status">
+                {config.has_acoustid_key ? "Key 已配置" : "Key 未配置"} ·{" "}
+                {config.tools?.fpcalc ? "fpcalc 已找到" : "fpcalc 未找到"}
+              </span>
+            </div>
             <p className="setting-help">
               需服务器安装 fpcalc ·{" "}
               <a
@@ -856,15 +865,6 @@ export function LibrarySettings({
                 申请应用 Key
               </a>
             </p>
-            <div className="management-toolbar">
-              <button className="primary" disabled={!!busy || !acoustidKey}>
-                保存指纹配置
-              </button>
-              <span>
-                {config.has_acoustid_key ? "Key 已配置" : "Key 未配置"} ·{" "}
-                {config.tools?.fpcalc ? "fpcalc 已找到" : "fpcalc 未找到"}
-              </span>
-            </div>
           </form>
         </>
       )}
@@ -877,7 +877,7 @@ export function LibrarySettings({
           }}
         >
           <h2>Navidrome 连接</h2>
-          <label className="library-switch">
+          <label className="ready-filter">
             <input
               type="checkbox"
               checked={config.navidrome.enabled}
@@ -950,42 +950,45 @@ export function LibrarySettings({
               />
             </label>
           </div>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={config.navidrome.auto_scan}
-              onChange={(e) =>
-                update("navidrome", {
-                  ...config.navidrome,
-                  auto_scan: e.target.checked,
-                })
-              }
-            />
-            本地整理完成后自动触发 Navidrome 扫描
-          </label>
-          {(config.navidrome.has_password || config.navidrome.has_api_key) && (
-            <label className="check-label">
+          <div className="settings-toggle-row">
+            <label className="ready-filter">
               <input
                 type="checkbox"
-                checked={clearCredentials}
-                onChange={(e) => setClearCredentials(e.target.checked)}
+                checked={config.navidrome.auto_scan}
+                onChange={(e) =>
+                  update("navidrome", {
+                    ...config.navidrome,
+                    auto_scan: e.target.checked,
+                  })
+                }
               />
-              清除原有认证信息
+              本地整理完成后自动触发 Navidrome 扫描
             </label>
-          )}
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={!!config.navidrome.delete_enabled}
-              onChange={(e) =>
-                update("navidrome", {
-                  ...config.navidrome,
-                  delete_enabled: e.target.checked,
-                })
-              }
-            />
-            允许删除 Navidrome 曲库原文件
-          </label>
+            {(config.navidrome.has_password ||
+              config.navidrome.has_api_key) && (
+              <label className="ready-filter">
+                <input
+                  type="checkbox"
+                  checked={clearCredentials}
+                  onChange={(e) => setClearCredentials(e.target.checked)}
+                />
+                清除原有认证信息
+              </label>
+            )}
+            <label className="ready-filter">
+              <input
+                type="checkbox"
+                checked={!!config.navidrome.delete_enabled}
+                onChange={(e) =>
+                  update("navidrome", {
+                    ...config.navidrome,
+                    delete_enabled: e.target.checked,
+                  })
+                }
+              />
+              允许删除 Navidrome 曲库原文件
+            </label>
+          </div>
           {config.navidrome.delete_enabled && (
             <>
               <div className="field-row">
@@ -993,7 +996,7 @@ export function LibrarySettings({
                   MeloKeep 中的共享目录
                   <input
                     value={config.navidrome.music_root || ""}
-                    placeholder={`/music/library（位于 ${config.file_root} 内）`}
+                    placeholder="/music/library"
                     onChange={(e) =>
                       update("navidrome", {
                         ...config.navidrome,
@@ -1002,7 +1005,7 @@ export function LibrarySettings({
                     }
                   />
                 </label>
-                <label className="field-md">
+                <label className="field-sm">
                   Navidrome 中的同一目录
                   <input
                     value={config.navidrome.server_music_root || ""}

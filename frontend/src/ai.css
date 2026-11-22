@@ -1355,30 +1355,107 @@
   margin: 0;
 }
 
+.ai-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-settings .ai-toggle-row label.ready-filter,
+.ai-toggle-row .ready-filter {
+  margin: 0 !important;
+}
+
+.ai-settings .field-row > .bot-secret {
+  margin: 0;
+}
+
+.ai-settings .bot-secret > label:not(.ready-filter) {
+  margin: 0;
+}
+
 .ai-settings fieldset > label:not(.ready-filter) {
   display: grid;
   gap: 8px;
 }
 
-.ai-settings fieldset > label.field-md {
-  width: min(100%, 340px);
-  max-width: 340px;
+.ai-settings
+  :is(fieldset, .field-row, .ai-model-group)
+  > :is(label, .bot-secret).field-xs {
+  width: auto;
+  min-width: 88px;
+  max-width: 100%;
 }
 
-.ai-settings fieldset > label.field-lg {
-  width: min(100%, 480px);
-  max-width: 480px;
+.ai-settings
+  :is(fieldset, .field-row, .ai-model-group)
+  > :is(label, .bot-secret).field-sm {
+  width: min(100%, 168px);
+  max-width: 168px;
 }
 
-.ai-settings fieldset > label.field-xl {
-  width: min(100%, 560px);
-  max-width: 560px;
+.ai-settings
+  :is(fieldset, .field-row, .ai-model-group)
+  > :is(label, .bot-secret).field-md {
+  width: min(100%, 224px);
+  max-width: 224px;
+}
+
+.ai-settings
+  :is(fieldset, .field-row, .ai-model-group)
+  > :is(label, .bot-secret).field-lg {
+  width: min(100%, 296px);
+  max-width: 296px;
+}
+
+.ai-settings
+  :is(fieldset, .field-row, .ai-model-group)
+  > :is(label, .bot-secret).field-xl {
+  width: min(100%, 420px);
+  max-width: 420px;
+}
+
+.ai-model-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.ai-settings .ai-model-group > label,
+.ai-model-group > label {
+  margin: 0;
+  min-width: 0;
+}
+
+.ai-settings .ai-model-group > label.field-md {
+  width: 224px;
+  max-width: 100%;
+}
+
+.ai-fetch-btn {
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .ai-settings input:not([type="checkbox"]),
 .ai-settings select {
   width: 100%;
   min-width: 0;
+}
+
+.ai-settings
+  .field-xs
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select
+  ) {
+  width: 88px;
+  max-width: 100%;
 }
 
 .ai-settings .settings-grid {
@@ -1444,9 +1521,37 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .ai-settings fieldset > label.field-md,
-  .ai-settings fieldset > label.field-lg,
-  .ai-settings fieldset > label.field-xl {
+  .ai-settings
+    :is(fieldset, .field-row, .ai-model-group)
+    > :is(label, .bot-secret):is(
+      .field-xs,
+      .field-sm,
+      .field-md,
+      .field-lg,
+      .field-xl
+    ) {
+    width: 100%;
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+
+  .ai-model-group {
+    width: 100%;
+  }
+
+  .ai-model-group > label.field-md {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .ai-settings
+    .field-xs
+    :is(
+      input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+          [type="color"]
+        ),
+      select
+    ) {
     width: 100%;
     max-width: 100%;
   }

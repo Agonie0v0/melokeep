@@ -364,7 +364,7 @@
 }
 
 .searchbox {
-  max-width: 780px;
+  max-width: 620px;
   width: 100%;
   margin-inline: auto;
   border-radius: 12px;
@@ -519,7 +519,7 @@
 }
 
 .library-search {
-  max-width: 380px;
+  max-width: 240px;
 }
 
 .settings-grid {
@@ -3576,7 +3576,12 @@
 }
 
 .settings-workspace .update-meta-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(3, minmax(0, 0.92fr))
+    minmax(0, 1.1fr)
+    minmax(0, 0.92fr)
+    minmax(0, 1.48fr);
+  gap: 10px;
 }
 
 .settings-workspace .settings-form {
@@ -3626,6 +3631,30 @@
   padding: 0 13px;
 }
 
+@media (min-width: 1120px) {
+  .settings-workspace
+    :is(.engine-settings, .engine-settings-stack)
+    > .settings-form {
+    grid-template-columns: minmax(0, 1.32fr) minmax(330px, 0.78fr);
+    align-items: stretch;
+  }
+
+  .settings-workspace
+    :is(.engine-settings, .engine-settings-stack)
+    .settings-basics
+    .field-row {
+    gap: 12px 14px;
+  }
+}
+
+@media (min-width: 1120px) and (max-width: 1260px) {
+  .settings-workspace
+    :is(.engine-settings, .engine-settings-stack)
+    > .settings-form {
+    grid-template-columns: minmax(0, 1.44fr) minmax(310px, 0.76fr);
+  }
+}
+
 .settings-workspace .settings-grid,
 .settings-workspace .bot-settings .settings-basics .settings-grid,
 .settings-workspace .bot-settings .settings-sources > .settings-grid,
@@ -3636,6 +3665,15 @@
 
 .settings-workspace .source-settings-grid .source-setting .settings-grid {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-workspace .settings-proxy .source-picker {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-workspace .source-picker .check-label {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .settings-workspace
@@ -3707,43 +3745,44 @@
 .settings-workspace
   :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
   :is(label, .bot-secret).field-xs {
-  width: min(100%, 148px);
-  max-width: 148px;
+  width: auto;
+  min-width: 88px;
+  max-width: 100%;
 }
 
 .field-sm,
 .settings-workspace
   :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
   :is(label, .bot-secret).field-sm {
-  width: min(100%, 220px);
-  max-width: 220px;
+  width: min(100%, 168px);
+  max-width: 168px;
 }
 
 .field-md,
 .settings-workspace
   :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
   :is(label, .bot-secret).field-md {
-  width: min(100%, 340px);
-  max-width: 340px;
+  width: min(100%, 224px);
+  max-width: 224px;
 }
 
 .field-lg,
 .settings-workspace
   :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
   :is(label, .bot-secret).field-lg {
-  width: min(100%, 480px);
-  max-width: 480px;
+  width: min(100%, 296px);
+  max-width: 296px;
 }
 
 .field-xl,
 .settings-workspace
   :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
   :is(label, .bot-secret).field-xl {
-  width: min(100%, 560px);
-  max-width: 560px;
+  width: min(100%, 420px);
+  max-width: 420px;
 }
 
-:is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl)
+:is(.field-sm, .field-md, .field-lg, .field-xl)
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
         [type="color"]
@@ -3753,7 +3792,7 @@
   ),
 .settings-workspace
   .settings-section
-  :is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl)
+  :is(.field-sm, .field-md, .field-lg, .field-xl)
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
         [type="color"]
@@ -3762,6 +3801,26 @@
     textarea
   ) {
   width: 100%;
+  max-width: 100%;
+}
+
+.field-xs
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select
+  ),
+.settings-workspace
+  .settings-section
+  .field-xs
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select
+  ) {
+  width: 88px;
   max-width: 100%;
 }
 
@@ -3790,27 +3849,40 @@
     width: min(100%, 180px);
     max-width: 180px;
   }
+
+  .settings-workspace .settings-form > .settings-save.settings-sticky-bar,
+  .settings-workspace .settings-sticky-bar {
+    width: fit-content;
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .settings-workspace .ai-settings .ai-model-group > label.field-md {
+    width: 224px;
+    max-width: 100%;
+  }
 }
 
-@media (min-width: 1100px) {
-  .settings-workspace
-    .bot-settings
-    .settings-basics
-    .field-row:has(> .field-lg):has(> .field-md)
-    > .field-md {
-    flex: 1 1 220px;
-    width: auto;
-    max-width: 340px;
+@media (min-width: 901px) {
+  .settings-workspace .settings-form > .settings-save.settings-sticky-bar,
+  .settings-workspace .settings-sticky-bar {
+    position: static;
   }
+}
 
+@media (min-width: 1120px) and (max-width: 1260px) {
   .settings-workspace
-    .settings-section
-    .field-row:has(> .field-md + .field-md + .field-md)
-    > .field-md {
-    flex: 1 1 260px;
-    width: auto;
-    max-width: 340px;
+    :is(.engine-settings, .engine-settings-stack)
+    .settings-basics
+    .field-row
+    > label.field-sm {
+    width: min(100%, clamp(152px, calc((100% - 28px) / 3), 168px));
+    max-width: 168px;
   }
+}
+
+.settings-workspace .settings-section > .settings-sticky-bar:last-child {
+  margin-bottom: 0;
 }
 
 .field-unit {
@@ -3818,6 +3890,52 @@
   font-size: 11.5px;
   color: var(--muted);
   margin-left: 2px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.settings-section .field-row + .settings-toggle-row {
+  margin-top: 16px;
+}
+
+.settings-toggle-row:last-child {
+  margin-bottom: 0;
+}
+
+.settings-workspace .settings-section .settings-toggle-row label.ready-filter {
+  margin: 0 !important;
+}
+
+.settings-workspace .settings-section > label.ready-filter {
+  display: flex !important;
+  margin: 0 0 14px !important;
+}
+
+.settings-workspace .settings-section > label.ready-filter:last-child {
+  margin-bottom: 0 !important;
+}
+
+.settings-workspace .source-setting > label.ready-filter {
+  display: flex !important;
+  margin: 12px 0 14px !important;
+}
+
+.bot-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 14px;
+}
+
+.settings-workspace .settings-section .bot-card-actions label.ready-filter {
+  margin: 0 !important;
 }
 
 .bot-toggle-grid {
@@ -3876,7 +3994,7 @@
     width: 34%;
   }
   .settings-workspace .update-meta-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -4311,7 +4429,12 @@
   .settings-workspace .settings-section {
     padding: 18px 16px;
   }
-  .settings-workspace .update-meta-grid,
+  .library-search {
+    max-width: 100%;
+  }
+  .settings-workspace .update-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .settings-workspace .settings-grid,
   .settings-workspace .bot-settings .settings-basics .settings-grid,
   .settings-workspace .bot-settings .settings-sources > .settings-grid,
@@ -4328,8 +4451,7 @@
   label.field-md,
   label.field-lg,
   label.field-xl,
-  .bot-secret.field-md,
-  .bot-secret.field-lg,
+  .bot-secret:is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl),
   .settings-workspace
     :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
     :is(label, .bot-secret):is(
@@ -4342,6 +4464,30 @@
     width: 100%;
     max-width: 100%;
     flex-basis: 100%;
+  }
+  .field-xs
+    :is(
+      input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+          [type="color"]
+        ),
+      select
+    ),
+  .settings-workspace
+    .settings-section
+    .field-xs
+    :is(
+      input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+          [type="color"]
+        ),
+      select
+    ) {
+    width: 100%;
+    max-width: 100%;
+  }
+  .settings-workspace .settings-form > .settings-save.settings-sticky-bar,
+  .settings-workspace .settings-sticky-bar {
+    width: 100%;
+    max-width: 100%;
   }
   .search-view .results {
     padding: 8px 10px;

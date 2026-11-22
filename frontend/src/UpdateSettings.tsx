@@ -255,8 +255,6 @@ export function UpdateSettings({
             ? "参考最新提交"
             : "等待检查";
 
-  const dockerCommand = "docker compose pull && docker compose up -d";
-
   async function copyText(key: string, value: string) {
     try {
       await navigator.clipboard.writeText(value);
@@ -322,6 +320,23 @@ export function UpdateSettings({
             </h2>
           </div>
           <div className="update-header-actions">
+            {current?.in_container &&
+              actionMode === "up_to_date" &&
+              !updatingNow && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={checking || updatingNow}
+                  title="强制重新拉取当前镜像并重启"
+                  onClick={() => {
+                    setActionError("");
+                    setConfirmMode("force_pull");
+                  }}
+                >
+                  <ArrowUpCircle aria-hidden="true" />
+                  重新拉取并重启
+                </button>
+              )}
             <button
               type="button"
               className={info?.has_update ? "secondary" : "primary"}
@@ -560,72 +575,6 @@ export function UpdateSettings({
                 : "当前已是最新版本，暂无待更新日志。"}
           </p>
         ) : null}
-      </section>
-
-      <section className="settings-section">
-        <h2>如何更新</h2>
-        {current?.in_container ? (
-          <>
-            <p>
-              当前运行在 Docker 容器中，请在宿主机{" "}
-              <code>docker-compose.yml</code>{" "}
-              所在目录执行以下命令拉取最新镜像并重建容器（<code>/data</code> 与{" "}
-              <code>/music</code> 挂载数据会自动保留）：
-            </p>
-            <div className="update-command-row">
-              <code>{dockerCommand}</code>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void copyText("docker-cmd", dockerCommand)}
-              >
-                {copiedKey === "docker-cmd" ? <Check /> : <Copy />}
-                {copiedKey === "docker-cmd" ? "已复制" : "复制命令"}
-              </button>
-            </div>
-            {actionMode === "disabled_hint" && (
-              <div className="update-sock-guide">
-                <strong>开启 Web 单容器一键更新</strong>
-                <p>
-                  只需在宿主机 <code>docker-compose.yml</code> 的{" "}
-                  <code>volumes:</code> 下增加挂载行，或在{" "}
-                  <code>docker run</code> 中传入挂载参数并重启容器，即可在 Web
-                  端一键拉取最新镜像并平滑更新：
-                </p>
-                <DockerSockSnippets
-                  prefix="guide"
-                  copiedKey={copiedKey}
-                  onCopy={(key, value) => void copyText(key, value)}
-                />
-              </div>
-            )}
-            {actionMode === "up_to_date" && (
-              <div className="update-force-row">
-                <span>
-                  当前已是最新版本；如需刷新当前标签镜像或重建容器，可手动重新拉取并重启。
-                </span>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={checking || updatingNow}
-                  onClick={() => {
-                    setActionError("");
-                    setConfirmMode("force_pull");
-                  }}
-                >
-                  <ArrowUpCircle aria-hidden="true" />
-                  强制重新拉取当前镜像并重启
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <p>
-            当前为本地 / 源码模式运行：请拉取最新源码（<code>git pull</code>
-            ）并重新构建前端（<code>cd frontend && npm run build</code>）与 Go
-            后端后重启服务。
-          </p>
-        )}
       </section>
 
       {confirmMode && !updatingNow && (

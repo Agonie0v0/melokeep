@@ -871,7 +871,7 @@ export function PluginSettings({
                 type="url"
                 value={sourceUrl}
                 onChange={(e) => setSourceUrl(e.target.value)}
-                placeholder="https://example.org/plugins/open-provider.js"
+                placeholder="https://example.com/plugin.js"
               />
             </label>
             <p className="setting-help">
