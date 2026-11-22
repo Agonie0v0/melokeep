@@ -149,6 +149,13 @@ type resolvedSource struct {
 	provider   model.Provider
 }
 
+type preparedSource struct {
+	src    resolvedSource
+	cached []model.ProviderTrack
+	hit    bool
+	flight *searchFlight
+}
+
 // CreateSearch validates inputs and resource limits, then starts a singleflight-backed search job.
 func (s *Service) CreateSearch(ctx context.Context, actor auth.Actor, snap config.Snapshot, req CreateRequest) (string, error) {
 	if !actor.Authenticated {
@@ -268,14 +275,60 @@ func (s *Service) CreateSearch(ctx context.Context, actor auth.Actor, snap confi
 	})
 	s.jobs[jobID] = job
 	s.jobSeq = append(s.jobSeq, jobID)
+
+	planned := make([]preparedSource, 0, len(sources))
+	var newFlights []*searchFlight
+	for _, src := range sources {
+		fk := makeFlightKey(snap.Revision, src.engineName, keyword, limit)
+		dk := fk.digest()
+		if req.Refresh {
+			s.cache.Invalidate(fk)
+		} else if cachedTracks, hit := s.cache.Get(fk); hit {
+			planned = append(planned, preparedSource{
+				src:    src,
+				cached: cachedTracks,
+				hit:    true,
+			})
+			continue
+		}
+
+		fl, exists := s.flights[dk]
+		if !exists || fl.isDone() {
+			flCtx, flCancel := context.WithCancel(s.baseCtx)
+			fl = &searchFlight{
+				svc:          s,
+				key:          fk,
+				digest:       dk,
+				src:          src,
+				limit:        limit,
+				logTaskID:    job.id,
+				startedAt:    now,
+				ctx:          flCtx,
+				cancel:       flCancel,
+				subscribers:  make(map[string]*flightConsumer),
+				notifySignal: make(chan struct{}),
+				doneCh:       make(chan struct{}),
+			}
+			s.flights[dk] = fl
+			newFlights = append(newFlights, fl)
+		}
+		_ = fl.attach(job.id)
+		planned = append(planned, preparedSource{
+			src:    src,
+			flight: fl,
+		})
+	}
 	s.mu.Unlock()
 
-	go s.runJob(job, snap, sources, keyword, limit, req.Refresh)
 	sourceIDs := make([]string, 0, len(sources))
 	for _, src := range sources {
 		sourceIDs = append(sourceIDs, src.publicID)
 	}
 	s.log("info", "search", jobID, fmt.Sprintf("开始搜索「%s」· 音源=%s · 每源目标=%d · 强制刷新=%v", keyword, strings.Join(sourceIDs, ","), limit, req.Refresh))
+	for _, fl := range newFlights {
+		go fl.run(snap)
+	}
+	go s.runJob(job, snap, planned, keyword, limit)
 	return jobID, nil
 }
 
@@ -428,15 +481,15 @@ func (s *Service) cancelJob(job *searchJob, markCancelled bool) {
 	job.finishTerminal(s.now())
 }
 
-func (s *Service) runJob(job *searchJob, snap config.Snapshot, sources []resolvedSource, keyword string, limit int, refresh bool) {
+func (s *Service) runJob(job *searchJob, snap config.Snapshot, planned []preparedSource, keyword string, limit int) {
 	defer job.wg.Done()
 	var srcWG sync.WaitGroup
-	for _, src := range sources {
-		src := src
+	for _, ps := range planned {
+		ps := ps
 		srcWG.Add(1)
 		go func() {
 			defer srcWG.Done()
-			s.runJobSource(job, snap, src, keyword, limit, refresh)
+			s.runJobSource(job, ps, limit)
 		}()
 	}
 	srcWG.Wait()
@@ -453,16 +506,10 @@ func (s *Service) runJob(job *searchJob, snap config.Snapshot, sources []resolve
 	job.finishTerminal(finishedAt)
 }
 
-func (s *Service) runJobSource(job *searchJob, snap config.Snapshot, src resolvedSource, keyword string, limit int, refresh bool) {
-	fk := makeFlightKey(snap.Revision, src.engineName, keyword, limit)
-	dk := fk.digest()
-
-	s.mu.Lock()
-	if refresh {
-		s.cache.Invalidate(fk)
-	} else if cachedTracks, hit := s.cache.Get(fk); hit {
-		s.mu.Unlock()
-		if err := s.persistTracks(job.ctx, cachedTracks); err != nil {
+func (s *Service) runJobSource(job *searchJob, ps preparedSource, limit int) {
+	src := ps.src
+	if ps.hit {
+		if err := s.persistTracks(job.ctx, ps.cached); err != nil {
 			if job.ctx.Err() != nil {
 				return
 			}
@@ -471,7 +518,7 @@ func (s *Service) runJobSource(job *searchJob, snap config.Snapshot, src resolve
 			return
 		}
 		emitted := 0
-		for _, tr := range cachedTracks {
+		for _, tr := range ps.cached {
 			if job.ctx.Err() != nil || job.isDone() {
 				return
 			}
@@ -486,30 +533,11 @@ func (s *Service) runJobSource(job *searchJob, snap config.Snapshot, src resolve
 		return
 	}
 
-	fl, exists := s.flights[dk]
-	if !exists || fl.isDone() {
-		flCtx, flCancel := context.WithCancel(s.baseCtx)
-		fl = &searchFlight{
-			svc:          s,
-			key:          fk,
-			digest:       dk,
-			src:          src,
-			limit:        limit,
-			logTaskID:    job.id,
-			startedAt:    s.now(),
-			ctx:          flCtx,
-			cancel:       flCancel,
-			subscribers:  make(map[string]*flightConsumer),
-			notifySignal: make(chan struct{}),
-			doneCh:       make(chan struct{}),
-		}
-		s.flights[dk] = fl
-		go fl.run(snap)
-	}
-	_ = fl.attach(job.id)
-	s.mu.Unlock()
-
+	fl := ps.flight
 	defer s.detachFlight(fl, job.id)
+	if job.ctx.Err() != nil || job.isDone() {
+		return
+	}
 
 	emittedIDs := make(map[string]bool)
 	cursor := 0
