@@ -33,6 +33,26 @@ type EpisodeProvider interface {
 	Episodes(ctx context.Context, track model.ProviderTrack) ([]model.ProviderTrack, error)
 }
 
+// EpisodePageOptions configures paginated episode expansion.
+type EpisodePageOptions struct {
+	Page     int
+	PageSize int
+}
+
+// EpisodePage represents a single page of episode tracks and pagination state.
+type EpisodePage struct {
+	Items    []model.ProviderTrack
+	Page     int
+	PageSize int
+	Total    int
+	HasMore  bool
+}
+
+// PagedEpisodeProvider is optionally implemented by providers supporting paginated episode queries.
+type PagedEpisodeProvider interface {
+	EpisodesPage(ctx context.Context, track model.ProviderTrack, opts EpisodePageOptions) (EpisodePage, error)
+}
+
 // MetadataItem represents a structured metadata enrichment candidate returned by a MetadataProvider.
 type MetadataItem struct {
 	SourceID    string  `json:"source_id"`

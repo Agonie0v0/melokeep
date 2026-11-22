@@ -32,6 +32,11 @@ import (
 type taskSpec struct {
 	downloadID         string
 	snap               config.Snapshot
+	preferredQuality   string
+	layoutOverride     string
+	bookTitle          string
+	chapterIndex       int
+	chapterTotal       int
 	allowPreview       bool
 	allowExternalWrite bool
 	rootID             string
@@ -153,7 +158,7 @@ func NewService(
 	}
 	maxQueued := opts.Budgets.MaxQueuedDownloads
 	if maxQueued <= 0 {
-		maxQueued = 1000
+		maxQueued = 5000
 	}
 	if opts.BackoffBase <= 0 {
 		opts.BackoffBase = DefaultBackoffBase
@@ -273,32 +278,50 @@ func (s *Service) Enqueue(ctx context.Context, actor auth.Actor, snap config.Sna
 		return store.CreateDownloadResult{}, model.NewError(model.ErrNotFound, http.StatusNotFound, "曲目记录不存在")
 	}
 
+	prefQuality := strings.ToLower(strings.TrimSpace(req.PreferredQuality))
+	layoutOverride := strings.TrimSpace(req.Layout)
+	bookTitle := strings.TrimSpace(req.BookTitle)
+
 	qualityID := strings.TrimSpace(req.QualityID)
-	if qualityID == "" {
+	if qualityID == "" && prefQuality == "" {
 		qualityID = qualityHint
 	}
 	qualityLabel := strings.TrimSpace(req.QualityLabel)
 	var variantID string
-	for _, v := range variants {
-		if qualityID == "" && !req.AllowPreview && v.PreviewOnly {
-			continue
-		}
-		if qualityID == "" || v.VariantID == qualityID || v.UpstreamID == qualityID {
-			variantID = v.VariantID
-			if qualityID == "" {
-				qualityID = v.VariantID
+	if qualityID != "" || prefQuality == "" {
+		for _, v := range variants {
+			if qualityID == "" && !req.AllowPreview && v.PreviewOnly {
+				continue
 			}
-			if qualityLabel == "" {
-				qualityLabel = v.Label
+			if qualityID == "" || v.VariantID == qualityID || v.UpstreamID == qualityID {
+				variantID = v.VariantID
+				if qualityID == "" {
+					qualityID = v.VariantID
+				}
+				if qualityLabel == "" {
+					qualityLabel = v.Label
+				}
+				break
 			}
-			break
 		}
 	}
 	if qualityLabel == "" {
-		qualityLabel = qualityID
+		if qualityID == "" {
+			if prefQuality == "standard" {
+				qualityLabel = "自动（标准音质）"
+			} else {
+				qualityLabel = "自动（最高可用）"
+			}
+		} else {
+			qualityLabel = qualityID
+		}
 	}
 
-	dedupeKey := computeDedupeKey(tr.Source, tr.Locator, qualityID, snap.Revision)
+	dedupeQuality := qualityID
+	if dedupeQuality == "" && prefQuality != "" {
+		dedupeQuality = "auto:" + prefQuality
+	}
+	dedupeKey := computeDedupeKey(tr.Source, tr.Locator, dedupeQuality, snap.Revision)
 	reuseCompleted := true
 	if req.ReuseCompleted != nil {
 		reuseCompleted = *req.ReuseCompleted
@@ -311,6 +334,11 @@ func (s *Service) Enqueue(ctx context.Context, actor auth.Actor, snap config.Sna
 	settingsBytes, _ := json.Marshal(map[string]any{
 		"config_revision":      snap.Revision,
 		"layout":               snap.Runtime.DownloadLayout,
+		"layout_override":      layoutOverride,
+		"preferred_quality":    prefQuality,
+		"book_title":           bookTitle,
+		"chapter_index":        req.ChapterIndex,
+		"chapter_total":        req.ChapterTotal,
 		"lyrics_mode":          snap.Runtime.LyricsMode,
 		"embed_metadata":       snap.Runtime.EmbedMetadata,
 		"allow_preview":        req.AllowPreview,
@@ -320,7 +348,7 @@ func (s *Service) Enqueue(ctx context.Context, actor auth.Actor, snap config.Sna
 	})
 	reqHash := strings.TrimSpace(req.RequestHash)
 	if reqHash == "" {
-		sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%v\x00%s", req.PublicID, qualityID, req.RootID, req.AllowPreview, req.IntentNonce)))
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%v\x00%s", req.PublicID, qualityID, prefQuality, layoutOverride, bookTitle, req.RootID, req.ChapterIndex, req.ChapterTotal, req.AllowPreview, req.IntentNonce)))
 		reqHash = hex.EncodeToString(sum[:])
 	}
 
@@ -351,6 +379,11 @@ func (s *Service) Enqueue(ctx context.Context, actor auth.Actor, snap config.Sna
 		spec := taskSpec{
 			downloadID:         res.Download.ID,
 			snap:               snap,
+			preferredQuality:   prefQuality,
+			layoutOverride:     layoutOverride,
+			bookTitle:          bookTitle,
+			chapterIndex:       req.ChapterIndex,
+			chapterTotal:       req.ChapterTotal,
 			allowPreview:       req.AllowPreview,
 			allowExternalWrite: allowExtWrite,
 			rootID:             req.RootID,
@@ -642,6 +675,7 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 			var cover *string
 			var sizeBytes *int64
 			var sizeLabel *string
+			var playlistIndex *int
 			var meta map[string]any
 			if tr.MetadataJSON != "" {
 				dec := json.NewDecoder(strings.NewReader(tr.MetadataJSON))
@@ -653,6 +687,10 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 			}
 			if meta != nil {
 				sizeBytes = parsePositiveInt64(meta["size_bytes"])
+				if idxPtr := parsePositiveInt64(meta["playlist_index"]); idxPtr != nil {
+					idxVal := int(*idxPtr)
+					playlistIndex = &idxVal
+				}
 				if sl, ok := meta["size_label"].(string); ok {
 					if trimmed := strings.TrimSpace(sl); trimmed != "" {
 						sizeLabel = &trimmed
@@ -683,18 +721,19 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 				sizeBytes = &val
 			}
 			trackDTO = model.TrackDTOFromDomain(model.ProviderTrack{
-				PublicID:   dl.PublicID,
-				Source:     config.PublicSourceID(tr.Source),
-				SourceID:   tr.Locator,
-				RootSource: tr.RootSource,
-				Title:      tr.Title,
-				Artist:     tr.Artist,
-				Album:      tr.Album,
-				Duration:   float64(tr.DurationMS) / 1000.0,
-				Cover:      cover,
-				SizeBytes:  sizeBytes,
-				SizeLabel:  sizeLabel,
-				Variants:   variants,
+				PublicID:      dl.PublicID,
+				Source:        config.PublicSourceID(tr.Source),
+				SourceID:      tr.Locator,
+				RootSource:    tr.RootSource,
+				Title:         tr.Title,
+				Artist:        tr.Artist,
+				Album:         tr.Album,
+				Duration:      float64(tr.DurationMS) / 1000.0,
+				Cover:         cover,
+				SizeBytes:     sizeBytes,
+				SizeLabel:     sizeLabel,
+				PlaylistIndex: playlistIndex,
+				Variants:      variants,
 			}, model.PlaybackDTO{State: "pending", PreviewOnly: false})
 		}
 	}
@@ -916,18 +955,20 @@ func (s *Service) executeJob(dlID string) {
 	resolveCtx := provider.WithRequestContext(runCtx, rc)
 	resolvedList, err := prov.Resolve(resolveCtx, pTrack, model.QualityPolicy{
 		PreferredVariantID: dl.QualityID,
+		PreferredQuality:   spec.preferredQuality,
 		AllowPreview:       spec.allowPreview,
 	})
 	var chosen model.ResolvedMedia
 	if err == nil {
-		chosen, ok = pickResolvedMedia(resolvedList, dl.QualityID, spec.allowPreview)
+		chosen, ok = pickResolvedMedia(resolvedList, dl.QualityID, spec.preferredQuality, spec.allowPreview)
 	}
 	if (!ok || err != nil) && strings.TrimSpace(dl.QualityID) != "" {
 		if fbList, fbErr := prov.Resolve(resolveCtx, pTrack, model.QualityPolicy{
 			PreferredVariantID: "",
+			PreferredQuality:   spec.preferredQuality,
 			AllowPreview:       spec.allowPreview,
 		}); fbErr == nil {
-			if fbChosen, fbOK := pickResolvedMedia(fbList, "", spec.allowPreview); fbOK {
+			if fbChosen, fbOK := pickResolvedMedia(fbList, "", spec.preferredQuality, spec.allowPreview); fbOK {
 				chosen, ok = fbChosen, true
 				resolvedList = fbList
 				err = nil
@@ -1145,6 +1186,10 @@ func (s *Service) executeJob(dlID string) {
 	var createdJobID string
 	var publishedRootPath string
 	var publishedPath string
+	effectiveLayout := spec.snap.Runtime.DownloadLayout
+	if strings.TrimSpace(spec.layoutOverride) != "" {
+		effectiveLayout = strings.TrimSpace(spec.layoutOverride)
+	}
 	func() {
 		roots := s.coords.Roots()
 		if len(roots) == 0 {
@@ -1160,10 +1205,31 @@ func (s *Service) executeJob(dlID string) {
 				}
 			}
 		}
-		targetPath := TargetAudioPath(targetRoot.CanonicalPath, spec.snap.Runtime.DownloadLayout, pTrack, ext, dlID)
+		targetPath := TargetAudioPathWithOptions(targetRoot.CanonicalPath, effectiveLayout, pTrack, ext, dlID, PathOptions{
+			BookTitle:    spec.bookTitle,
+			ChapterIndex: spec.chapterIndex,
+			ChapterTotal: spec.chapterTotal,
+		})
 		publishedRootPath = targetRoot.CanonicalPath
 		publishedPath = targetPath
 		sidecars := BuildSidecars(targetPath, spec.snap.Runtime.LyricsMode, lyricsText, coverData, coverMime)
+
+		effectiveAlbum := trRec.Album
+		if strings.TrimSpace(effectiveAlbum) == "" && strings.TrimSpace(spec.bookTitle) != "" {
+			effectiveAlbum = strings.TrimSpace(spec.bookTitle)
+		}
+		effectiveChapter := spec.chapterIndex
+		if effectiveChapter <= 0 && pTrack.PlaylistIndex != nil {
+			effectiveChapter = *pTrack.PlaylistIndex
+		}
+		trackNumTag := ""
+		if effectiveChapter > 0 {
+			if spec.chapterTotal > 0 {
+				trackNumTag = fmt.Sprintf("%d/%d", effectiveChapter, spec.chapterTotal)
+			} else {
+				trackNumTag = strconv.Itoa(effectiveChapter)
+			}
+		}
 
 		var autoSpec *store.AutoOrganizeJobSpec
 		if spec.autoOrganize != nil && spec.autoOrganize.Enabled {
@@ -1195,14 +1261,18 @@ func (s *Service) executeJob(dlID string) {
 		var mutator files.StageMutator
 		if spec.snap.Runtime.EmbedMetadata && s.tags != nil && media.EditableExtensions[strings.ToLower(ext)] {
 			mutator = func(mCtx context.Context, stageAudioPath string) ([]files.SidecarOutput, error) {
+				tagsMap := map[string]string{
+					"title":  trRec.Title,
+					"artist": trRec.Artist,
+					"album":  effectiveAlbum,
+				}
+				if trackNumTag != "" {
+					tagsMap["track_number"] = trackNumTag
+				}
 				req := helper.WriteTagsRequest{
 					AllowedStageRoot: targetRoot.CanonicalPath,
 					StagePath:        stageAudioPath,
-					Tags: map[string]string{
-						"title":  trRec.Title,
-						"artist": trRec.Artist,
-						"album":  trRec.Album,
-					},
+					Tags:             tagsMap,
 				}
 				mode := strings.ToLower(strings.TrimSpace(spec.snap.Runtime.LyricsMode))
 				if (mode == "" || mode == "both" || mode == "embed") && strings.TrimSpace(lyricsText) != "" {
@@ -1226,20 +1296,25 @@ func (s *Service) executeJob(dlID string) {
 			}
 		}
 
+		newMeta := map[string]string{
+			"title":  trRec.Title,
+			"artist": trRec.Artist,
+			"album":  effectiveAlbum,
+		}
+		if trackNumTag != "" {
+			newMeta["track_number"] = trackNumTag
+		}
+
 		_, pubErr = s.coords.Execute(s.baseCtx, files.OperationRequest{
-			Kind:          "download_publish",
-			SourcePath:    partPath,
-			TargetPath:    targetPath,
-			NewTitle:      trRec.Title,
-			NewArtist:     trRec.Artist,
-			NewAlbum:      trRec.Album,
-			NewDurationMS: durationMS,
-			Editable:      media.EditableExtensions[strings.ToLower(ext)],
-			NewMetadata: map[string]string{
-				"title":  trRec.Title,
-				"artist": trRec.Artist,
-				"album":  trRec.Album,
-			},
+			Kind:           "download_publish",
+			SourcePath:     partPath,
+			TargetPath:     targetPath,
+			NewTitle:       trRec.Title,
+			NewArtist:      trRec.Artist,
+			NewAlbum:       effectiveAlbum,
+			NewDurationMS:  durationMS,
+			Editable:       media.EditableExtensions[strings.ToLower(ext)],
+			NewMetadata:    newMeta,
 			Mutator:        mutator,
 			HookAfterPhase: s.opts.TestPublishHook,
 			DownloadPublish: &files.DownloadPublishSpec{
@@ -1269,7 +1344,8 @@ func (s *Service) executeJob(dlID string) {
 	_ = os.Remove(partPath)
 	s.deleteSpec(dlID)
 	s.log("info", dlID, fmt.Sprintf("下载完成：《%s》 · %s · %d bytes", trRec.Title, strings.TrimPrefix(ext, "."), bytesWritten))
-	if s.libArtwork != nil && strings.TrimSpace(trRec.Artist) != "" && publishedRootPath != "" && publishedPath != "" {
+	if !strings.EqualFold(effectiveLayout, "audiobook") &&
+		s.libArtwork != nil && strings.TrimSpace(trRec.Artist) != "" && publishedRootPath != "" && publishedPath != "" {
 		if library.ResolveArtistDir(publishedRootPath, publishedPath, trRec.Artist) != "" {
 			artCtx, artCancel := context.WithTimeout(s.baseCtx, 6*time.Second)
 			if target, status, artErr := s.libArtwork.EnsureArtistArtwork(artCtx, spec.snap, publishedRootPath, publishedPath, trRec.Artist); artErr != nil {
@@ -1541,6 +1617,11 @@ func (s *Service) specForRetry(ctx context.Context, dlID string, snap config.Sna
 	var settingsJSON string
 	_ = s.store.Reader().QueryRowContext(ctx, `SELECT settings_json FROM downloads WHERE id = ?`, dlID).Scan(&settingsJSON)
 	var parsed struct {
+		PreferredQuality   string              `json:"preferred_quality"`
+		LayoutOverride     string              `json:"layout_override"`
+		BookTitle          string              `json:"book_title"`
+		ChapterIndex       int                 `json:"chapter_index"`
+		ChapterTotal       int                 `json:"chapter_total"`
 		AllowPreview       bool                `json:"allow_preview"`
 		AllowExternalWrite bool                `json:"allow_external_write"`
 		RootID             string              `json:"root_id"`
@@ -1550,6 +1631,11 @@ func (s *Service) specForRetry(ctx context.Context, dlID string, snap config.Sna
 	return taskSpec{
 		downloadID:         dlID,
 		snap:               snap,
+		preferredQuality:   strings.ToLower(strings.TrimSpace(parsed.PreferredQuality)),
+		layoutOverride:     strings.TrimSpace(parsed.LayoutOverride),
+		bookTitle:          strings.TrimSpace(parsed.BookTitle),
+		chapterIndex:       parsed.ChapterIndex,
+		chapterTotal:       parsed.ChapterTotal,
 		allowPreview:       parsed.AllowPreview,
 		allowExternalWrite: parsed.AllowExternalWrite,
 		rootID:             parsed.RootID,
@@ -1560,40 +1646,154 @@ func (s *Service) specForRetry(ctx context.Context, dlID string, snap config.Sna
 func domainTrackFromRecord(publicID string, tr store.ProviderTrackRecord, variants []model.MediaVariant) model.ProviderTrack {
 	var meta map[string]any
 	if tr.MetadataJSON != "" {
-		_ = json.Unmarshal([]byte(tr.MetadataJSON), &meta)
+		dec := json.NewDecoder(strings.NewReader(tr.MetadataJSON))
+		dec.UseNumber()
+		_ = dec.Decode(&meta)
 	}
 	var cover *string
 	if c, ok := meta["cover"].(string); ok && c != "" {
 		cover = &c
 	}
+	var playlistIndex *int
+	if meta != nil {
+		if idxPtr := parsePositiveInt64(meta["playlist_index"]); idxPtr != nil {
+			idxVal := int(*idxPtr)
+			playlistIndex = &idxVal
+		}
+	}
 	return model.ProviderTrack{
-		PublicID:   publicID,
-		Source:     tr.Source,
-		SourceID:   tr.Locator,
-		RootSource: tr.RootSource,
-		Title:      tr.Title,
-		Artist:     tr.Artist,
-		Album:      tr.Album,
-		Duration:   float64(tr.DurationMS) / 1000.0,
-		Cover:      cover,
-		Variants:   variants,
+		PublicID:      publicID,
+		Source:        tr.Source,
+		SourceID:      tr.Locator,
+		RootSource:    tr.RootSource,
+		Title:         tr.Title,
+		Artist:        tr.Artist,
+		Album:         tr.Album,
+		Duration:      float64(tr.DurationMS) / 1000.0,
+		Cover:         cover,
+		PlaylistIndex: playlistIndex,
+		Variants:      variants,
 	}
 }
 
-func pickResolvedMedia(list []model.ResolvedMedia, qualityID string, allowPreview bool) (model.ResolvedMedia, bool) {
-	for _, rm := range list {
-		if rm.URL == "" {
-			continue
+func isLosslessMedia(rm model.ResolvedMedia) bool {
+	if rm.Variant.Lossless {
+		return true
+	}
+	c := resolvedCodec(rm)
+	return c != "" && provider.IsLosslessExt(c)
+}
+
+func mediaBitrate(rm model.ResolvedMedia) int {
+	if rm.Bitrate != nil && *rm.Bitrate > 0 {
+		return *rm.Bitrate
+	}
+	if rm.Variant.Bitrate != nil && *rm.Variant.Bitrate > 0 {
+		return *rm.Variant.Bitrate
+	}
+	return 0
+}
+
+func pickResolvedMedia(list []model.ResolvedMedia, qualityID, preferredQuality string, allowPreview bool) (model.ResolvedMedia, bool) {
+	qid := strings.TrimSpace(qualityID)
+	isPreview := func(rm model.ResolvedMedia) bool {
+		return rm.PreviewOnly || rm.Variant.PreviewOnly
+	}
+	eligible := func(rm model.ResolvedMedia) bool {
+		if strings.TrimSpace(rm.URL) == "" {
+			return false
 		}
-		if rm.PreviewOnly && !allowPreview {
-			continue
+		if isPreview(rm) && !allowPreview {
+			return false
 		}
-		if qualityID == "" || rm.VariantID == qualityID || rm.Variant.UpstreamID == qualityID || rm.Variant.VariantID == qualityID {
-			return rm, true
+		return true
+	}
+
+	if qid != "" {
+		for _, rm := range list {
+			if !eligible(rm) {
+				continue
+			}
+			if rm.VariantID == qid || rm.Variant.UpstreamID == qid || rm.Variant.VariantID == qid {
+				return rm, true
+			}
 		}
 	}
+
+	pq := strings.ToLower(strings.TrimSpace(preferredQuality))
+	if qid == "" && pq == "standard" {
+		var bestStd *model.ResolvedMedia
+		bestStdBr := -1
+		var bestLowLossy *model.ResolvedMedia
+		bestLowBr := 0
+		var firstNonLossless *model.ResolvedMedia
+		var firstNonPreview *model.ResolvedMedia
+
+		for i := range list {
+			rm := list[i]
+			if !eligible(rm) || isPreview(rm) {
+				continue
+			}
+			if firstNonPreview == nil {
+				firstNonPreview = &list[i]
+			}
+			if isLosslessMedia(rm) {
+				continue
+			}
+			if firstNonLossless == nil {
+				firstNonLossless = &list[i]
+			}
+			br := mediaBitrate(rm)
+			if br > 0 && br <= 192 {
+				if br > bestStdBr {
+					bestStdBr = br
+					bestStd = &list[i]
+				}
+				continue
+			}
+			if br > 0 && (bestLowBr == 0 || br < bestLowBr) {
+				bestLowBr = br
+				bestLowLossy = &list[i]
+			}
+		}
+		if bestStd != nil {
+			return *bestStd, true
+		}
+		if bestLowLossy != nil {
+			return *bestLowLossy, true
+		}
+		if firstNonLossless != nil {
+			return *firstNonLossless, true
+		}
+		if firstNonPreview != nil {
+			return *firstNonPreview, true
+		}
+	}
+
+	if qid == "" && pq == "highest" {
+		var best *model.ResolvedMedia
+		for i := range list {
+			rm := list[i]
+			if !eligible(rm) || isPreview(rm) {
+				continue
+			}
+			if best == nil || provider.AudioRankBetter(rm, *best) {
+				best = &list[i]
+			}
+		}
+		if best != nil {
+			return *best, true
+		}
+	}
+
 	for _, rm := range list {
-		if rm.URL == "" || (rm.PreviewOnly && !allowPreview) {
+		if !eligible(rm) || isPreview(rm) {
+			continue
+		}
+		return rm, true
+	}
+	for _, rm := range list {
+		if !eligible(rm) {
 			continue
 		}
 		return rm, true

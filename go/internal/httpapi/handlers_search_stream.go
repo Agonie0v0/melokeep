@@ -157,28 +157,30 @@ func (s *Server) loadDomainTrack(ctx context.Context, sid string) (model.Provide
 		return model.ProviderTrack{}, nil, false, tErr
 	}
 	var meta struct {
-		Cover     *string `json:"cover"`
-		SizeBytes *int64  `json:"size_bytes"`
-		SizeLabel *string `json:"size_label"`
-		Episodes  int     `json:"episodes"`
-		Lyrics    string  `json:"lyrics"`
+		Cover         *string `json:"cover"`
+		SizeBytes     *int64  `json:"size_bytes"`
+		SizeLabel     *string `json:"size_label"`
+		Episodes      int     `json:"episodes"`
+		PlaylistIndex *int    `json:"playlist_index"`
+		Lyrics        string  `json:"lyrics"`
 	}
 	_ = json.Unmarshal([]byte(tr.MetadataJSON), &meta)
 	return model.ProviderTrack{
-		PublicID:   sid,
-		Source:     tr.Source,
-		SourceID:   tr.Locator,
-		RootSource: tr.RootSource,
-		Title:      tr.Title,
-		Artist:     tr.Artist,
-		Album:      tr.Album,
-		Duration:   float64(tr.DurationMS) / 1000.0,
-		Cover:      meta.Cover,
-		SizeBytes:  meta.SizeBytes,
-		SizeLabel:  meta.SizeLabel,
-		Episodes:   meta.Episodes,
-		Lyrics:     meta.Lyrics,
-		Variants:   variants,
+		PublicID:      sid,
+		Source:        tr.Source,
+		SourceID:      tr.Locator,
+		RootSource:    tr.RootSource,
+		Title:         tr.Title,
+		Artist:        tr.Artist,
+		Album:         tr.Album,
+		Duration:      float64(tr.DurationMS) / 1000.0,
+		Cover:         meta.Cover,
+		SizeBytes:     meta.SizeBytes,
+		SizeLabel:     meta.SizeLabel,
+		Episodes:      meta.Episodes,
+		PlaylistIndex: meta.PlaylistIndex,
+		Lyrics:        meta.Lyrics,
+		Variants:      variants,
 	}, nil, true, nil
 }
 
@@ -617,6 +619,66 @@ func (s *Server) fetchProviderLyrics(ctx context.Context, sid string, tr model.P
 	return cleanLyricsPayload(txt)
 }
 
+func (s *Server) persistEpisodeTracks(ctx context.Context, snapRevision string, parent model.ProviderTrack, provEngine string, rawEpisodes []model.ProviderTrack) ([]model.TrackDTO, []string, error) {
+	if len(rawEpisodes) == 0 {
+		return []model.TrackDTO{}, nil, nil
+	}
+	out := make([]model.TrackDTO, 0, len(rawEpisodes))
+	epIDs := make([]string, 0, len(rawEpisodes))
+	for _, ep := range rawEpisodes {
+		if ep.Source == "" {
+			ep.Source = parent.Source
+		}
+		if ep.RootSource == "" {
+			ep.RootSource = firstNonEmpty(parent.RootSource, provEngine)
+		}
+		if ep.PublicID == "" {
+			ep.PublicID = deterministicCandidateID(firstNonEmpty(ep.RootSource, ep.Source), ep.SourceID, snapRevision)
+		}
+		if s.deps.Store != nil {
+			metaBytes, _ := json.Marshal(map[string]any{
+				"cover":          ep.Cover,
+				"size_bytes":     ep.SizeBytes,
+				"size_label":     ep.SizeLabel,
+				"episodes":       ep.Episodes,
+				"playlist_index": ep.PlaylistIndex,
+				"lyrics":         ep.Lyrics,
+			})
+			trID, uErr := s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+				Source:       ep.Source,
+				Locator:      ep.SourceID,
+				RootSource:   ep.RootSource,
+				Title:        ep.Title,
+				Artist:       ep.Artist,
+				Album:        ep.Album,
+				DurationMS:   int64(ep.Duration * 1000),
+				MetadataJSON: string(metaBytes),
+			}, ep.Variants)
+			if uErr != nil {
+				return nil, nil, uErr
+			}
+			_ = s.deps.Store.PutPublicRef(ctx, model.PublicRef{
+				PublicID: ep.PublicID,
+				Kind:     "candidate",
+				TargetID: trID,
+				Source:   ep.Source,
+				SourceID: ep.SourceID,
+			}, "")
+		}
+		playback := model.PlaybackDTOFromResolvedTrack(ep, "")
+		if len(ep.Variants) == 0 {
+			playback = search.PendingTrackPlayback()
+		}
+		dto := model.TrackDTOFromDomain(ep, playback)
+		if s.deps.Store != nil {
+			_ = s.storeTrackDTO(ctx, dto)
+		}
+		epIDs = append(epIDs, dto.ID)
+		out = append(out, dto)
+	}
+	return out, epIDs, nil
+}
+
 func (s *Server) resolveTrackEpisodes(ctx context.Context, sid string) ([]model.TrackDTO, error) {
 	tr, _, found, err := s.loadDomainTrack(ctx, sid)
 	if err != nil {
@@ -677,67 +739,20 @@ func (s *Server) resolveTrackEpisodes(ctx context.Context, sid string) ([]model.
 		return []model.TrackDTO{}, nil
 	}
 
-	out := make([]model.TrackDTO, 0, len(rawEpisodes))
-	epIDs := make([]string, 0, len(rawEpisodes))
-	for _, ep := range rawEpisodes {
-		if ep.Source == "" {
-			ep.Source = tr.Source
-		}
-		if ep.RootSource == "" {
-			ep.RootSource = firstNonEmpty(tr.RootSource, prov.EngineName())
-		}
-		if ep.PublicID == "" {
-			ep.PublicID = deterministicCandidateID(firstNonEmpty(ep.RootSource, ep.Source), ep.SourceID, snap.Revision)
-		}
-		if s.deps.Store != nil {
-			metaBytes, _ := json.Marshal(map[string]any{
-				"cover":      ep.Cover,
-				"size_bytes": ep.SizeBytes,
-				"size_label": ep.SizeLabel,
-				"episodes":   ep.Episodes,
-				"lyrics":     ep.Lyrics,
-			})
-			trID, uErr := s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
-				Source:       ep.Source,
-				Locator:      ep.SourceID,
-				RootSource:   ep.RootSource,
-				Title:        ep.Title,
-				Artist:       ep.Artist,
-				Album:        ep.Album,
-				DurationMS:   int64(ep.Duration * 1000),
-				MetadataJSON: string(metaBytes),
-			}, ep.Variants)
-			if uErr != nil {
-				return nil, uErr
-			}
-			_ = s.deps.Store.PutPublicRef(ctx, model.PublicRef{
-				PublicID: ep.PublicID,
-				Kind:     "candidate",
-				TargetID: trID,
-				Source:   ep.Source,
-				SourceID: ep.SourceID,
-			}, "")
-		}
-		playback := model.PlaybackDTOFromResolvedTrack(ep, "")
-		if len(ep.Variants) == 0 {
-			playback = search.PendingTrackPlayback()
-		}
-		dto := model.TrackDTOFromDomain(ep, playback)
-		if s.deps.Store != nil {
-			_ = s.storeTrackDTO(ctx, dto)
-		}
-		epIDs = append(epIDs, dto.ID)
-		out = append(out, dto)
+	out, epIDs, err := s.persistEpisodeTracks(ctx, snap.Revision, tr, prov.EngineName(), rawEpisodes)
+	if err != nil {
+		return nil, err
 	}
 	if s.deps.Store != nil && len(epIDs) > 0 {
 		if ref, _, rOK, rErr := s.deps.Store.GetPublicRef(ctx, sid); rErr == nil && rOK && (ref.Kind == "track" || ref.Kind == "candidate") {
 			metaBytes, _ := json.Marshal(map[string]any{
-				"cover":       tr.Cover,
-				"size_bytes":  tr.SizeBytes,
-				"size_label":  tr.SizeLabel,
-				"episodes":    len(epIDs),
-				"episode_ids": epIDs,
-				"lyrics":      tr.Lyrics,
+				"cover":          tr.Cover,
+				"size_bytes":     tr.SizeBytes,
+				"size_label":     tr.SizeLabel,
+				"episodes":       len(epIDs),
+				"episode_ids":    epIDs,
+				"playlist_index": tr.PlaylistIndex,
+				"lyrics":         tr.Lyrics,
 			})
 			_, _ = s.deps.Store.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
 				ID:           ref.TargetID,
@@ -755,8 +770,131 @@ func (s *Server) resolveTrackEpisodes(ctx context.Context, sid string) ([]model.
 	return out, nil
 }
 
+func (s *Server) resolveTrackEpisodesPage(ctx context.Context, sid string, page, pageSize int) (model.EpisodePageDTO, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	tr, _, found, err := s.loadDomainTrack(ctx, sid)
+	if err != nil {
+		return model.EpisodePageDTO{}, err
+	}
+	if !found {
+		return model.EpisodePageDTO{}, model.NewError(model.ErrNotFound, http.StatusNotFound, "曲目不存在")
+	}
+
+	if s.deps.Providers == nil || strings.TrimSpace(tr.SourceID) == "" {
+		return model.EpisodePageDTO{Items: []model.TrackDTO{}, Page: page, PageSize: pageSize}, nil
+	}
+	prov, ok := s.deps.Providers.Get(firstNonEmpty(tr.RootSource, tr.Source))
+	if !ok {
+		return model.EpisodePageDTO{Items: []model.TrackDTO{}, Page: page, PageSize: pageSize}, nil
+	}
+
+	if pagedProv, isPaged := prov.(provider.PagedEpisodeProvider); isPaged {
+		snap := s.currentSnapshot()
+		var logFn provider.LogFunc
+		if s.deps.Logs != nil {
+			logFn = s.deps.Logs.Push
+		}
+		epCtx := provider.WithRequestContext(ctx, provider.RequestContext{
+			Config:  snap,
+			TaskID:  sid,
+			LogFunc: logFn,
+		})
+		epPage, pErr := pagedProv.EpisodesPage(epCtx, tr, provider.EpisodePageOptions{
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if pErr != nil {
+			return model.EpisodePageDTO{}, pErr
+		}
+		items, _, pErr := s.persistEpisodeTracks(ctx, snap.Revision, tr, prov.EngineName(), epPage.Items)
+		if pErr != nil {
+			return model.EpisodePageDTO{}, pErr
+		}
+		outPage := epPage.Page
+		if outPage < 1 {
+			outPage = page
+		}
+		outSize := epPage.PageSize
+		if outSize <= 0 {
+			outSize = pageSize
+		}
+		return model.EpisodePageDTO{
+			Items:    items,
+			Page:     outPage,
+			PageSize: outSize,
+			Total:    epPage.Total,
+			HasMore:  epPage.HasMore,
+		}, nil
+	}
+
+	all, err := s.resolveTrackEpisodes(ctx, sid)
+	if err != nil {
+		return model.EpisodePageDTO{}, err
+	}
+	total := len(all)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return model.EpisodePageDTO{
+			Items:    []model.TrackDTO{},
+			Page:     page,
+			PageSize: pageSize,
+			Total:    total,
+			HasMore:  false,
+		}, nil
+	}
+	end := min(start+pageSize, total)
+	items := make([]model.TrackDTO, end-start)
+	copy(items, all[start:end])
+	return model.EpisodePageDTO{
+		Items:    items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  end < total,
+	}, nil
+}
+
 func (s *Server) handleTrackEpisodes(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
+	q := r.URL.Query()
+	rawPage := strings.TrimSpace(q.Get("page"))
+	rawPaged := strings.TrimSpace(q.Get("paged"))
+	if rawPage != "" || rawPaged == "1" || strings.EqualFold(rawPaged, "true") {
+		page := 1
+		if rawPage != "" {
+			if p, err := strconv.Atoi(rawPage); err == nil && p > 0 {
+				page = p
+			}
+		}
+		pageSize := 100
+		if rawSize := strings.TrimSpace(q.Get("page_size")); rawSize != "" {
+			if ps, err := strconv.Atoi(rawSize); err == nil && ps > 0 {
+				pageSize = ps
+			}
+		}
+		if pageSize < 10 {
+			pageSize = 10
+		}
+		if pageSize > 200 {
+			pageSize = 200
+		}
+		epPage, err := s.resolveTrackEpisodesPage(r.Context(), sid, page, pageSize)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, epPage)
+		return
+	}
 	episodes, err := s.resolveTrackEpisodes(r.Context(), sid)
 	if err != nil {
 		writeDomainError(w, err)

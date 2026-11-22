@@ -662,11 +662,12 @@ func (s *Service) persistTracks(ctx context.Context, tracks []model.ProviderTrac
 		}
 		metaJSON := "{}"
 		if rawMeta, mErr := json.Marshal(map[string]any{
-			"cover":      tr.Cover,
-			"size_bytes": tr.SizeBytes,
-			"size_label": tr.SizeLabel,
-			"episodes":   tr.Episodes,
-			"lyrics":     tr.Lyrics,
+			"cover":          tr.Cover,
+			"size_bytes":     tr.SizeBytes,
+			"size_label":     tr.SizeLabel,
+			"episodes":       tr.Episodes,
+			"playlist_index": tr.PlaylistIndex,
+			"lyrics":         tr.Lyrics,
 		}); mErr == nil {
 			metaJSON = string(rawMeta)
 		}

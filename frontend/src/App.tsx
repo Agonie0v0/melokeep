@@ -13,6 +13,7 @@ import { playbackClock } from "./playback-clock";
 import { useAppearance } from "./theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ArrowUpCircle,
   AudioLines,
   Check,
@@ -39,6 +40,15 @@ import {
   CircleAlert,
 } from "lucide-react";
 import { ApiError, api } from "./api";
+import {
+  buildBatchDownloadPayloads,
+  chunkArray,
+  formatEpisodeBadge,
+  getEpisodeNumber,
+  isCollectionTrack,
+  selectEpisodeRange,
+  shouldUseBatchDownloadModal,
+} from "./audiobook-utils";
 import { formatLibraryRefreshNotice } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
 import {
@@ -69,6 +79,8 @@ import {
 import { updateTargetKey, updateTargetLabel } from "./UpdateSettings";
 import { isPluginSource, pickPlaylistImportSource } from "./plugin-utils";
 import type {
+  BatchQualityPolicy,
+  EpisodePage,
   Track,
   Config,
   DownloadJob,
@@ -80,6 +92,39 @@ import type {
   PlaylistSummary,
   SystemUpdateInfo,
 } from "./types";
+
+interface EpisodeContext {
+  parent: Track;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  loading: boolean;
+  loadingAll: boolean;
+  savedTracks: Track[];
+  savedSourceFilter: string;
+}
+
+interface BatchDownloadState {
+  title: string;
+  isAudiobook: boolean;
+  parentTrack: Track | null;
+  items: Track[];
+  totalEpisodes: number;
+  loading: boolean;
+  loadedPages: number;
+  loadedCount: number;
+  error: string;
+  preferredQuality: BatchQualityPolicy;
+  audiobookLayout: boolean;
+  skipAutoOrganize: boolean;
+  bookTitle: string;
+  rangeStart: string;
+  rangeEnd: string;
+  submitting: boolean;
+  submitDone: number;
+  submitTotal: number;
+}
 
 const views = {
   search: "搜索音乐",
@@ -535,6 +580,12 @@ export function App() {
     [busy, setBusy] = useState(false);
   const [qualityTracks, setQualityTracks] = useState<Track[] | null>(null),
     [qualities, setQualities] = useState<Record<string, string>>({}),
+    [episodeContext, setEpisodeContext] = useState<EpisodeContext | null>(null),
+    [epRangeStart, setEpRangeStart] = useState("1"),
+    [epRangeEnd, setEpRangeEnd] = useState("100"),
+    [batchDownload, setBatchDownload] = useState<BatchDownloadState | null>(
+      null,
+    ),
     [showPlaylist, setShowPlaylist] = useState(false),
     [playlistModalTracks, setPlaylistModalTracks] = useState<Track[] | null>(
       null,
@@ -549,6 +600,9 @@ export function App() {
   const audio = useRef<HTMLAudioElement>(null),
     playGeneration = useRef(0),
     searchGeneration = useRef(0),
+    episodeLoadSeq = useRef(0),
+    batchDownloadSeqRef = useRef(0),
+    batchDownloadAbortRef = useRef<AbortController | null>(null),
     searchJob = useRef<string | null>(null),
     eventSource = useRef<EventSource | null>(null),
     startTime = useRef(0),
@@ -845,7 +899,7 @@ export function App() {
         api<Config>("/config"),
         api<Track[]>("/favorites"),
         api<Track[]>("/playlist"),
-        api<DownloadJob[]>("/downloads"),
+        api<DownloadJob[]>("/downloads?limit=500"),
         api<PlaylistSummary[]>("/playlists"),
         fetchServerPreferences().catch(() => null),
       ]);
@@ -900,6 +954,7 @@ export function App() {
     return () => {
       window.removeEventListener("melokeep-login", login);
       eventSource.current?.close();
+      batchDownloadAbortRef.current?.abort();
       if (searchJob.current)
         void api(`/search/jobs/${searchJob.current}`, "DELETE").catch(() => {});
     };
@@ -924,7 +979,7 @@ export function App() {
       try {
         if (!document.hidden) {
           const next = await api<DownloadJob[]>(
-            "/downloads",
+            "/downloads?limit=500",
             "GET",
             undefined,
             controller.signal,
@@ -985,6 +1040,8 @@ export function App() {
   const lastSearch = useRef("");
   async function search(keyword = query) {
     if (!keyword.trim() || !config) return;
+    ++episodeLoadSeq.current;
+    setEpisodeContext(null);
     const generation = ++searchGeneration.current;
     eventSource.current?.close();
     const previousJob = searchJob.current;
@@ -1406,6 +1463,459 @@ export function App() {
       fail(error);
     }
   }
+  function normalizeEpisodePage(
+    raw: EpisodePage | Track[],
+    fallbackPage: number,
+    fallbackPageSize: number,
+  ): EpisodePage {
+    if (Array.isArray(raw)) {
+      return {
+        items: raw,
+        page: fallbackPage,
+        page_size: raw.length || fallbackPageSize,
+        total: raw.length,
+        has_more: false,
+      };
+    }
+    return {
+      items: Array.isArray(raw.items) ? raw.items : [],
+      page: raw.page || fallbackPage,
+      page_size: raw.page_size || fallbackPageSize,
+      total: typeof raw.total === "number" ? raw.total : 0,
+      has_more: Boolean(raw.has_more),
+    };
+  }
+  async function openEpisodes(parent: Track) {
+    const seq = ++episodeLoadSeq.current;
+    searchGeneration.current++;
+    eventSource.current?.close();
+    eventSource.current = null;
+    if (searchJob.current) {
+      void api(`/search/jobs/${searchJob.current}`, "DELETE").catch(() => {});
+      searchJob.current = null;
+    }
+    setSearching(false);
+    const savedTracks = episodeContext ? episodeContext.savedTracks : tracks;
+    const savedSourceFilter = episodeContext
+      ? episodeContext.savedSourceFilter
+      : sourceFilter;
+    const initialTotal =
+      parent.episodes && parent.episodes > 0 ? parent.episodes : 0;
+    setEpisodeContext({
+      parent,
+      page: 1,
+      pageSize: 100,
+      total: initialTotal,
+      hasMore: false,
+      loading: true,
+      loadingAll: false,
+      savedTracks,
+      savedSourceFilter,
+    });
+    setView("search");
+    setSourceFilter("all");
+    setFilter("all");
+    setSort("relevance");
+    setSelected(new Set());
+    try {
+      const raw = await api<EpisodePage | Track[]>(
+        `/tracks/${parent.id}/episodes?page=1&page_size=100`,
+      );
+      if (seq !== episodeLoadSeq.current) return;
+      const pageData = normalizeEpisodePage(raw, 1, 100);
+      setTracks(pageData.items);
+      const lastEp = pageData.items.length
+        ? getEpisodeNumber(
+            pageData.items[pageData.items.length - 1],
+            pageData.items.length - 1,
+          )
+        : 100;
+      setEpRangeStart("1");
+      setEpRangeEnd(String(lastEp));
+      setEpisodeContext((prev) =>
+        prev
+          ? {
+              ...prev,
+              page: pageData.page || 1,
+              pageSize: pageData.page_size || 100,
+              total: pageData.total > 0 ? pageData.total : initialTotal,
+              hasMore: Boolean(pageData.has_more) && pageData.items.length > 0,
+              loading: false,
+            }
+          : null,
+      );
+    } catch (error) {
+      if (seq !== episodeLoadSeq.current) return;
+      setEpisodeContext(null);
+      setSourceFilter(savedSourceFilter);
+      fail(error);
+    }
+  }
+  function returnFromEpisodes() {
+    if (!episodeContext) return;
+    episodeLoadSeq.current++;
+    setTracks(episodeContext.savedTracks);
+    setSourceFilter(episodeContext.savedSourceFilter);
+    setFilter("all");
+    setSort("relevance");
+    setSelected(new Set());
+    setEpisodeContext(null);
+  }
+  async function loadNextEpisodesPage() {
+    if (
+      !episodeContext ||
+      episodeContext.loading ||
+      episodeContext.loadingAll ||
+      !episodeContext.hasMore
+    ) {
+      return;
+    }
+    const seq = episodeLoadSeq.current;
+    const { parent, page, pageSize } = episodeContext;
+    const nextPage = page + 1;
+    setEpisodeContext((prev) => (prev ? { ...prev, loading: true } : null));
+    try {
+      const raw = await api<EpisodePage | Track[]>(
+        `/tracks/${parent.id}/episodes?page=${nextPage}&page_size=${pageSize}`,
+      );
+      if (seq !== episodeLoadSeq.current) return;
+      const pageData = normalizeEpisodePage(raw, nextPage, pageSize);
+      setTracks((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        const additions = pageData.items.filter((item) => !seen.has(item.id));
+        return additions.length ? [...prev, ...additions] : prev;
+      });
+      setEpisodeContext((prev) =>
+        prev
+          ? {
+              ...prev,
+              page: pageData.page || nextPage,
+              total: pageData.total > 0 ? pageData.total : prev.total,
+              hasMore: Boolean(pageData.has_more) && pageData.items.length > 0,
+              loading: false,
+            }
+          : null,
+      );
+    } catch (error) {
+      if (seq !== episodeLoadSeq.current) return;
+      setEpisodeContext((prev) => (prev ? { ...prev, loading: false } : null));
+      fail(error);
+    }
+  }
+  async function loadAllEpisodes() {
+    if (
+      !episodeContext ||
+      episodeContext.loading ||
+      episodeContext.loadingAll ||
+      !episodeContext.hasMore
+    ) {
+      return;
+    }
+    const seq = episodeLoadSeq.current;
+    const { parent, pageSize } = episodeContext;
+    const seenIds = new Set(tracks.map((item) => item.id));
+    let nextPage = episodeContext.page + 1;
+    let hasMore: boolean = episodeContext.hasMore;
+    setEpisodeContext((prev) => (prev ? { ...prev, loadingAll: true } : null));
+    try {
+      while (hasMore && nextPage <= 30) {
+        if (seq !== episodeLoadSeq.current) return;
+        const raw = await api<EpisodePage | Track[]>(
+          `/tracks/${parent.id}/episodes?page=${nextPage}&page_size=${pageSize}`,
+        );
+        if (seq !== episodeLoadSeq.current) return;
+        const pageData = normalizeEpisodePage(raw, nextPage, pageSize);
+        const uniqueNew = pageData.items.filter(
+          (item) => !seenIds.has(item.id),
+        );
+        for (const item of uniqueNew) seenIds.add(item.id);
+        if (uniqueNew.length) {
+          setTracks((prev) => {
+            const existing = new Set(prev.map((t) => t.id));
+            const additions = uniqueNew.filter(
+              (item) => !existing.has(item.id),
+            );
+            return additions.length ? [...prev, ...additions] : prev;
+          });
+        }
+        hasMore =
+          Boolean(pageData.has_more) &&
+          pageData.items.length > 0 &&
+          uniqueNew.length > 0;
+        const resolvedPage = pageData.page || nextPage;
+        setEpisodeContext((prev) =>
+          prev
+            ? {
+                ...prev,
+                page: resolvedPage,
+                total: pageData.total > 0 ? pageData.total : prev.total,
+                hasMore,
+              }
+            : null,
+        );
+        if (!hasMore) break;
+        nextPage++;
+      }
+      if (hasMore && seq === episodeLoadSeq.current) {
+        setNotice("已加载前 30 页分集，可继续点击「加载下一页」");
+      }
+    } catch (error) {
+      if (seq === episodeLoadSeq.current) fail(error);
+    } finally {
+      if (seq === episodeLoadSeq.current) {
+        setEpisodeContext((prev) =>
+          prev ? { ...prev, loadingAll: false } : null,
+        );
+      }
+    }
+  }
+  function applyEpisodeRangeSelection() {
+    if (!tracks.length) return;
+    const rawStart = Number.parseInt(epRangeStart, 10);
+    const rawEnd = Number.parseInt(epRangeEnd, 10);
+    const start = Number.isFinite(rawStart) && rawStart > 0 ? rawStart : 1;
+    const end =
+      Number.isFinite(rawEnd) && rawEnd > 0
+        ? rawEnd
+        : getEpisodeNumber(tracks[tracks.length - 1], tracks.length - 1);
+    const matched = selectEpisodeRange(tracks, start, end);
+    setSelected(new Set(matched.map((item) => item.id)));
+    if (!matched.length) {
+      setNotice(
+        `当前已加载分集中没有第 ${Math.min(start, end)}–${Math.max(start, end)} 集`,
+      );
+    }
+  }
+  function closeBatchDownload() {
+    if (batchDownload?.submitting) return;
+    batchDownloadSeqRef.current++;
+    batchDownloadAbortRef.current?.abort();
+    batchDownloadAbortRef.current = null;
+    setBatchDownload(null);
+  }
+  const batchMatchedItems = useMemo(() => {
+    if (!batchDownload) return [];
+    if (!batchDownload.isAudiobook) return batchDownload.items;
+    const rawStart = Number.parseInt(batchDownload.rangeStart, 10);
+    const rawEnd = Number.parseInt(batchDownload.rangeEnd, 10);
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return [];
+    if (rawStart <= 0 && rawEnd <= 0) return [];
+    return selectEpisodeRange(batchDownload.items, rawStart, rawEnd);
+  }, [batchDownload]);
+  async function startWholeBookDownload(parent: Track) {
+    const seq = ++batchDownloadSeqRef.current;
+    batchDownloadAbortRef.current?.abort();
+    batchDownloadAbortRef.current = null;
+    const bookTitle = parent.album || parent.title;
+    const canReuseLoaded = Boolean(
+      episodeContext &&
+      episodeContext.parent.id === parent.id &&
+      !episodeContext.hasMore &&
+      !episodeContext.loading &&
+      !episodeContext.loadingAll &&
+      tracks.length > 0,
+    );
+    if (canReuseLoaded) {
+      const totalEp =
+        episodeContext!.total > 0 ? episodeContext!.total : tracks.length;
+      setBatchDownload({
+        title: `下载整部：${parent.title}`,
+        isAudiobook: true,
+        parentTrack: parent,
+        items: tracks,
+        totalEpisodes: totalEp,
+        loading: false,
+        loadedPages: episodeContext!.page,
+        loadedCount: tracks.length,
+        error: "",
+        preferredQuality: "highest",
+        audiobookLayout: true,
+        skipAutoOrganize: true,
+        bookTitle,
+        rangeStart: "1",
+        rangeEnd: String(tracks.length),
+        submitting: false,
+        submitDone: 0,
+        submitTotal: 0,
+      });
+      return;
+    }
+    const controller = new AbortController();
+    batchDownloadAbortRef.current = controller;
+    let knownTotal =
+      parent.episodes && parent.episodes > 0 ? parent.episodes : 0;
+    setBatchDownload({
+      title: `下载整部：${parent.title}`,
+      isAudiobook: true,
+      parentTrack: parent,
+      items: [],
+      totalEpisodes: knownTotal,
+      loading: true,
+      loadedPages: 0,
+      loadedCount: 0,
+      error: "",
+      preferredQuality: "highest",
+      audiobookLayout: true,
+      skipAutoOrganize: true,
+      bookTitle,
+      rangeStart: "1",
+      rangeEnd: String(knownTotal > 0 ? knownTotal : 1),
+      submitting: false,
+      submitDone: 0,
+      submitTotal: 0,
+    });
+    const allItems: Track[] = [];
+    const seenIds = new Set<string>();
+    let page = 1;
+    let hasMore = true;
+    try {
+      while (hasMore && page <= 50) {
+        if (seq !== batchDownloadSeqRef.current || controller.signal.aborted) {
+          return;
+        }
+        const raw = await api<EpisodePage | Track[]>(
+          `/tracks/${parent.id}/episodes?page=${page}&page_size=100`,
+          "GET",
+          undefined,
+          controller.signal,
+        );
+        if (seq !== batchDownloadSeqRef.current || controller.signal.aborted) {
+          return;
+        }
+        const pageData = normalizeEpisodePage(raw, page, 100);
+        let added = 0;
+        for (const item of pageData.items) {
+          if (!seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            allItems.push(item);
+            added++;
+          }
+        }
+        if (pageData.total > 0) knownTotal = pageData.total;
+        hasMore =
+          Boolean(pageData.has_more) && pageData.items.length > 0 && added > 0;
+        setBatchDownload((prev) =>
+          prev
+            ? {
+                ...prev,
+                loadedPages: page,
+                loadedCount: allItems.length,
+                totalEpisodes: knownTotal > 0 ? knownTotal : prev.totalEpisodes,
+              }
+            : null,
+        );
+        if (!hasMore) break;
+        page++;
+      }
+      if (seq !== batchDownloadSeqRef.current || controller.signal.aborted) {
+        return;
+      }
+      batchDownloadAbortRef.current = null;
+      if (!allItems.length) {
+        setBatchDownload((prev) =>
+          prev
+            ? {
+                ...prev,
+                loading: false,
+                error: "未获取到可下载的分集曲目，请稍后重试",
+              }
+            : null,
+        );
+        return;
+      }
+      const finalTotal = knownTotal > 0 ? knownTotal : allItems.length;
+      setBatchDownload((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: allItems,
+              totalEpisodes: finalTotal,
+              loading: false,
+              loadedCount: allItems.length,
+              rangeStart: "1",
+              rangeEnd: String(allItems.length),
+            }
+          : null,
+      );
+    } catch (error) {
+      if (seq !== batchDownloadSeqRef.current || controller.signal.aborted) {
+        return;
+      }
+      batchDownloadAbortRef.current = null;
+      setBatchDownload((prev) =>
+        prev
+          ? {
+              ...prev,
+              loading: false,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          : null,
+      );
+    }
+  }
+  async function submitBatchDownload() {
+    if (!batchDownload || batchDownload.submitting || batchDownload.loading) {
+      return;
+    }
+    const targets = batchDownload.isAudiobook
+      ? batchMatchedItems
+      : batchDownload.items;
+    if (!targets.length) return;
+    const payloads = buildBatchDownloadPayloads(targets, {
+      preferredQuality: batchDownload.preferredQuality,
+      audiobookLayout: batchDownload.audiobookLayout,
+      skipAutoOrganize: batchDownload.skipAutoOrganize,
+      bookTitle: batchDownload.bookTitle.trim(),
+      totalEpisodes:
+        batchDownload.totalEpisodes > 0
+          ? batchDownload.totalEpisodes
+          : targets.length,
+    });
+    const chunks = chunkArray(payloads, 200);
+    setBatchDownload((prev) =>
+      prev
+        ? {
+            ...prev,
+            submitting: true,
+            submitDone: 0,
+            submitTotal: payloads.length,
+            error: "",
+          }
+        : null,
+    );
+    let queued = 0;
+    try {
+      for (const chunk of chunks) {
+        await api<DownloadJob[]>("/downloads", "POST", chunk);
+        queued += chunk.length;
+        setBatchDownload((prev) =>
+          prev ? { ...prev, submitDone: queued } : null,
+        );
+      }
+      const refreshed = await api<DownloadJob[]>("/downloads?limit=500");
+      setJobs(refreshed);
+      const isBook = batchDownload.isAudiobook;
+      setBatchDownload(null);
+      setNotice(
+        isBook ? `已加入 ${queued} 集下载任务` : `已加入 ${queued} 首下载任务`,
+      );
+    } catch (error) {
+      if (queued > 0) {
+        await api<DownloadJob[]>("/downloads?limit=500")
+          .then(setJobs)
+          .catch(() => {});
+      }
+      setBatchDownload((prev) =>
+        prev
+          ? {
+              ...prev,
+              submitting: false,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          : null,
+      );
+    }
+  }
   async function chooseDownload(items: Track[]) {
     const skippedCount = items.filter(
       (track) => track.source === "navidrome" || track.source === "local",
@@ -1425,6 +1935,52 @@ export function App() {
     }
     if (skippedCount > 0) {
       setNotice(`已自动跳过 ${skippedCount} 首已在本地/Navidrome 的曲目`);
+    }
+    if (downloadable.length === 1 && isCollectionTrack(downloadable[0])) {
+      await startWholeBookDownload(downloadable[0]);
+      return;
+    }
+    const inEpisodeView = Boolean(view === "search" && episodeContext);
+    if (shouldUseBatchDownloadModal(downloadable, inEpisodeView)) {
+      const bookTitle = inEpisodeView
+        ? episodeContext!.parent.album || episodeContext!.parent.title
+        : downloadable[0]?.album || "";
+      const totalEpisodes = inEpisodeView
+        ? episodeContext!.total > 0
+          ? episodeContext!.total
+          : downloadable.length
+        : downloadable.length;
+      const epNumbers = downloadable.map((t, idx) => getEpisodeNumber(t, idx));
+      const minEp = epNumbers.length ? Math.min(...epNumbers) : 1;
+      const maxEp = epNumbers.length
+        ? Math.max(...epNumbers)
+        : downloadable.length;
+      batchDownloadSeqRef.current++;
+      batchDownloadAbortRef.current?.abort();
+      batchDownloadAbortRef.current = null;
+      setBatchDownload({
+        title: inEpisodeView
+          ? `下载分集：${episodeContext!.parent.title}`
+          : `批量下载（${downloadable.length} 首）`,
+        isAudiobook: inEpisodeView,
+        parentTrack: inEpisodeView ? episodeContext!.parent : null,
+        items: downloadable,
+        totalEpisodes,
+        loading: false,
+        loadedPages: 0,
+        loadedCount: downloadable.length,
+        error: "",
+        preferredQuality: "highest",
+        audiobookLayout: inEpisodeView,
+        skipAutoOrganize: inEpisodeView,
+        bookTitle,
+        rangeStart: String(minEp),
+        rangeEnd: String(maxEp),
+        submitting: false,
+        submitDone: 0,
+        submitTotal: 0,
+      });
+      return;
     }
     items = downloadable;
     const canProbeSize = items.length <= 8;
@@ -1802,7 +2358,9 @@ export function App() {
       setManagementError((error as Error).message);
       setConfirmation(null);
     } finally {
-      await api<DownloadJob[]>("/downloads").then(setJobs).catch(fail);
+      await api<DownloadJob[]>("/downloads?limit=500")
+        .then(setJobs)
+        .catch(fail);
       setManaging(false);
     }
   }
@@ -1893,7 +2451,9 @@ export function App() {
           setConfirmation(null);
         } finally {
           await loadLibraryFiles({ cursor: null });
-          await api<DownloadJob[]>("/downloads").then(setJobs).catch(fail);
+          await api<DownloadJob[]>("/downloads?limit=500")
+            .then(setJobs)
+            .catch(fail);
           setManaging(false);
         }
       },
@@ -2142,13 +2702,136 @@ export function App() {
   const trackTable = (
     <>
       <section className="results">
+        {view === "search" && episodeContext && (
+          <div
+            className="episode-context-bar"
+            role="region"
+            aria-label="分集导航与选集"
+          >
+            <div className="episode-context-top">
+              <div className="episode-context-title">
+                <button
+                  type="button"
+                  className="episode-back-btn"
+                  onClick={returnFromEpisodes}
+                >
+                  <ArrowLeft />
+                  返回搜索结果
+                </button>
+                <div className="episode-book-meta">
+                  <strong>{episodeContext.parent.title}</strong>
+                  <span>
+                    {episodeContext.loading && !tracks.length
+                      ? "正在加载分集…"
+                      : episodeContext.total > 0
+                        ? `已加载 ${tracks.length} / ${episodeContext.total} 集`
+                        : `已加载 ${tracks.length} 集`}
+                  </span>
+                </div>
+              </div>
+              <div className="episode-context-actions">
+                {(episodeContext.hasMore ||
+                  episodeContext.loading ||
+                  episodeContext.loadingAll) && (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={
+                        !episodeContext.hasMore ||
+                        episodeContext.loading ||
+                        episodeContext.loadingAll
+                      }
+                      onClick={() => void loadNextEpisodesPage()}
+                    >
+                      {episodeContext.loading ? "加载中…" : "加载下一页"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={
+                        !episodeContext.hasMore ||
+                        episodeContext.loading ||
+                        episodeContext.loadingAll
+                      }
+                      onClick={() => void loadAllEpisodes()}
+                    >
+                      {episodeContext.loadingAll ? "正在拉取全部…" : "加载全部"}
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!selection.length || episodeContext.loading}
+                  onClick={() => void chooseDownload(selection)}
+                >
+                  下载已选 ({selection.length})
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={episodeContext.loading}
+                  onClick={() =>
+                    void startWholeBookDownload(episodeContext.parent)
+                  }
+                >
+                  下载整部
+                </button>
+              </div>
+            </div>
+            <div className="episode-range-controls">
+              <span>快速选集：第</span>
+              <div className="episode-range-inputs">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  aria-label="起始集数"
+                  value={epRangeStart}
+                  onChange={(e) => setEpRangeStart(e.target.value)}
+                />
+                <span>至</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  aria-label="结束集数"
+                  value={epRangeEnd}
+                  onChange={(e) => setEpRangeEnd(e.target.value)}
+                />
+                <span>集</span>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!tracks.length || episodeContext.loading}
+                onClick={applyEpisodeRangeSelection}
+              >
+                勾选该区间
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!tracks.length || episodeContext.loading}
+                onClick={() => setSelected(new Set(tracks.map((t) => t.id)))}
+              >
+                全选已加载
+              </button>
+            </div>
+          </div>
+        )}
         <div className="result-tools">
           <strong>
             {view === "favorites"
               ? "收藏曲目"
               : view === "playlists"
                 ? "歌单曲目"
-                : "搜索结果"}{" "}
+                : view === "search" && episodeContext
+                  ? "分集目录"
+                  : "搜索结果"}{" "}
             <span>{display.length}</span>
           </strong>
           <div className="filter-group" role="group" aria-label="音质筛选">
@@ -2250,31 +2933,38 @@ export function App() {
                         onPlay={() => void play(track, display)}
                       />
                       <div className="song-copy">
-                        <SongTitle
-                          className="song-name"
-                          track={track}
-                          onPlay={() => void play(track, display)}
-                        />
-                        {!!track.episodes && (
-                          <button
-                            className="text-button"
-                            onClick={() => {
-                              searchGeneration.current++;
-                              eventSource.current?.close();
-                              eventSource.current = null;
-                              searchJob.current = null;
-                              setSearching(false);
-                              void api<Track[]>(`/tracks/${track.id}/episodes`)
-                                .then((items) => {
-                                  setTracks(items);
-                                  setSelected(new Set());
-                                  setView("search");
-                                })
-                                .catch(fail);
-                            }}
-                          >
-                            展开 {track.episodes} 个分集
-                          </button>
+                        <div className="song-title-row">
+                          {view === "search" && episodeContext && (
+                            <span className="episode-index-badge">
+                              #{getEpisodeNumber(track, index)}
+                            </span>
+                          )}
+                          <SongTitle
+                            className="song-name"
+                            track={track}
+                            onPlay={() => void play(track, display)}
+                          />
+                        </div>
+                        {isCollectionTrack(track) && (
+                          <div className="episode-inline-actions">
+                            <span className="episode-badge">
+                              {formatEpisodeBadge(track.episodes)}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-button episode-action-link"
+                              onClick={() => void openEpisodes(track)}
+                            >
+                              查看分集
+                            </button>
+                            <button
+                              type="button"
+                              className="text-button episode-action-link"
+                              onClick={() => void startWholeBookDownload(track)}
+                            >
+                              下载整部
+                            </button>
+                          </div>
                         )}
                         <div
                           className="song-meta mobile-only"
@@ -2313,6 +3003,18 @@ export function App() {
                       <span className="quality-inline">
                         {track.playback.codec?.toUpperCase() || "原格式"}
                       </span>
+                    ) : isCollectionTrack(track) ? (
+                      <button
+                        type="button"
+                        className="quality quality-collection"
+                        aria-label={`整部下载 ${track.title}`}
+                        title="点击配置整部下载（免逐集预解析）"
+                        onClick={() => void startWholeBookDownload(track)}
+                      >
+                        <span className="quality-inline is-collection">
+                          整部合集
+                        </span>
+                      </button>
                     ) : (
                       <button
                         className="quality"
@@ -2412,8 +3114,12 @@ export function App() {
                         <button
                           className="icon-button"
                           aria-label={`下载 ${track.title}`}
-                          title="下载"
-                          onClick={() => chooseDownload([track])}
+                          title={isCollectionTrack(track) ? "整部下载" : "下载"}
+                          onClick={() =>
+                            isCollectionTrack(track)
+                              ? void startWholeBookDownload(track)
+                              : void chooseDownload([track])
+                          }
                         >
                           <Download />
                           <span>下载</span>
@@ -2444,25 +3150,33 @@ export function App() {
             })}
           </tbody>
         </table>
-        {view === "search" && searching && !display.length && (
-          <div className="shimmer-list" aria-hidden="true">
-            <div className="shimmer-row" />
-            <div className="shimmer-row" />
-            <div className="shimmer-row" />
-            <div className="shimmer-row" />
-          </div>
-        )}
-        {!display.length && !(view === "search" && searching) && (
-          <div className="empty">
-            {view === "favorites"
-              ? "还没有收藏，点击曲目旁的爱心保存。"
-              : tableTracks.length
-                ? "没有符合筛选条件的曲目。"
-                : view === "playlists"
-                  ? "歌单暂无可用曲目，可在上方查看未导入原因。"
-                  : "输入歌曲、歌手或专辑开始搜索。"}
-          </div>
-        )}
+        {view === "search" &&
+          (searching || Boolean(episodeContext?.loading)) &&
+          !display.length && (
+            <div className="shimmer-list" aria-hidden="true">
+              <div className="shimmer-row" />
+              <div className="shimmer-row" />
+              <div className="shimmer-row" />
+              <div className="shimmer-row" />
+            </div>
+          )}
+        {!display.length &&
+          !(
+            view === "search" &&
+            (searching || Boolean(episodeContext?.loading))
+          ) && (
+            <div className="empty">
+              {view === "favorites"
+                ? "还没有收藏，点击曲目旁的爱心保存。"
+                : tableTracks.length
+                  ? "没有符合筛选条件的曲目。"
+                  : view === "playlists"
+                    ? "歌单暂无可用曲目，可在上方查看未导入原因。"
+                    : episodeContext
+                      ? "该有声书暂无分集。"
+                      : "输入歌曲、歌手或专辑开始搜索。"}
+            </div>
+          )}
       </section>
       {view === "search" && (firstMs !== null || searching) && (
         <div className="result-foot">
@@ -3081,7 +3795,7 @@ export function App() {
                     type="button"
                     className="secondary"
                     onClick={() =>
-                      void api<DownloadJob[]>("/downloads")
+                      void api<DownloadJob[]>("/downloads?limit=500")
                         .then(setJobs)
                         .catch(fail)
                     }
@@ -3308,7 +4022,9 @@ export function App() {
                                 onClick={() =>
                                   void api(`/downloads/${job.id}/pause`, "POST")
                                     .then(() =>
-                                      api<DownloadJob[]>("/downloads"),
+                                      api<DownloadJob[]>(
+                                        "/downloads?limit=500",
+                                      ),
                                     )
                                     .then(setJobs)
                                     .catch(fail)
@@ -3325,7 +4041,9 @@ export function App() {
                                     "POST",
                                   )
                                     .then(() =>
-                                      api<DownloadJob[]>("/downloads"),
+                                      api<DownloadJob[]>(
+                                        "/downloads?limit=500",
+                                      ),
                                     )
                                     .then(setJobs)
                                     .catch(fail)
@@ -3811,6 +4529,255 @@ export function App() {
             >
               {busy ? "正在加入…" : "加入下载队列"}
             </button>
+          </div>
+        </Modal>
+      )}
+      {batchDownload && (
+        <Modal
+          title={batchDownload.title}
+          close={batchDownload.submitting ? undefined : closeBatchDownload}
+        >
+          <div className="batch-download-modal">
+            {batchDownload.loading ? (
+              <>
+                <div className="batch-download-progress" role="status">
+                  <div className="batch-download-progress-head">
+                    <strong>正在加载分集目录…</strong>
+                    <span>
+                      第 {batchDownload.loadedPages} 页 · 已获取{" "}
+                      {batchDownload.loadedCount}
+                      {batchDownload.totalEpisodes > 0
+                        ? ` / ${batchDownload.totalEpisodes}`
+                        : ""}{" "}
+                      集
+                    </span>
+                  </div>
+                  <div
+                    className="batch-download-progress-bar"
+                    aria-hidden="true"
+                  >
+                    <span
+                      style={{
+                        width:
+                          batchDownload.totalEpisodes > 0
+                            ? `${Math.min(100, Math.round((batchDownload.loadedCount / batchDownload.totalEpisodes) * 100))}%`
+                            : "35%",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="dialog-actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={closeBatchDownload}
+                  >
+                    取消
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="batch-download-summary">
+                  <span>
+                    {batchDownload.isAudiobook
+                      ? `书名：${batchDownload.bookTitle || batchDownload.parentTrack?.title || "有声书"}`
+                      : `已选择 ${batchDownload.items.length} 首曲目`}
+                  </span>
+                  <small>
+                    {batchDownload.isAudiobook
+                      ? `共 ${batchDownload.items.length} 集可用 · 下载时自动按策略解析`
+                      : "跳过逐首预探测，直接按策略解析入队"}
+                  </small>
+                </div>
+                <div className="batch-download-section">
+                  <span className="batch-download-section-label">
+                    下载音质策略
+                  </span>
+                  <div className="batch-policy-list">
+                    <label
+                      className={`version-option batch-policy-option ${batchDownload.preferredQuality === "highest" ? "is-active" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="batch-quality-policy"
+                        value="highest"
+                        checked={batchDownload.preferredQuality === "highest"}
+                        disabled={batchDownload.submitting}
+                        onChange={() =>
+                          setBatchDownload((prev) =>
+                            prev
+                              ? { ...prev, preferredQuality: "highest" }
+                              : null,
+                          )
+                        }
+                      />
+                      <span className="version-option-main">
+                        <span className="version-option-title">
+                          最高可用音质
+                        </span>
+                        <span className="batch-policy-desc">
+                          优先选择无损或当前音源支持的最高码率流
+                        </span>
+                      </span>
+                    </label>
+                    <label
+                      className={`version-option batch-policy-option ${batchDownload.preferredQuality === "standard" ? "is-active" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="batch-quality-policy"
+                        value="standard"
+                        checked={batchDownload.preferredQuality === "standard"}
+                        disabled={batchDownload.submitting}
+                        onChange={() =>
+                          setBatchDownload((prev) =>
+                            prev
+                              ? { ...prev, preferredQuality: "standard" }
+                              : null,
+                          )
+                        }
+                      />
+                      <span className="version-option-main">
+                        <span className="version-option-title">
+                          标准音质（节省空间）
+                        </span>
+                        <span className="batch-policy-desc">
+                          优先选择 128–192 kbps 压缩音频，适合有声书长时离线收听
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                {batchDownload.isAudiobook &&
+                  batchDownload.items.length > 0 && (
+                    <div className="batch-range-row">
+                      <span>下载集数范围：第</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        aria-label="下载起始集数"
+                        value={batchDownload.rangeStart}
+                        disabled={batchDownload.submitting}
+                        onChange={(e) =>
+                          setBatchDownload((prev) =>
+                            prev
+                              ? { ...prev, rangeStart: e.target.value }
+                              : null,
+                          )
+                        }
+                      />
+                      <span>至</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        aria-label="下载结束集数"
+                        value={batchDownload.rangeEnd}
+                        disabled={batchDownload.submitting}
+                        onChange={(e) =>
+                          setBatchDownload((prev) =>
+                            prev ? { ...prev, rangeEnd: e.target.value } : null,
+                          )
+                        }
+                      />
+                      <span>集</span>
+                      <span className="batch-range-matched">
+                        已匹配 {batchMatchedItems.length} 集
+                      </span>
+                    </div>
+                  )}
+                <div className="batch-toggles">
+                  <label className="batch-toggle-item">
+                    <input
+                      type="checkbox"
+                      checked={batchDownload.audiobookLayout}
+                      disabled={batchDownload.submitting}
+                      onChange={(e) =>
+                        setBatchDownload((prev) =>
+                          prev
+                            ? { ...prev, audiobookLayout: e.target.checked }
+                            : null,
+                        )
+                      }
+                    />
+                    <span>
+                      按书名分目录并编号保存（书名/001 - 章节名）
+                      <span className="batch-toggle-sub">
+                        目录：{batchDownload.bookTitle || "未命名有声书"}
+                      </span>
+                    </span>
+                  </label>
+                  <label className="batch-toggle-item">
+                    <input
+                      type="checkbox"
+                      checked={batchDownload.skipAutoOrganize}
+                      disabled={batchDownload.submitting}
+                      onChange={(e) =>
+                        setBatchDownload((prev) =>
+                          prev
+                            ? { ...prev, skipAutoOrganize: e.target.checked }
+                            : null,
+                        )
+                      }
+                    />
+                    <span>
+                      跳过音乐自动刮削/整理
+                      <span className="batch-toggle-sub">
+                        避免有声书或大批量任务触发音乐库刮削流程
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                {batchDownload.error && (
+                  <p className="batch-download-error" role="alert">
+                    {batchDownload.error}
+                  </p>
+                )}
+                <div className="dialog-actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={batchDownload.submitting}
+                    onClick={closeBatchDownload}
+                  >
+                    取消
+                  </button>
+                  {batchDownload.items.length > 0 ? (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={
+                        batchDownload.submitting ||
+                        (batchDownload.isAudiobook && !batchMatchedItems.length)
+                      }
+                      onClick={() => void submitBatchDownload()}
+                    >
+                      {batchDownload.submitting
+                        ? `正在加入 (${batchDownload.submitDone}/${batchDownload.submitTotal})…`
+                        : `加入下载队列（${batchDownload.isAudiobook ? batchMatchedItems.length : batchDownload.items.length}）`}
+                    </button>
+                  ) : (
+                    batchDownload.parentTrack && (
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() =>
+                          void startWholeBookDownload(
+                            batchDownload.parentTrack!,
+                          )
+                        }
+                      >
+                        重新加载分集
+                      </button>
+                    )
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </Modal>
       )}

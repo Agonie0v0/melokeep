@@ -7432,3 +7432,434 @@ tr.current {
     justify-content: flex-end;
   }
 }
+
+/* Audiobook collection badges, episode context navigation, and batch download modal */
+.song-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.song-title-row .song-title-play {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.episode-index-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  background: var(--subtle);
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+}
+
+.episode-inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
+.episode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  white-space: nowrap;
+}
+
+.text-button.episode-action-link {
+  font-size: 11.5px;
+  font-weight: 550;
+  padding: 1px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.text-button.episode-action-link:hover {
+  background: var(--subtle);
+  color: var(--accent);
+}
+
+.track-versions .quality-inline.is-collection {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.quality.quality-collection:hover .quality-inline.is-collection {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.episode-context-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-panel, 12px);
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+}
+
+.episode-context-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.episode-context-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.episode-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.episode-back-btn:hover {
+  background: var(--hover);
+}
+
+.episode-back-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.episode-book-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.episode-book-meta strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.episode-book-meta span {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.episode-context-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.episode-context-actions :is(.primary, .secondary) {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+
+.episode-range-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.episode-range-inputs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.episode-range-controls input[type="number"] {
+  width: 76px;
+  min-width: 60px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-control, 8px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.episode-range-controls .secondary {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.batch-download-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.batch-download-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control, 9px);
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.batch-download-summary span {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.batch-download-summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batch-download-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-panel, 12px);
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+}
+
+.batch-download-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12.5px;
+}
+
+.batch-download-progress-head span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-download-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.batch-download-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.batch-download-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-download-section-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.batch-policy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.version-option.batch-policy-option {
+  border: 1px solid var(--line-soft);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.version-option.batch-policy-option.is-active {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--soft);
+}
+
+.batch-policy-desc {
+  display: block;
+  width: 100%;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.batch-range-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control, 9px);
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.batch-range-row input[type="number"] {
+  width: 82px;
+  min-width: 60px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-control, 8px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-range-matched {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control, 9px);
+  background: var(--subtle);
+  border: 1px solid var(--line-soft);
+}
+
+.batch-toggle-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.batch-toggle-item input[type="checkbox"] {
+  margin-top: 2px;
+  flex: none;
+}
+
+.batch-toggle-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.batch-download-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .episode-context-bar {
+    padding: 10px 12px;
+  }
+
+  .episode-context-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .episode-context-title {
+    flex: none;
+  }
+
+  .episode-context-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .episode-context-actions :is(.primary, .secondary) {
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .episode-range-controls input[type="number"],
+  .batch-range-row input[type="number"] {
+    width: 68px;
+  }
+
+  .batch-download-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .batch-range-matched {
+    width: 100%;
+    margin-left: 0;
+  }
+}

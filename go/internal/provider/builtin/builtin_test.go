@@ -248,8 +248,17 @@ func TestBuiltin7ProvidersOffline(t *testing.T) {
 			previewFound = append(previewFound, tr)
 			return nil
 		})
-		if err != nil || len(previewFound) != 1 || previewFound[0].SourceID != "702" || previewFound[0].Title != "Preview Track" {
+		if err != nil || len(previewFound) != 1 || previewFound[0].SourceID != "702" || previewFound[0].Title != "Preview Track" || previewFound[0].Episodes != 0 {
 			t.Fatalf("unexpected iTunes preview search result: found=%+v err=%v", previewFound, err)
+		}
+
+		var feedFound []model.ProviderTrack
+		_, err = p.Search(baseCtx, model.SearchOptions{Keyword: "good", Limit: 2}, func(tr model.ProviderTrack) error {
+			feedFound = append(feedFound, tr)
+			return nil
+		})
+		if err != nil || len(feedFound) != 1 || feedFound[0].SourceID != "703" || feedFound[0].Episodes != -1 {
+			t.Fatalf("expected iTunes podcast feed search track Episodes=-1, found=%+v err=%v", feedFound, err)
 		}
 
 		_, err = p.Resolve(baseCtx, previewFound[0], model.QualityPolicy{AllowPreview: false})

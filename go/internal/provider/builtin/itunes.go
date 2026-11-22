@@ -111,7 +111,11 @@ func (c *ITunesMusicClient) Search(ctx context.Context, opts model.SearchOptions
 		c.rememberRow(sid, r)
 		dur := provider.ParseDurationSeconds(r.TrackTimeMillis) / 1000.0
 		cover := firstNonEmpty(r.ArtworkURL600, r.ArtworkURL100)
-		rows = append(rows, newCandidateTrack(c.ID(), c.EngineName(), sid, title, r.ArtistName, r.CollectionName, dur, cover, nil))
+		tr := newCandidateTrack(c.ID(), c.EngineName(), sid, title, r.ArtistName, r.CollectionName, dur, cover, nil)
+		if hasFeed {
+			tr.Episodes = -1
+		}
+		rows = append(rows, tr)
 	}
 	return emitSearchResults(ctx, opts, rows, emit)
 }

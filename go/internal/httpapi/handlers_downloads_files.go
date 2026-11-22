@@ -34,11 +34,17 @@ var mediaTypesByExt = map[string]string{
 }
 
 type downloadEnqueueItem struct {
-	TrackID      string `json:"track_id"`
-	QualityID    string `json:"quality_id"`
-	ForceNew     bool   `json:"force_new,omitempty"`
-	IntentNonce  string `json:"intent_nonce,omitempty"`
-	AllowPreview bool   `json:"allow_preview,omitempty"`
+	TrackID          string `json:"track_id"`
+	QualityID        string `json:"quality_id"`
+	PreferredQuality string `json:"preferred_quality,omitempty"`
+	Layout           string `json:"layout,omitempty"`
+	BookTitle        string `json:"book_title,omitempty"`
+	ChapterIndex     int    `json:"chapter_index,omitempty"`
+	ChapterTotal     int    `json:"chapter_total,omitempty"`
+	SkipAutoOrganize bool   `json:"skip_auto_organize,omitempty"`
+	ForceNew         bool   `json:"force_new,omitempty"`
+	IntentNonce      string `json:"intent_nonce,omitempty"`
+	AllowPreview     bool   `json:"allow_preview,omitempty"`
 }
 
 func (s *Server) handleDownloads(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +52,16 @@ func (s *Server) handleDownloads(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []model.DownloadJobDTO{})
 		return
 	}
-	list, err := s.deps.Download.List(r.Context(), 200)
+	limit := 200
+	if rawLim := strings.TrimSpace(r.URL.Query().Get("limit")); rawLim != "" {
+		if v, err := strconv.Atoi(rawLim); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+	list, err := s.deps.Download.List(r.Context(), limit)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -97,14 +112,23 @@ func (s *Server) handleDownloadEnqueue(w http.ResponseWriter, r *http.Request) {
 		if ikey != "" && len(items) > 1 {
 			ikey = ikey + ":" + strconv.Itoa(idx)
 		}
+		autoOrg := defaultAutoOrg
+		if it.SkipAutoOrganize {
+			autoOrg = nil
+		}
 		res, err := s.deps.Download.Enqueue(r.Context(), actor, snap, download.EnqueueRequest{
-			PublicID:       it.TrackID,
-			QualityID:      it.QualityID,
-			IdempotencyKey: ikey,
-			ForceNew:       it.ForceNew,
-			IntentNonce:    it.IntentNonce,
-			AllowPreview:   it.AllowPreview,
-			AutoOrganize:   defaultAutoOrg,
+			PublicID:         it.TrackID,
+			QualityID:        it.QualityID,
+			PreferredQuality: it.PreferredQuality,
+			Layout:           it.Layout,
+			BookTitle:        it.BookTitle,
+			ChapterIndex:     it.ChapterIndex,
+			ChapterTotal:     it.ChapterTotal,
+			IdempotencyKey:   ikey,
+			ForceNew:         it.ForceNew,
+			IntentNonce:      it.IntentNonce,
+			AllowPreview:     it.AllowPreview,
+			AutoOrganize:     autoOrg,
 		})
 		if err != nil {
 			writeDomainError(w, err)

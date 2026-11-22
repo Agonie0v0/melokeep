@@ -38,18 +38,23 @@ type AutoOrganizeHandler func(ctx context.Context, jobID string, dl model.Downlo
 
 // EnqueueRequest carries the actor, immutable config snapshot, and download intent.
 type EnqueueRequest struct {
-	PublicID       string
-	QualityID      string
-	QualityLabel   string
-	IdempotencyKey string
-	RequestHash    string
-	ForceNew       bool
-	IntentNonce    string
-	ReuseCompleted *bool
-	AllowPreview   bool
-	RootID         string
-	AutoOrganize   *AutoOrganizeConfig
-	Outbox         *store.OutboxEnqueueParams
+	PublicID         string
+	QualityID        string
+	QualityLabel     string
+	PreferredQuality string
+	Layout           string
+	BookTitle        string
+	ChapterIndex     int
+	ChapterTotal     int
+	IdempotencyKey   string
+	RequestHash      string
+	ForceNew         bool
+	IntentNonce      string
+	ReuseCompleted   *bool
+	AllowPreview     bool
+	RootID           string
+	AutoOrganize     *AutoOrganizeConfig
+	Outbox           *store.OutboxEnqueueParams
 }
 
 // Options configures the download Service.

@@ -171,7 +171,7 @@ const manifest = {
     album: "Creative Sessions",   // 可选：专辑名
     duration: 198,                // 可选：时长（秒，浮点数或整数）
     cover: "https://...",         // 可选：封面图片 URL
-    episodes: 0,                  // 可选：合集/播客集数
+    episodes: 0,                  // 可选：合集/有声书集数（正整数为已知总集数；-1 表示合集但搜索时未知总集数；0 或省略表示单曲）
     variants: [                   // 可选：已知音质列表
       {
         variantId: "mp3:320",
@@ -222,10 +222,33 @@ const manifest = {
 - 使用 `ctx.emit(track)` 推送歌单内曲目，可附带 `playlistIndex`。
 - 返回：`{ id, name, count, detail, issues: [{ sourceId, title, artist, reason }] }`。
 
-### 4.4 `episodes(ctx, track)`（可选）
+### 4.4 `episodes(ctx, track, opts)`（可选）
 
-- 输入：父级播客/有声书候选 `track`。
-- 返回：`Track[]`（每个分集曲目数组）。
+- 输入：
+  - `track`：父级播客/有声书候选对象（含 `sourceId`、`title`、`artist`、`album`、`episodes` 及可选的 `playlistIndex` 等字段）。
+  - `opts`（可选，分页调用时宿主传入）：`{ page: number, pageSize: number }`（`page` 为 1-based 页码，`pageSize` 默认 `100`、上限 `200`）。
+- 返回：
+  - **推荐（分页模式）**：返回分页对象（同时兼容结合 `ctx.emit(track)` 推送分集）：
+    ```js
+    return {
+      episodes: [
+        {
+          sourceId: "book:1001#ep:1",
+          title: "第 1 章",
+          artist: "演播者",
+          album: "书名",
+          duration: 620,
+          playlistIndex: 1, // 可选：1-based 章节序号；省略时宿主按 (page - 1) * pageSize + i + 1 自动补全
+        },
+      ],
+      page: 1,
+      pageSize: 100,
+      total: 313,     // 已知总集数（未知时可填 0）
+      hasMore: true,  // 是否仍有下一页
+    };
+    ```
+    > 返回对象字段同时兼容 `items` / `tracks` 替代 `episodes`、`has_more` 替代 `hasMore`、`totalCount` / `total_count` 替代 `total`。
+  - **向后兼容（旧版全量模式）**：插件仍可直接返回 `Track[]`（或未包含 `page` / `total` / `hasMore` 等分页元信息的 `{ episodes: Track[] }`，或仅通过 `ctx.emit(track)` 输出）。宿主会自动为缺失 `playlistIndex` 的条目按 1-based 顺序编号，并在 Go 层按 `(page - 1) * pageSize` 切片计算 `total` 与 `hasMore`。当未传 `opts` 调用旧版分集接口时亦保持完全兼容。
 
 ### 4.5 `lyrics(ctx, track)`（可选）
 

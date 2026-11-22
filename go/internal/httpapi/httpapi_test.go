@@ -2978,3 +2978,373 @@ func TestHandleStreamInjectsDefaultUserAgentAndSkipsBlankHeaders(t *testing.T) {
 		t.Fatalf("expected explicit User-Agent preserved, got %q", ua)
 	}
 }
+
+type pagedEpisodeStubProvider struct {
+	stubProvider
+	pageCalls atomic.Int32
+}
+
+func (p *pagedEpisodeStubProvider) Episodes(_ context.Context, tr model.ProviderTrack) ([]model.ProviderTrack, error) {
+	out := make([]model.ProviderTrack, 0, 15)
+	for i := 1; i <= 15; i++ {
+		idx := i
+		out = append(out, model.ProviderTrack{
+			Source:        "paged-src",
+			SourceID:      fmt.Sprintf("%s#ep:%d", tr.SourceID, i),
+			RootSource:    "paged-src",
+			Title:         fmt.Sprintf("Legacy Ep %d", i),
+			Artist:        tr.Artist,
+			Album:         tr.Album,
+			PlaylistIndex: &idx,
+		})
+	}
+	return out, nil
+}
+
+func (p *pagedEpisodeStubProvider) EpisodesPage(_ context.Context, tr model.ProviderTrack, opts provider.EpisodePageOptions) (provider.EpisodePage, error) {
+	p.pageCalls.Add(1)
+	const total = 15
+	start := (opts.Page - 1) * opts.PageSize
+	if start >= total {
+		return provider.EpisodePage{
+			Items:    []model.ProviderTrack{},
+			Page:     opts.Page,
+			PageSize: opts.PageSize,
+			Total:    total,
+			HasMore:  false,
+		}, nil
+	}
+	end := min(start+opts.PageSize, total)
+	items := make([]model.ProviderTrack, 0, end-start)
+	for i := start + 1; i <= end; i++ {
+		idx := i
+		items = append(items, model.ProviderTrack{
+			Source:        "paged-src",
+			SourceID:      fmt.Sprintf("%s#ep:%d", tr.SourceID, i),
+			RootSource:    "paged-src",
+			Title:         fmt.Sprintf("Chapter %d", i),
+			Artist:        tr.Artist,
+			Album:         tr.Album,
+			Duration:      600,
+			PlaylistIndex: &idx,
+		})
+	}
+	return provider.EpisodePage{
+		Items:    items,
+		Page:     opts.Page,
+		PageSize: opts.PageSize,
+		Total:    total,
+		HasMore:  end < total,
+	}, nil
+}
+
+type legacySliceEpisodeProvider struct {
+	stubProvider
+}
+
+func (p *legacySliceEpisodeProvider) Episodes(_ context.Context, tr model.ProviderTrack) ([]model.ProviderTrack, error) {
+	out := make([]model.ProviderTrack, 0, 15)
+	for i := 1; i <= 15; i++ {
+		idx := i
+		out = append(out, model.ProviderTrack{
+			Source:        "legacy-slice-src",
+			SourceID:      fmt.Sprintf("%s#ep:%d", tr.SourceID, i),
+			RootSource:    "legacy-slice-src",
+			Title:         fmt.Sprintf("Slice Ep %d", i),
+			Artist:        tr.Artist,
+			Album:         tr.Album,
+			PlaylistIndex: &idx,
+		})
+	}
+	return out, nil
+}
+
+func TestTrackEpisodesPaginationAndMetadata(t *testing.T) {
+	pagedProv := &pagedEpisodeStubProvider{
+		stubProvider: stubProvider{id: "paged-src", engineName: "paged-src", category: "播客", label: "Paged"},
+	}
+	legacyProv := &legacySliceEpisodeProvider{
+		stubProvider: stubProvider{id: "legacy-slice-src", engineName: "legacy-slice-src", category: "播客", label: "LegacySlice"},
+	}
+
+	srv, st, _ := newTestServer(t, func(deps *Dependencies, _ string) {
+		reg, err := provider.NewRegistry([]provider.Entry{
+			{Provider: pagedProv, Meta: provider.Metadata{Label: "Paged", Category: "播客"}},
+			{Provider: legacyProv, Meta: provider.Metadata{Label: "LegacySlice", Category: "播客"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps.Providers = reg
+	})
+	ctx := context.Background()
+
+	// Seed parent with episodes=-1 and pre-existing episode_ids cache (must NOT truncate paged mode!).
+	parentMeta, _ := json.Marshal(map[string]any{
+		"episodes":    -1,
+		"episode_ids": []string{"stale-ep-id"},
+	})
+	_, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		ID: "book-rec-1", Source: "paged-src", Locator: "book-1", RootSource: "paged-src",
+		Title: "Paged Book", Artist: "Reader", MetadataJSON: string(parentMeta),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.PutPublicRef(ctx, model.PublicRef{PublicID: "book-pub-1", Kind: "candidate", TargetID: "book-rec-1", Source: "paged-src", SourceID: "book-1"}, "")
+
+	// 1. Paged request with page_size=2 gets clamped to 10; ignores stale episode_ids cache.
+	rec1 := httptest.NewRecorder()
+	srv.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/api/tracks/book-pub-1/episodes?page=1&page_size=2", nil))
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("GET paged episodes p1 failed: %d %s", rec1.Code, rec1.Body.String())
+	}
+	var dto1 model.EpisodePageDTO
+	if err := json.Unmarshal(rec1.Body.Bytes(), &dto1); err != nil {
+		t.Fatalf("decode dto1: %v", err)
+	}
+	if dto1.Page != 1 || dto1.PageSize != 10 || dto1.Total != 15 || !dto1.HasMore || len(dto1.Items) != 10 {
+		t.Fatalf("unexpected dto1: %+v", dto1)
+	}
+	if dto1.Items[0].PlaylistIndex == nil || *dto1.Items[0].PlaylistIndex != 1 {
+		t.Fatalf("expected playlist_index=1, got %v", dto1.Items[0].PlaylistIndex)
+	}
+	// Verify playlist_index persisted into MetadataJSON and loaded back by loadDomainTrack.
+	loadedEp, _, foundEp, lErr := srv.loadDomainTrack(ctx, dto1.Items[0].ID)
+	if lErr != nil || !foundEp || loadedEp.PlaylistIndex == nil || *loadedEp.PlaylistIndex != 1 {
+		t.Fatalf("expected loadDomainTrack to restore playlist_index=1, got found=%v ep=%+v err=%v", foundEp, loadedEp, lErr)
+	}
+
+	// 2. Page 2 returns remaining 5 items with has_more=false; page_size=500 clamped to 200.
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/tracks/book-pub-1/episodes?page=2&page_size=10", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET paged episodes p2 failed: %d %s", rec2.Code, rec2.Body.String())
+	}
+	var dto2 model.EpisodePageDTO
+	_ = json.Unmarshal(rec2.Body.Bytes(), &dto2)
+	if dto2.Page != 2 || dto2.Total != 15 || dto2.HasMore || len(dto2.Items) != 5 || *dto2.Items[4].PlaylistIndex != 15 {
+		t.Fatalf("unexpected dto2: %+v", dto2)
+	}
+
+	// 3. Verify parent track's episodes (-1) was NOT overwritten by single-page count.
+	parentLoaded, _, _, _ := srv.loadDomainTrack(ctx, "book-pub-1")
+	if parentLoaded.Episodes != -1 {
+		t.Fatalf("expected parent episodes=-1 preserved in paged mode, got %d", parentLoaded.Episodes)
+	}
+
+	// 4. Out-of-range page serializes items as [] (not null), and ?paged=1 defaults page=1, page_size=100.
+	recEmpty := httptest.NewRecorder()
+	srv.ServeHTTP(recEmpty, httptest.NewRequest(http.MethodGet, "/api/tracks/book-pub-1/episodes?page=5&page_size=500", nil))
+	if recEmpty.Code != http.StatusOK || !strings.Contains(recEmpty.Body.String(), `"items":[]`) || !strings.Contains(recEmpty.Body.String(), `"page_size":200`) {
+		t.Fatalf("unexpected empty/clamped paged response: %d %s", recEmpty.Code, recEmpty.Body.String())
+	}
+	recPagedFlag := httptest.NewRecorder()
+	srv.ServeHTTP(recPagedFlag, httptest.NewRequest(http.MethodGet, "/api/tracks/book-pub-1/episodes?paged=1", nil))
+	if recPagedFlag.Code != http.StatusOK {
+		t.Fatalf("GET ?paged=1 failed: %d %s", recPagedFlag.Code, recPagedFlag.Body.String())
+	}
+	var dtoPagedFlag model.EpisodePageDTO
+	_ = json.Unmarshal(recPagedFlag.Body.Bytes(), &dtoPagedFlag)
+	if dtoPagedFlag.Page != 1 || dtoPagedFlag.PageSize != 100 || len(dtoPagedFlag.Items) != 15 || dtoPagedFlag.HasMore {
+		t.Fatalf("unexpected ?paged=1 result: %+v", dtoPagedFlag)
+	}
+
+	// 5. Legacy EpisodeProvider (non-PagedEpisodeProvider): unpaged returns []TrackDTO, paged slices in Go.
+	_, err = st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		ID: "leg-rec-1", Source: "legacy-slice-src", Locator: "leg-1", RootSource: "legacy-slice-src",
+		Title: "Legacy Pod", Artist: "Host",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.PutPublicRef(ctx, model.PublicRef{PublicID: "leg-pub-1", Kind: "candidate", TargetID: "leg-rec-1", Source: "legacy-slice-src", SourceID: "leg-1"}, "")
+
+	legPagedRec := httptest.NewRecorder()
+	srv.ServeHTTP(legPagedRec, httptest.NewRequest(http.MethodGet, "/api/tracks/leg-pub-1/episodes?page=2&page_size=10", nil))
+	if legPagedRec.Code != http.StatusOK {
+		t.Fatalf("legacy paged failed: %d %s", legPagedRec.Code, legPagedRec.Body.String())
+	}
+	var legDTO model.EpisodePageDTO
+	_ = json.Unmarshal(legPagedRec.Body.Bytes(), &legDTO)
+	if legDTO.Page != 2 || legDTO.PageSize != 10 || legDTO.Total != 15 || legDTO.HasMore || len(legDTO.Items) != 5 {
+		t.Fatalf("unexpected legacy Go-sliced page: %+v", legDTO)
+	}
+
+	legUnpagedRec := httptest.NewRecorder()
+	srv.ServeHTTP(legUnpagedRec, httptest.NewRequest(http.MethodGet, "/api/tracks/leg-pub-1/episodes", nil))
+	var unpagedArr []model.TrackDTO
+	if err := json.Unmarshal(legUnpagedRec.Body.Bytes(), &unpagedArr); err != nil || len(unpagedArr) != 15 {
+		t.Fatalf("expected unpaged []TrackDTO of 15 items, err=%v len=%d body=%s", err, len(unpagedArr), legUnpagedRec.Body.String())
+	}
+}
+
+func TestDownloadEnqueueAudiobookSkipAutoOrganizeAndListLimit(t *testing.T) {
+	wav := make([]byte, 44+32)
+	copy(wav[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(wav[4:8], 36+32)
+	copy(wav[8:16], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(wav[16:20], 16)
+	binary.LittleEndian.PutUint16(wav[20:22], 1)
+	binary.LittleEndian.PutUint16(wav[22:24], 1)
+	binary.LittleEndian.PutUint32(wav[24:28], 8000)
+	binary.LittleEndian.PutUint32(wav[28:32], 16000)
+	binary.LittleEndian.PutUint16(wav[32:34], 2)
+	binary.LittleEndian.PutUint16(wav[34:36], 16)
+	copy(wav[36:40], "data")
+	binary.LittleEndian.PutUint32(wav[40:44], 32)
+
+	audioSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write(wav)
+	}))
+	defer audioSrv.Close()
+
+	var dlSvc *download.Service
+	srv, st, canonRoot := newTestServer(t, func(deps *Dependencies, tmp string) {
+		prov := &stubProvider{
+			id:         "AudiusMusicClient",
+			engineName: "AudiusMusicClient",
+			resolveFn: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+				br128 := 128
+				br999 := 999
+				return []model.ResolvedMedia{
+					{
+						VariantID: "var-flac",
+						Variant:   model.MediaVariant{VariantID: "var-flac", Label: "FLAC", Codec: "flac", Bitrate: &br999, Lossless: true},
+						URL:       audioSrv.URL + "/high.flac",
+						Codec:     "flac",
+						Bitrate:   &br999,
+					},
+					{
+						VariantID: "var-mp3-128",
+						Variant:   model.MediaVariant{VariantID: "var-mp3-128", Label: "MP3 128k", Codec: "mp3", Bitrate: &br128},
+						URL:       audioSrv.URL + "/std.mp3",
+						Codec:     "mp3",
+						Bitrate:   &br128,
+					},
+				}, nil
+			},
+		}
+		reg, _ := provider.NewRegistry([]provider.Entry{{Provider: prov, Meta: provider.Metadata{Label: "Audius"}}})
+		deps.Providers = reg
+		snapProvider := func() config.Snapshot { return deps.InitialSnapshot }
+		scraper := library.NewScraper(deps.Transport, deps.Providers, deps.Media, library.ScraperOptions{})
+		libSvc := library.NewService(deps.Store, deps.Files, deps.Tags, deps.Media, scraper, library.ServiceOptions{
+			SnapshotProvider: snapProvider,
+		})
+		dlSvc = download.NewService(deps.Store, deps.Transport, deps.Providers, deps.Files, deps.Media, deps.Tags, download.Options{
+			StagingRoot:        filepath.Join(tmp, "staging"),
+			Budgets:            deps.Budgets,
+			SnapshotProvider:   snapProvider,
+			AutoOrganizeRunner: libSvc.AutoOrganizeDownload,
+		})
+		t.Cleanup(func() { _ = dlSvc.Close() })
+		deps.Library = libSvc
+		deps.Download = dlSvc
+	})
+
+	// Enable auto_scrape + auto_organize so we prove skip_auto_organize=true suppresses it.
+	getSetRec := httptest.NewRecorder()
+	srv.ServeHTTP(getSetRec, httptest.NewRequest(http.MethodGet, "/api/library/settings", nil))
+	var settingsMap map[string]any
+	_ = json.Unmarshal(getSetRec.Body.Bytes(), &settingsMap)
+	settingsMap["auto_scrape"] = true
+	settingsMap["auto_organize"] = true
+	settingsBody, _ := json.Marshal(settingsMap)
+	setReq := httptest.NewRequest(http.MethodPut, "/api/library/settings", bytes.NewReader(settingsBody))
+	setReq.Header.Set("Content-Type", "application/json")
+	setReq.Header.Set("X-MeloKeep-Request", "1")
+	setRec := httptest.NewRecorder()
+	srv.ServeHTTP(setRec, setReq)
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/library/settings failed: %d %s", setRec.Code, setRec.Body.String())
+	}
+
+	ctx := context.Background()
+	trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		ID: "ab-ep-3", Source: "AudiusMusicClient", Locator: "ab-loc-3", RootSource: "AudiusMusicClient",
+		Title: "第三回", Artist: "说书人", Album: "", DurationMS: 1000,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: "pub-ab-ep-3", Kind: "candidate", TargetID: trID, Source: "AudiusMusicClient", SourceID: "ab-loc-3",
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	enqBody := `[{"track_id":"pub-ab-ep-3","quality_id":"","preferred_quality":"standard","layout":"audiobook","book_title":"示例有声书","chapter_index":3,"chapter_total":50,"skip_auto_organize":true}]`
+	enqReq := httptest.NewRequest(http.MethodPost, "/api/downloads", strings.NewReader(enqBody))
+	enqReq.Header.Set("Content-Type", "application/json")
+	enqReq.Header.Set("X-MeloKeep-Request", "1")
+	enqRec := httptest.NewRecorder()
+	srv.ServeHTTP(enqRec, enqReq)
+	if enqRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/downloads failed: %d %s", enqRec.Code, enqRec.Body.String())
+	}
+	var jobs []model.DownloadJobDTO
+	_ = json.Unmarshal(enqRec.Body.Bytes(), &jobs)
+	if len(jobs) != 1 || jobs[0].QualityLabel != "自动（标准音质）" {
+		t.Fatalf("unexpected enqueued audiobook job: %+v", jobs)
+	}
+
+	var finalDTO model.DownloadJobDTO
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		dl, ok, _ := dlSvc.Get(ctx, jobs[0].ID)
+		if ok {
+			dto, _ := dlSvc.ToDTO(ctx, dl)
+			if dto.Status == "complete" {
+				finalDTO = dto
+				break
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if finalDTO.Status != "complete" {
+		t.Fatalf("audiobook download did not complete in time: %+v", finalDTO)
+	}
+	if finalDTO.Processing != nil {
+		t.Fatalf("expected skip_auto_organize=true to skip Processing, got %+v", finalDTO.Processing)
+	}
+	wantPath := filepath.Join(canonRoot, "示例有声书", "003 - 第三回.mp3")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected audiobook output at %s: %v", wantPath, err)
+	}
+
+	// Verify GET /api/downloads?limit=500 returns > 200 items while default returns 200.
+	for i := 0; i < 249; i++ {
+		if _, err := st.CreateDownload(ctx, store.CreateDownloadParams{
+			ID:             fmt.Sprintf("seed-dl-%03d", i),
+			TrackID:        trID,
+			PublicID:       "pub-ab-ep-3",
+			QualityID:      "",
+			QualityLabel:   "自动（标准音质）",
+			DownloadSource: "AudiusMusicClient",
+			ActorKey:       "anonymous:web:anonymous",
+			DedupeKey:      fmt.Sprintf("seed-dedupe-%03d", i),
+			ForceNew:       true,
+			IntentNonce:    fmt.Sprintf("nonce-%03d", i),
+		}); err != nil {
+			t.Fatalf("seed download %d: %v", i, err)
+		}
+	}
+
+	defRec := httptest.NewRecorder()
+	srv.ServeHTTP(defRec, httptest.NewRequest(http.MethodGet, "/api/downloads", nil))
+	var defList []model.DownloadJobDTO
+	_ = json.Unmarshal(defRec.Body.Bytes(), &defList)
+	if len(defList) != 200 {
+		t.Fatalf("expected default GET /api/downloads to return 200 items, got %d", len(defList))
+	}
+
+	limRec := httptest.NewRecorder()
+	srv.ServeHTTP(limRec, httptest.NewRequest(http.MethodGet, "/api/downloads?limit=500", nil))
+	var limList []model.DownloadJobDTO
+	_ = json.Unmarshal(limRec.Body.Bytes(), &limList)
+	if len(limList) != 250 {
+		t.Fatalf("expected GET /api/downloads?limit=500 to return 250 items, got %d", len(limList))
+	}
+}

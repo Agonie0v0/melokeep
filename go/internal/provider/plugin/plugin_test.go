@@ -1471,3 +1471,159 @@ func TestProviderResolveAudioProbe(t *testing.T) {
 		t.Fatalf("expected ErrAuthRequired for trial-only track, got %v", err)
 	}
 }
+
+func TestEpisodesPageNativeAndLegacyCompat(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Native paged plugin + ctx.emit dedupe + playlistIndex passthrough + clamping.
+	nativeScript := `
+		module.exports = {
+			manifest: {
+				apiVersion: 1,
+				id: "paged-episodes-src",
+				name: "Paged Episodes",
+				version: "1.0.0",
+				capabilities: { search: true, episodes: true }
+			},
+			search(ctx, opts) { return []; },
+			resolve(ctx, track) { return []; },
+			episodes(ctx, track, opts) {
+				if (!opts) {
+					return [
+						{ sourceId: "ep-1", title: "Ep 1" },
+						{ sourceId: "ep-2", title: "Ep 2" }
+					];
+				}
+				// Verify track.playlistIndex is forwarded when present.
+				const parentIdx = track.playlistIndex || 0;
+				const p = opts.page;
+				const ps = opts.pageSize;
+				// Emit one track that overlaps with returned list to test dedupe + custom playlistIndex.
+				ctx.emit({ sourceId: "ep-" + p + "-emit", title: "Emitted p" + p + " idx=" + parentIdx + " ps=" + ps });
+				return {
+					episodes: [
+						{ sourceId: "ep-" + p + "-emit", title: "Duplicate Should Dedupe" },
+						{ sourceId: "ep-" + p + "-ret", title: "Returned p" + p },
+						{ sourceId: "ep-" + p + "-custom", title: "Custom", playlistIndex: 777 }
+					],
+					page: p,
+					pageSize: ps,
+					totalCount: "250",
+					has_more: p < 2
+				};
+			}
+		};
+	`
+	c1, err := plugin.ParseAndCompile(nativeScript)
+	if err != nil {
+		t.Fatalf("ParseAndCompile native: %v", err)
+	}
+	p1, err := plugin.NewProvider(c1, plugin.ProviderOptions{SkipAudioProbe: true})
+	if err != nil {
+		t.Fatalf("NewProvider native: %v", err)
+	}
+
+	capProv1 := p1.AsCapabilityProvider()
+	pagedProv, ok := capProv1.(provider.PagedEpisodeProvider)
+	if !ok {
+		t.Fatal("capability wrapper for episodes-enabled plugin must implement provider.PagedEpisodeProvider")
+	}
+
+	parentIdx := 9
+	parentTrack := model.ProviderTrack{SourceID: "book-1", Title: "Book", PlaylistIndex: &parentIdx}
+
+	// page=0 -> clamped to 1, pageSize=999 -> clamped to 200.
+	pg1, err := pagedProv.EpisodesPage(ctx, parentTrack, provider.EpisodePageOptions{Page: 0, PageSize: 999})
+	if err != nil {
+		t.Fatalf("EpisodesPage page 1: %v", err)
+	}
+	if pg1.Page != 1 || pg1.PageSize != 200 || pg1.Total != 250 || !pg1.HasMore {
+		t.Fatalf("unexpected pg1 metadata: %+v", pg1)
+	}
+	if len(pg1.Items) != 3 {
+		t.Fatalf("expected 3 deduplicated items on pg1, got %d: %+v", len(pg1.Items), pg1.Items)
+	}
+	if pg1.Items[0].Title != "Emitted p1 idx=9 ps=200" || *pg1.Items[0].PlaylistIndex != 1 {
+		t.Fatalf("unexpected pg1 item[0]: %+v", pg1.Items[0])
+	}
+	if *pg1.Items[1].PlaylistIndex != 2 || *pg1.Items[2].PlaylistIndex != 777 {
+		t.Fatalf("unexpected playlist indices on pg1: [1]=%v [2]=%v", pg1.Items[1].PlaylistIndex, pg1.Items[2].PlaylistIndex)
+	}
+
+	// page=2, pageSize=50 -> auto numbering starts at 51.
+	pg2, err := pagedProv.EpisodesPage(ctx, parentTrack, provider.EpisodePageOptions{Page: 2, PageSize: 50})
+	if err != nil {
+		t.Fatalf("EpisodesPage page 2: %v", err)
+	}
+	if pg2.Page != 2 || pg2.PageSize != 50 || pg2.Total != 250 || pg2.HasMore {
+		t.Fatalf("unexpected pg2 metadata: %+v", pg2)
+	}
+	if *pg2.Items[0].PlaylistIndex != 51 || *pg2.Items[1].PlaylistIndex != 52 || *pg2.Items[2].PlaylistIndex != 777 {
+		t.Fatalf("unexpected pg2 indices: %+v", pg2.Items)
+	}
+
+	// Backward-compatible Episodes(ctx, track) still passes no opts.
+	legacyEps, err := capProv1.(provider.EpisodeProvider).Episodes(ctx, parentTrack)
+	if err != nil || len(legacyEps) != 2 || legacyEps[0].SourceID != "ep-1" {
+		t.Fatalf("unexpected legacy Episodes result: %+v err=%v", legacyEps, err)
+	}
+
+	// 2. Legacy plugin returning unpaged Track[] or { tracks: Track[] } slices cleanly in Go.
+	legacyScript := `
+		module.exports = {
+			manifest: {
+				apiVersion: 1,
+				id: "legacy-episodes-src",
+				name: "Legacy Episodes",
+				version: "1.0.0",
+				capabilities: { search: true, episodes: true }
+			},
+			search(ctx, opts) { return []; },
+			resolve(ctx, track) { return []; },
+			episodes(ctx, track) {
+				const out = [];
+				for (let i = 1; i <= 5; i++) {
+					out.push({ sourceId: "leg-" + i, title: "Leg " + i });
+				}
+				return track.sourceId === "map-mode" ? { tracks: out } : out;
+			}
+		};
+	`
+	c2, err := plugin.ParseAndCompile(legacyScript)
+	if err != nil {
+		t.Fatalf("ParseAndCompile legacy: %v", err)
+	}
+	p2, err := plugin.NewProvider(c2, plugin.ProviderOptions{SkipAudioProbe: true})
+	if err != nil {
+		t.Fatalf("NewProvider legacy: %v", err)
+	}
+
+	for _, sid := range []string{"arr-mode", "map-mode"} {
+		page1, err := p2.EpisodesPage(ctx, model.ProviderTrack{SourceID: sid}, provider.EpisodePageOptions{Page: 1, PageSize: 2})
+		if err != nil {
+			t.Fatalf("%s page 1 failed: %v", sid, err)
+		}
+		if len(page1.Items) != 2 || page1.Total != 5 || !page1.HasMore || *page1.Items[0].PlaylistIndex != 1 || *page1.Items[1].PlaylistIndex != 2 {
+			t.Fatalf("%s unexpected page 1: %+v", sid, page1)
+		}
+		page3, err := p2.EpisodesPage(ctx, model.ProviderTrack{SourceID: sid}, provider.EpisodePageOptions{Page: 3, PageSize: 2})
+		if err != nil {
+			t.Fatalf("%s page 3 failed: %v", sid, err)
+		}
+		if len(page3.Items) != 1 || page3.Total != 5 || page3.HasMore || *page3.Items[0].PlaylistIndex != 5 {
+			t.Fatalf("%s unexpected page 3: %+v", sid, page3)
+		}
+		page4, err := p2.EpisodesPage(ctx, model.ProviderTrack{SourceID: sid}, provider.EpisodePageOptions{Page: 4, PageSize: 2})
+		if err != nil || len(page4.Items) != 0 || page4.Total != 5 || page4.HasMore || page4.Items == nil {
+			t.Fatalf("%s unexpected out-of-range page 4: %+v err=%v", sid, page4, err)
+		}
+	}
+
+	// 3. Search-only plugin wrapper must NOT implement PagedEpisodeProvider.
+	noEpScript := `module.exports = { manifest: { apiVersion: 1, id: "no-ep-src", name: "No Ep", version: "1.0.0", capabilities: { search: true } }, search(){return [];}, resolve(){return [];} };`
+	c3, _ := plugin.ParseAndCompile(noEpScript)
+	p3, _ := plugin.NewProvider(c3, plugin.ProviderOptions{})
+	if _, ok := p3.AsCapabilityProvider().(provider.PagedEpisodeProvider); ok {
+		t.Fatal("plugin without episodes capability must not implement PagedEpisodeProvider")
+	}
+}

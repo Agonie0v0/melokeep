@@ -249,8 +249,11 @@ func (s *Store) GetDownload(ctx context.Context, id string) (model.Download, boo
 }
 
 func (s *Store) ListDownloads(ctx context.Context, limit int) ([]model.Download, error) {
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
 		limit = 200
+	}
+	if limit > 2000 {
+		limit = 2000
 	}
 	rows, err := s.reader.QueryContext(ctx, `
 		SELECT id, owner_key, public_id, quality_id, quality_label, download_source,

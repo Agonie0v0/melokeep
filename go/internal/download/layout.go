@@ -44,9 +44,22 @@ func DownloadStem(title, artist string) string {
 	return stem
 }
 
+// PathOptions carries optional naming metadata (such as audiobook directory and chapter numbering).
+type PathOptions struct {
+	BookTitle    string
+	ChapterIndex int
+	ChapterTotal int
+}
+
 // TargetAudioPath resolves a non-colliding absolute target path inside rootPath
 // according to DownloadLayout (source | flat | artist | artist_album).
 func TargetAudioPath(rootPath, layout string, track model.ProviderTrack, ext, downloadID string) string {
+	return TargetAudioPathWithOptions(rootPath, layout, track, ext, downloadID, PathOptions{})
+}
+
+// TargetAudioPathWithOptions resolves a non-colliding absolute target path inside rootPath
+// according to DownloadLayout (source | flat | artist | artist_album | audiobook) and PathOptions.
+func TargetAudioPathWithOptions(rootPath, layout string, track model.ProviderTrack, ext, downloadID string, opts PathOptions) string {
 	if ext == "" {
 		ext = ".mp3"
 	}
@@ -54,21 +67,53 @@ func TargetAudioPath(rootPath, layout string, track model.ProviderTrack, ext, do
 		ext = "." + ext
 	}
 	ext = strings.ToLower(ext)
-	stem := DownloadStem(track.Title, track.Artist)
 
 	var dir string
+	var stem string
 	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "audiobook":
+		bookName := strings.TrimSpace(opts.BookTitle)
+		if bookName == "" {
+			bookName = strings.TrimSpace(track.Album)
+		}
+		if bookName == "" {
+			bookName = strings.TrimSpace(track.Artist)
+		}
+		dir = filepath.Join(rootPath, SanitizeSegment(bookName, "未知有声书"))
+
+		idx := opts.ChapterIndex
+		if idx <= 0 && track.PlaylistIndex != nil {
+			idx = *track.PlaylistIndex
+		}
+		chapTitle := SanitizeSegment(track.Title, "未知章节")
+		if idx > 0 {
+			width := 3
+			if opts.ChapterTotal >= 1000 || idx >= 1000 {
+				width = 4
+			}
+			stem = fmt.Sprintf("%0*d - %s", width, idx, chapTitle)
+		} else {
+			stem = chapTitle
+		}
+		first := strings.SplitN(stem, ".", 2)[0]
+		if reservedWinNameRe.MatchString(first) {
+			stem = "_" + stem
+		}
 	case "flat":
 		dir = rootPath
+		stem = DownloadStem(track.Title, track.Artist)
 	case "artist":
 		dir = filepath.Join(rootPath, SanitizeSegment(track.Artist, "未知歌手"))
+		stem = DownloadStem(track.Title, track.Artist)
 	case "artist_album":
 		artist := SanitizeSegment(track.Artist, "未知歌手")
 		album := SanitizeSegment(track.Album, "未知专辑")
 		dir = filepath.Join(rootPath, artist, album)
+		stem = DownloadStem(track.Title, track.Artist)
 	default: // "source"
 		src := SanitizeSegment(track.Source, "unknown")
 		dir = filepath.Join(rootPath, src)
+		stem = DownloadStem(track.Title, track.Artist)
 	}
 
 	shortID := downloadID

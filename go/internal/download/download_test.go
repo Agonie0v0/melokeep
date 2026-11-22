@@ -7,6 +7,7 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/agonie0v0/melokeep/internal/auth"
 	"github.com/agonie0v0/melokeep/internal/config"
 	"github.com/agonie0v0/melokeep/internal/files"
+	"github.com/agonie0v0/melokeep/internal/helper"
 	"github.com/agonie0v0/melokeep/internal/media"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/provider"
@@ -1105,5 +1107,338 @@ func TestDownloadFallbackToNextCandidateOn403AndUpdatesBytesTotal(t *testing.T) 
 	done3 := waitForStatus(t, svc, res3.Download.ID, model.DownloadFailed, 5*time.Second)
 	if done3.File != nil {
 		t.Fatalf("expected no file on total failure, got %v", done3.File)
+	}
+}
+
+func TestTargetAudioPathWithOptionsAudiobookLayout(t *testing.T) {
+	root := t.TempDir()
+	plIdx := 9
+	track := model.ProviderTrack{
+		Source:        "open-podcast",
+		Title:         "第9章: 风起?",
+		Artist:        "演播者A",
+		Album:         "专辑名",
+		PlaylistIndex: &plIdx,
+	}
+
+	// 1. opts.BookTitle and opts.ChapterIndex override Album and PlaylistIndex; 3-digit width when total < 1000.
+	p1 := TargetAudioPathWithOptions(root, "audiobook", track, "mp3", "dl12345678", PathOptions{
+		BookTitle:    "书名优先",
+		ChapterIndex: 5,
+		ChapterTotal: 313,
+	})
+	want1 := filepath.Join(root, "书名优先", "005 - 第9章_ 风起_.mp3")
+	if p1 != want1 {
+		t.Fatalf("expected %q, got %q", want1, p1)
+	}
+
+	// 2. 4-digit width when ChapterTotal >= 1000 or idx >= 1000, falling back to track.Album and *track.PlaylistIndex.
+	p2 := TargetAudioPathWithOptions(root, "audiobook", track, ".m4a", "dl12345678", PathOptions{
+		ChapterTotal: 1200,
+	})
+	want2 := filepath.Join(root, "专辑名", "0009 - 第9章_ 风起_.m4a")
+	if p2 != want2 {
+		t.Fatalf("expected %q, got %q", want2, p2)
+	}
+
+	// 3. Fallback to Artist and "未知有声书", plus unnumbered title when idx <= 0.
+	noIdxTrack := model.ProviderTrack{Title: "", Artist: "单口主播"}
+	p3 := TargetAudioPathWithOptions(root, "audiobook", noIdxTrack, "mp3", "dlabcdef", PathOptions{})
+	want3 := filepath.Join(root, "单口主播", "未知章节.mp3")
+	if p3 != want3 {
+		t.Fatalf("expected %q, got %q", want3, p3)
+	}
+	p4 := TargetAudioPathWithOptions(root, "audiobook", model.ProviderTrack{Title: "序章"}, "mp3", "dlabcdef", PathOptions{})
+	want4 := filepath.Join(root, "未知有声书", "序章.mp3")
+	if p4 != want4 {
+		t.Fatalf("expected %q, got %q", want4, p4)
+	}
+
+	// 4. Collision suffix preserved.
+	if err := os.MkdirAll(filepath.Dir(p1), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p1, []byte("occupied"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p5 := TargetAudioPathWithOptions(root, "audiobook", track, "mp3", "dl12345678", PathOptions{
+		BookTitle:    "书名优先",
+		ChapterIndex: 5,
+		ChapterTotal: 313,
+	})
+	want5 := filepath.Join(root, "书名优先", "005 - 第9章_ 风起_-dl123456.mp3")
+	if p5 != want5 {
+		t.Fatalf("expected collision suffix %q, got %q", want5, p5)
+	}
+}
+
+func TestPickResolvedMediaStandardAndHighest(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	list := []model.ResolvedMedia{
+		{VariantID: "prev", URL: "https://example.com/prev.mp3", Codec: "mp3", Bitrate: intPtr(128), PreviewOnly: true, Variant: model.MediaVariant{VariantID: "prev", Codec: "mp3", Bitrate: intPtr(128), PreviewOnly: true}},
+		{VariantID: "flac", URL: "https://example.com/full.flac", Codec: "flac", Bitrate: intPtr(999), Variant: model.MediaVariant{VariantID: "flac", Codec: "flac", Bitrate: intPtr(999), Lossless: true}},
+		{VariantID: "mp3-320", URL: "https://example.com/320.mp3", Codec: "mp3", Bitrate: intPtr(320), Variant: model.MediaVariant{VariantID: "mp3-320", Codec: "mp3", Bitrate: intPtr(320)}},
+		{VariantID: "mp3-128", URL: "https://example.com/128.mp3", Codec: "mp3", Bitrate: intPtr(128), Variant: model.MediaVariant{VariantID: "mp3-128", Codec: "mp3", Bitrate: intPtr(128)}},
+		{VariantID: "mp3-192", URL: "https://example.com/192.mp3", Codec: "mp3", Bitrate: intPtr(192), Variant: model.MediaVariant{VariantID: "mp3-192", Codec: "mp3", Bitrate: intPtr(192)}},
+	}
+
+	gotStd, ok := pickResolvedMedia(list, "", "standard", true)
+	if !ok || gotStd.VariantID != "mp3-192" {
+		t.Fatalf("expected standard to pick 192k non-preview non-lossless, got ok=%v %+v", ok, gotStd)
+	}
+
+	gotHigh, ok := pickResolvedMedia(list, "", "highest", true)
+	if !ok || gotHigh.VariantID != "flac" {
+		t.Fatalf("expected highest to pick flac, got ok=%v %+v", ok, gotHigh)
+	}
+
+	// Standard fallback when no <=192 lossy stream exists: picks lowest positive lossy (256 over 320 and flac).
+	highOnly := []model.ResolvedMedia{
+		{VariantID: "flac", URL: "https://example.com/full.flac", Codec: "flac", Bitrate: intPtr(999), Variant: model.MediaVariant{VariantID: "flac", Codec: "flac", Bitrate: intPtr(999), Lossless: true}},
+		{VariantID: "mp3-320", URL: "https://example.com/320.mp3", Codec: "mp3", Bitrate: intPtr(320), Variant: model.MediaVariant{VariantID: "mp3-320", Codec: "mp3", Bitrate: intPtr(320)}},
+		{VariantID: "aac-256", URL: "https://example.com/256.m4a", Codec: "m4a", Bitrate: intPtr(256), Variant: model.MediaVariant{VariantID: "aac-256", Codec: "m4a", Bitrate: intPtr(256)}},
+	}
+	gotStdFb, ok := pickResolvedMedia(highOnly, "", "standard", false)
+	if !ok || gotStdFb.VariantID != "aac-256" {
+		t.Fatalf("expected standard fallback to pick 256k lowest lossy, got ok=%v %+v", ok, gotStdFb)
+	}
+
+	// Standard fallback when only lossless exists: picks first non-preview stream.
+	losslessOnly := []model.ResolvedMedia{
+		{VariantID: "prev", URL: "https://example.com/prev.mp3", Codec: "mp3", Bitrate: intPtr(128), PreviewOnly: true, Variant: model.MediaVariant{VariantID: "prev", Codec: "mp3", PreviewOnly: true}},
+		{VariantID: "flac", URL: "https://example.com/full.flac", Codec: "flac", Bitrate: intPtr(999), Variant: model.MediaVariant{VariantID: "flac", Codec: "flac", Lossless: true}},
+	}
+	gotStdLossless, ok := pickResolvedMedia(losslessOnly, "", "standard", true)
+	if !ok || gotStdLossless.VariantID != "flac" {
+		t.Fatalf("expected standard lossless-only fallback to pick non-preview flac, got ok=%v %+v", ok, gotStdLossless)
+	}
+}
+
+type stubTagRW struct {
+	mu       sync.Mutex
+	requests []helper.WriteTagsRequest
+}
+
+func (s *stubTagRW) ReadTags(context.Context, string) (helper.AudioTagData, error) {
+	return helper.AudioTagData{}, nil
+}
+
+func (s *stubTagRW) BatchReadTags(context.Context, []string) ([]helper.BatchTagItem, error) {
+	return nil, nil
+}
+
+func (s *stubTagRW) WriteTags(_ context.Context, req helper.WriteTagsRequest) (helper.AudioTagData, error) {
+	s.mu.Lock()
+	s.requests = append(s.requests, req)
+	s.mu.Unlock()
+	return helper.AudioTagData{Tags: req.Tags}, nil
+}
+
+func TestAudiobookLazyResolveTagsRetryAndDedupe(t *testing.T) {
+	wavPayload := sampleWAVBytes()
+	var failFirstAttempt atomic.Bool
+	failFirstAttempt.Store(true)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chap-std-flaky.wav" && failFirstAttempt.Swap(false) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set("Content-Length", strconv.Itoa(len(wavPayload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(wavPayload)
+	}))
+	defer srv.Close()
+
+	var seenStdPolicy, seenHighPolicy atomic.Bool
+	var seenPlaylistIdx atomic.Int32
+	prov := &stubProvider{
+		id: "AudiusMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			switch policy.PreferredQuality {
+			case "standard":
+				seenStdPolicy.Store(true)
+			case "highest":
+				seenHighPolicy.Store(true)
+			}
+			if track.PlaylistIndex != nil {
+				seenPlaylistIdx.Store(int32(*track.PlaylistIndex))
+			}
+			br128 := 128
+			br320 := 320
+			mediaPath := "/chap-high.wav"
+			if track.SourceID == "chap-retry" && policy.PreferredQuality == "standard" {
+				mediaPath = "/chap-std-flaky.wav"
+			}
+			return []model.ResolvedMedia{
+				{
+					VariantID: "v-lossless",
+					Variant:   model.MediaVariant{VariantID: "v-lossless", Label: "WAV", Codec: "wav", Lossless: true},
+					URL:       srv.URL + mediaPath,
+					Codec:     "wav",
+				},
+				{
+					VariantID: "v-320",
+					Variant:   model.MediaVariant{VariantID: "v-320", Label: "MP3 320k", Codec: "mp3", Bitrate: &br320},
+					URL:       srv.URL + mediaPath,
+					Codec:     "mp3",
+					Bitrate:   &br320,
+				},
+				{
+					VariantID: "v-128",
+					Variant:   model.MediaVariant{VariantID: "v-128", Label: "MP3 128k", Codec: "mp3", Bitrate: &br128},
+					URL:       srv.URL + mediaPath,
+					Codec:     "mp3",
+					Bitrate:   &br128,
+				},
+			}, nil
+		},
+	}
+
+	tagRW := &stubTagRW{}
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "go", "melokeep.db")
+	st, err := store.Open(context.Background(), store.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	musicRoot := filepath.Join(tmp, "music")
+	if err := os.MkdirAll(musicRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canon, err := files.CanonicalizeRoot(musicRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps, mode, _ := files.ProbeCapabilities(canon)
+	rootID := model.NewUUID()
+	if err := st.UpsertRoot(context.Background(), store.RootRecord{
+		ID: rootID, CanonicalPath: canon, PathCaseMode: mode, Enabled: true, Healthy: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	coords := files.NewCoordinator(st, files.NewAssetLockManager(2*time.Second), []files.Root{{
+		ID: rootID, CanonicalPath: canon, CaseMode: mode, Capabilities: caps,
+	}})
+	reg, err := provider.NewRegistry([]provider.Entry{{Provider: prov}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	t.Cleanup(pool.CloseAll)
+	budgets := config.DefaultResourceBudgets()
+	runner := media.NewRunner(budgets, "", "", "")
+	tagSvc := media.NewTagService(tagRW, runner)
+	svc := NewService(st, pool, reg, coords, runner, tagSvc, Options{
+		StagingRoot: filepath.Join(tmp, "partial"),
+		Budgets:     budgets,
+		BackoffBase: 10 * time.Millisecond,
+		BackoffMax:  20 * time.Millisecond,
+		MaxAttempts: 1, // Force failure on first error so Retry exercises specForRetry.
+	})
+	t.Cleanup(func() { _ = svc.Close() })
+
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	snap := config.NewSnapshot(config.DefaultRuntimeConfig(), budgets)
+
+	// Seed lazy episode without variants, Album="", and playlist_index=7 in MetadataJSON.
+	metaBytes, _ := json.Marshal(map[string]any{"playlist_index": 7})
+	trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+		Source:       "AudiusMusicClient",
+		Locator:      "chap-retry",
+		RootSource:   "StubMusicClient",
+		Title:        "序幕",
+		Artist:       "演播甲",
+		Album:        "",
+		DurationMS:   60000,
+		MetadataJSON: string(metaBytes),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubID := "pub-chap-retry"
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: pubID, Kind: "candidate", TargetID: trID, Source: "AudiusMusicClient", SourceID: "chap-retry",
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enqueue with PreferredQuality="standard", Layout="audiobook", BookTitle="示例有声书", ChapterTotal=120.
+	resStd, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID:         pubID,
+		QualityID:        "",
+		PreferredQuality: "standard",
+		Layout:           "audiobook",
+		BookTitle:        "示例有声书",
+		ChapterTotal:     120,
+	})
+	if err != nil {
+		t.Fatalf("enqueue standard: %v", err)
+	}
+	if resStd.Download.QualityLabel != "自动（标准音质）" {
+		t.Fatalf("expected QualityLabel 自动（标准音质）, got %q", resStd.Download.QualityLabel)
+	}
+
+	// Same track with PreferredQuality="highest" must produce distinct dedupeKey (not reuse standard task).
+	resHigh, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID:         pubID,
+		QualityID:        "",
+		PreferredQuality: "highest",
+		Layout:           "audiobook",
+		BookTitle:        "示例有声书",
+		ChapterTotal:     120,
+	})
+	if err != nil || !resHigh.Created || resHigh.Download.ID == resStd.Download.ID {
+		t.Fatalf("expected distinct task for highest vs standard, err=%v resHigh=%+v", err, resHigh)
+	}
+	if resHigh.Download.QualityLabel != "自动（最高可用）" {
+		t.Fatalf("expected QualityLabel 自动（最高可用）, got %q", resHigh.Download.QualityLabel)
+	}
+
+	// Wait for resStd to fail (500 on first attempt with MaxAttempts=1), then Retry to verify specForRetry restores audiobook spec!
+	waitForStatus(t, svc, resStd.Download.ID, model.DownloadFailed, 5*time.Second)
+	if _, err := svc.Retry(ctx, actor, resStd.Download.ID, snap); err != nil {
+		t.Fatalf("Retry failed: %v", err)
+	}
+	doneStd := waitForStatus(t, svc, resStd.Download.ID, model.DownloadComplete, 5*time.Second)
+	if doneStd.File == nil {
+		t.Fatal("expected completed file after Retry")
+	}
+
+	// Verify restored PlaylistIndex=7 and audiobook path: <canon>/示例有声书/007 - 序幕.mp3
+	expectedFile := filepath.Join(canon, "示例有声书", "007 - 序幕.mp3")
+	if _, err := os.Stat(expectedFile); err != nil {
+		t.Fatalf("expected audiobook file at %s: %v", expectedFile, err)
+	}
+	if seenPlaylistIdx.Load() != 7 {
+		t.Fatalf("expected PlaylistIndex=7 restored from MetadataJSON, got %d", seenPlaylistIdx.Load())
+	}
+
+	// Verify tags written: track_number="7/120" and album="示例有声书".
+	tagRW.mu.Lock()
+	reqs := append([]helper.WriteTagsRequest(nil), tagRW.requests...)
+	tagRW.mu.Unlock()
+	if len(reqs) == 0 {
+		t.Fatal("expected WriteTags called")
+	}
+	var matchedTag *helper.WriteTagsRequest
+	for i := range reqs {
+		if reqs[i].Tags["track_number"] == "7/120" && reqs[i].Tags["album"] == "示例有声书" {
+			matchedTag = &reqs[i]
+			break
+		}
+	}
+	if matchedTag == nil {
+		t.Fatalf("expected tag write with track_number=7/120 and album=示例有声书, got %+v", reqs)
+	}
+
+	// Also wait for resHigh to complete so no goroutines linger.
+	waitForStatus(t, svc, resHigh.Download.ID, model.DownloadComplete, 5*time.Second)
+	if !seenStdPolicy.Load() || !seenHighPolicy.Load() {
+		t.Fatalf("expected both standard and highest PreferredQuality passed to Resolve, got std=%v high=%v", seenStdPolicy.Load(), seenHighPolicy.Load())
 	}
 }

@@ -33,6 +33,14 @@ export interface Track {
     preview_only: boolean;
   };
 }
+export interface EpisodePage {
+  items: Track[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
+}
+export type BatchQualityPolicy = "highest" | "standard";
 export interface SourceCapability {
   tier?: string;
   note?: string;

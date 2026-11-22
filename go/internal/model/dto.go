@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -46,6 +47,25 @@ type TrackDTO struct {
 	RootSource    string       `json:"root_source,omitempty"`
 	Qualities     []QualityDTO `json:"qualities"`
 	Playback      PlaybackDTO  `json:"playback"`
+}
+
+// EpisodePageDTO represents a paginated episode list response.
+type EpisodePageDTO struct {
+	Items    []TrackDTO `json:"items"`
+	Page     int        `json:"page"`
+	PageSize int        `json:"page_size"`
+	Total    int        `json:"total"`
+	HasMore  bool       `json:"has_more"`
+}
+
+// MarshalJSON ensures Items is always serialized as [] rather than null.
+func (p EpisodePageDTO) MarshalJSON() ([]byte, error) {
+	type episodePageAlias EpisodePageDTO
+	out := episodePageAlias(p)
+	if out.Items == nil {
+		out.Items = []TrackDTO{}
+	}
+	return json.Marshal(out)
 }
 
 type DownloadProcessingDTO struct {

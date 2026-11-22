@@ -47,7 +47,7 @@ func DefaultResourceBudgets() ResourceBudgets {
 		ProviderConcurrency:       4,
 		DownloadConcurrency:       2,
 		MaxDownloadConcurrency:    4,
-		MaxQueuedDownloads:        1000,
+		MaxQueuedDownloads:        5000,
 		AudioToolsConcurrency:     1,
 		LocalFileWriters:          1,
 		ExtractorHelpers:          2,

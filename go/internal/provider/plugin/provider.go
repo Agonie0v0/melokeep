@@ -20,11 +20,12 @@ import (
 )
 
 var (
-	_ model.Provider            = (*Provider)(nil)
-	_ model.PlaylistProvider    = (*Provider)(nil)
-	_ provider.EpisodeProvider  = (*Provider)(nil)
-	_ provider.LyricsProvider   = (*Provider)(nil)
-	_ provider.MetadataProvider = (*Provider)(nil)
+	_ model.Provider              = (*Provider)(nil)
+	_ model.PlaylistProvider      = (*Provider)(nil)
+	_ provider.EpisodeProvider    = (*Provider)(nil)
+	_ provider.PagedEpisodeProvider = (*Provider)(nil)
+	_ provider.LyricsProvider     = (*Provider)(nil)
+	_ provider.MetadataProvider   = (*Provider)(nil)
 )
 
 const (
@@ -589,34 +590,46 @@ func (p *Provider) Playlist(ctx context.Context, locator string, emit func(model
 	return summary, nil
 }
 
+func (p *Provider) normalizeEpisodeRows(rows []map[string]any, indexBase int) []model.ProviderTrack {
+	out := make([]model.ProviderTrack, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	for _, raw := range rows {
+		tr, ok := p.normalizeTrackMap(raw)
+		if !ok || seen[tr.SourceID] {
+			continue
+		}
+		seen[tr.SourceID] = true
+		if tr.PlaylistIndex == nil {
+			idx := indexBase + len(out) + 1
+			tr.PlaylistIndex = &idx
+		}
+		out = append(out, tr)
+	}
+	return out
+}
+
+func extractEpisodeReturnedRows(res any) []map[string]any {
+	switch typed := res.(type) {
+	case []any:
+		return sliceAnyToMaps(typed)
+	case map[string]any:
+		return extractTrackSlice(typed, "episodes", "tracks", "items")
+	default:
+		return nil
+	}
+}
+
 func (p *Provider) Episodes(ctx context.Context, track model.ProviderTrack) ([]model.ProviderTrack, error) {
 	if !p.compiled.Manifest.Capabilities.Episodes {
 		return nil, model.NewError(model.ErrUnsupported, http.StatusBadRequest, "插件未启用 episodes 能力")
 	}
 
-	var out []model.ProviderTrack
-	seen := make(map[string]bool)
-	appendTrack := func(raw map[string]any) {
-		tr, ok := p.normalizeTrackMap(raw)
-		if !ok {
-			return
-		}
-		if seen[tr.SourceID] {
-			return
-		}
-		seen[tr.SourceID] = true
-		if tr.PlaylistIndex == nil {
-			idx := len(out) + 1
-			tr.PlaylistIndex = &idx
-		}
-		out = append(out, tr)
-	}
-
+	var rawRows []map[string]any
 	res, err := invokeCompiledPlugin(ctx, p.compiled, p.runtimeCfg(nil), invocationParams{
 		fnName: "episodes",
 		args:   []any{trackToJSMap(track)},
 		onEmit: func(raw map[string]any) error {
-			appendTrack(raw)
+			rawRows = append(rawRows, raw)
 			return nil
 		},
 	})
@@ -624,20 +637,107 @@ func (p *Provider) Episodes(ctx context.Context, track model.ProviderTrack) ([]m
 		return nil, err
 	}
 
-	switch typed := res.(type) {
-	case []any:
-		for _, row := range sliceAnyToMaps(typed) {
-			appendTrack(row)
-		}
-	case map[string]any:
-		for _, row := range extractTrackSlice(typed, "episodes", "tracks", "items") {
-			appendTrack(row)
+	rawRows = append(rawRows, extractEpisodeReturnedRows(res)...)
+	return p.normalizeEpisodeRows(rawRows, 0), nil
+}
+
+func hasAnyMapKey(m map[string]any, keys ...string) bool {
+	for _, k := range keys {
+		if _, ok := m[k]; ok {
+			return true
 		}
 	}
-	if out == nil {
-		out = []model.ProviderTrack{}
+	return false
+}
+
+func (p *Provider) EpisodesPage(ctx context.Context, track model.ProviderTrack, opts provider.EpisodePageOptions) (provider.EpisodePage, error) {
+	if !p.compiled.Manifest.Capabilities.Episodes {
+		return provider.EpisodePage{}, model.NewError(model.ErrUnsupported, http.StatusBadRequest, "插件未启用 episodes 能力")
 	}
-	return out, nil
+
+	page := max(1, opts.Page)
+	pageSize := opts.PageSize
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	var rawRows []map[string]any
+	res, err := invokeCompiledPlugin(ctx, p.compiled, p.runtimeCfg(nil), invocationParams{
+		fnName: "episodes",
+		args: []any{
+			trackToJSMap(track),
+			map[string]any{
+				"page":     page,
+				"pageSize": pageSize,
+			},
+		},
+		onEmit: func(raw map[string]any) error {
+			rawRows = append(rawRows, raw)
+			return nil
+		},
+	})
+	if err != nil {
+		return provider.EpisodePage{}, err
+	}
+
+	rawRows = append(rawRows, extractEpisodeReturnedRows(res)...)
+
+	if resMap, ok := res.(map[string]any); ok && hasAnyMapKey(resMap, "hasMore", "has_more", "total", "totalCount", "total_count", "page", "pageSize", "page_size") {
+		effPage := page
+		if rp := anyToInt(resMap["page"]); rp > 0 {
+			effPage = rp
+		}
+		effPageSize := pageSize
+		if rs := anyToInt(firstNonNil(resMap["pageSize"], resMap["page_size"])); rs > 0 && rs <= 200 {
+			effPageSize = rs
+		}
+		items := p.normalizeEpisodeRows(rawRows, (effPage-1)*effPageSize)
+		total := anyToInt(firstNonNil(resMap["total"], resMap["totalCount"], resMap["total_count"]))
+		rawHasMore, hasMoreKey := resMap["hasMore"]
+		if !hasMoreKey {
+			rawHasMore, hasMoreKey = resMap["has_more"]
+		}
+		var hasMore bool
+		if hasMoreKey {
+			hasMore = anyToBool(rawHasMore)
+		} else if total > 0 {
+			hasMore = (effPage-1)*effPageSize+len(items) < total
+		}
+		return provider.EpisodePage{
+			Items:    items,
+			Page:     effPage,
+			PageSize: effPageSize,
+			Total:    total,
+			HasMore:  hasMore,
+		}, nil
+	}
+
+	// Backward compatibility: legacy plugins returning unpaged Track[] or {episodes: Track[]}.
+	all := p.normalizeEpisodeRows(rawRows, 0)
+	total := len(all)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return provider.EpisodePage{
+			Items:    []model.ProviderTrack{},
+			Page:     page,
+			PageSize: pageSize,
+			Total:    total,
+			HasMore:  false,
+		}, nil
+	}
+	end := min(start+pageSize, total)
+	items := make([]model.ProviderTrack, end-start)
+	copy(items, all[start:end])
+	return provider.EpisodePage{
+		Items:    items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  end < total,
+	}, nil
 }
 
 func (p *Provider) Lyrics(ctx context.Context, track model.ProviderTrack) (string, error) {
@@ -833,7 +933,7 @@ func trackToJSMap(tr model.ProviderTrack) map[string]any {
 		}
 		variants = append(variants, item)
 	}
-	return map[string]any{
+	out := map[string]any{
 		"publicId":   tr.PublicID,
 		"source":     tr.Source,
 		"sourceId":   tr.SourceID,
@@ -847,6 +947,10 @@ func trackToJSMap(tr model.ProviderTrack) map[string]any {
 		"episodes":   tr.Episodes,
 		"variants":   variants,
 	}
+	if tr.PlaylistIndex != nil {
+		out["playlistIndex"] = *tr.PlaylistIndex
+	}
+	return out
 }
 
 func validateResolvedMediaURL(rawURL string, allowedOrigins map[string]bool) error {
@@ -1062,6 +1166,10 @@ type episodesCap struct{ p *Provider }
 
 func (c episodesCap) Episodes(ctx context.Context, track model.ProviderTrack) ([]model.ProviderTrack, error) {
 	return c.p.Episodes(ctx, track)
+}
+
+func (c episodesCap) EpisodesPage(ctx context.Context, track model.ProviderTrack, opts provider.EpisodePageOptions) (provider.EpisodePage, error) {
+	return c.p.EpisodesPage(ctx, track, opts)
 }
 
 type lyricsCap struct{ p *Provider }
