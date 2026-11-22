@@ -848,7 +848,7 @@ export function PluginSettings({
 
         {importMode === "code" && (
           <div className="plugin-import-panel">
-            <label>
+            <label className="field-xl">
               插件 JavaScript 源码（CommonJS）
               <textarea
                 rows={5}
@@ -865,7 +865,7 @@ export function PluginSettings({
 
         {importMode === "url" && (
           <div className="plugin-import-panel">
-            <label>
+            <label className="field-lg">
               插件脚本 HTTPS URL
               <input
                 type="url"
@@ -1776,7 +1776,14 @@ export function PluginSettings({
                     );
                   }
                   return (
-                    <label key={field.key} className="form-label">
+                    <label
+                      key={field.key}
+                      className={
+                        field.type === "number"
+                          ? "form-label field-xs"
+                          : "form-label"
+                      }
+                    >
                       {field.label}
                       {field.required && " *"}
                       <input

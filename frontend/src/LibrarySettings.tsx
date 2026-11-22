@@ -395,8 +395,8 @@ export function LibrarySettings({
                 </span>
               </label>
             </div>
-            <div className="settings-grid">
-              <label>
+            <div className="field-row">
+              <label className="field-sm">
                 整理后的音乐库目录
                 <input
                   required
@@ -406,21 +406,7 @@ export function LibrarySettings({
                   title={`相对目录位于 ${config.file_root} 内`}
                 />
               </label>
-              <label>
-                原文件恢复期限
-                <input
-                  type="number"
-                  min="0"
-                  max="365"
-                  placeholder="天，0 不备份"
-                  title="单位：天，设为 0 不保存原文件备份"
-                  value={config.backup_days}
-                  onChange={(e) =>
-                    update("backup_days", Number(e.target.value))
-                  }
-                />
-              </label>
-              <label>
+              <label className="field-md">
                 目录模板
                 <input
                   required
@@ -430,7 +416,7 @@ export function LibrarySettings({
                   onChange={(e) => update("folder_template", e.target.value)}
                 />
               </label>
-              <label>
+              <label className="field-md">
                 文件名模板
                 <input
                   required
@@ -440,7 +426,9 @@ export function LibrarySettings({
                   onChange={(e) => update("filename_template", e.target.value)}
                 />
               </label>
-              <label>
+            </div>
+            <div className="field-row">
+              <label className="field-sm">
                 歌词保存方式
                 <select
                   value={config.lyrics_mode}
@@ -452,7 +440,7 @@ export function LibrarySettings({
                   <option value="none">不补全歌词</option>
                 </select>
               </label>
-              <label>
+              <label className="field-sm">
                 封面保存方式
                 <select
                   value={config.cover_mode}
@@ -464,52 +452,70 @@ export function LibrarySettings({
                   <option value="none">不补全封面</option>
                 </select>
               </label>
-              <label className="library-match-score-field">
-                默认自动匹配分数
-                <div className="library-match-score-controls">
-                  <input
-                    type="range"
-                    aria-label="默认自动匹配分数滑块"
-                    min={MIN_MATCH_SCORE_MIN}
-                    max={MIN_MATCH_SCORE_MAX}
-                    step={1}
-                    value={sanitizeMinMatchScore(config.min_match_score)}
-                    onChange={(e) =>
-                      update(
-                        "min_match_score",
-                        sanitizeMinMatchScore(e.target.value),
-                      )
-                    }
-                  />
-                  <input
-                    type="number"
-                    aria-label="默认自动匹配分数"
-                    min={MIN_MATCH_SCORE_MIN}
-                    max={MIN_MATCH_SCORE_MAX}
-                    step={1}
-                    value={config.min_match_score ?? DEFAULT_MIN_MATCH_SCORE}
-                    onChange={(e) => {
-                      const raw = Number(e.target.value);
-                      if (Number.isFinite(raw)) {
-                        update("min_match_score", raw);
-                      }
-                    }}
-                    onBlur={() =>
-                      update(
-                        "min_match_score",
-                        sanitizeMinMatchScore(config.min_match_score),
-                      )
-                    }
-                  />
-                </div>
-                <small>
-                  {describeMinMatchScore(
-                    sanitizeMinMatchScore(config.min_match_score),
-                  )}
-                  （85–100 严格 / 75–84 推荐均衡 / 50–74 宽松自动整理）
-                </small>
+              <label className="field-xs">
+                原文件恢复期限
+                <span className="field-unit" aria-hidden="true">
+                  （天）
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  aria-label="原文件恢复期限"
+                  placeholder="天，0 不备份"
+                  title="单位：天，设为 0 不保存原文件备份"
+                  value={config.backup_days}
+                  onChange={(e) =>
+                    update("backup_days", Number(e.target.value))
+                  }
+                />
               </label>
             </div>
+            <label className="library-match-score-field">
+              默认自动匹配分数
+              <div className="library-match-score-controls">
+                <input
+                  type="range"
+                  aria-label="默认自动匹配分数滑块"
+                  min={MIN_MATCH_SCORE_MIN}
+                  max={MIN_MATCH_SCORE_MAX}
+                  step={1}
+                  value={sanitizeMinMatchScore(config.min_match_score)}
+                  onChange={(e) =>
+                    update(
+                      "min_match_score",
+                      sanitizeMinMatchScore(e.target.value),
+                    )
+                  }
+                />
+                <input
+                  type="number"
+                  aria-label="默认自动匹配分数"
+                  min={MIN_MATCH_SCORE_MIN}
+                  max={MIN_MATCH_SCORE_MAX}
+                  step={1}
+                  value={config.min_match_score ?? DEFAULT_MIN_MATCH_SCORE}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    if (Number.isFinite(raw)) {
+                      update("min_match_score", raw);
+                    }
+                  }}
+                  onBlur={() =>
+                    update(
+                      "min_match_score",
+                      sanitizeMinMatchScore(config.min_match_score),
+                    )
+                  }
+                />
+              </div>
+              <small>
+                {describeMinMatchScore(
+                  sanitizeMinMatchScore(config.min_match_score),
+                )}
+                （85–100 严格 / 75–84 推荐均衡 / 50–74 宽松自动整理）
+              </small>
+            </label>
             <details className="library-advanced">
               <summary>整理模板示例与可用变量</summary>
               <dl className="template-example">
@@ -573,34 +579,20 @@ export function LibrarySettings({
                 />
                 启用目录监控
               </label>
-              <div className="settings-grid">
-                <label>
-                  监控目录
-                  <textarea
-                    rows={3}
-                    aria-label="监控目录（每行一个）"
-                    placeholder="每行一个相对或绝对路径"
-                    value={(config.watch_dirs || ["incoming"]).join("\n")}
-                    onChange={(e) =>
-                      update("watch_dirs", e.target.value.split("\n"))
-                    }
-                  />
-                </label>
-                <label>
-                  检查间隔
-                  <input
-                    type="number"
-                    min={10}
-                    max={86400}
-                    placeholder="秒"
-                    title="单位：秒"
-                    value={config.watch_interval ?? 180}
-                    onChange={(e) =>
-                      update("watch_interval", Number(e.target.value))
-                    }
-                  />
-                </label>
-                <label>
+              <label className="field-xl">
+                监控目录
+                <textarea
+                  rows={3}
+                  aria-label="监控目录（每行一个）"
+                  placeholder="每行一个相对或绝对路径"
+                  value={(config.watch_dirs || ["incoming"]).join("\n")}
+                  onChange={(e) =>
+                    update("watch_dirs", e.target.value.split("\n"))
+                  }
+                />
+              </label>
+              <div className="field-row">
+                <label className="field-md">
                   失败文件目录
                   <input
                     value={config.watch_failure_dir || ""}
@@ -611,12 +603,34 @@ export function LibrarySettings({
                     placeholder="留空保留原处，例如 review"
                   />
                 </label>
-                <label>
+                <label className="field-xs">
+                  检查间隔
+                  <span className="field-unit" aria-hidden="true">
+                    （秒）
+                  </span>
+                  <input
+                    type="number"
+                    min={10}
+                    max={86400}
+                    aria-label="检查间隔"
+                    placeholder="秒"
+                    title="单位：秒"
+                    value={config.watch_interval ?? 180}
+                    onChange={(e) =>
+                      update("watch_interval", Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="field-xs">
                   文件稳定等待
+                  <span className="field-unit" aria-hidden="true">
+                    （秒）
+                  </span>
                   <input
                     type="number"
                     min={2}
                     max={3600}
+                    aria-label="文件稳定等待"
                     placeholder="秒"
                     title="单位：秒"
                     value={config.watch_stable_seconds ?? 30}
@@ -625,7 +639,9 @@ export function LibrarySettings({
                     }
                   />
                 </label>
-                <label>
+              </div>
+              <div className="field-row">
+                <label className="field-sm">
                   监控处理方式
                   <select
                     value={config.watch_action || "both"}
@@ -636,7 +652,7 @@ export function LibrarySettings({
                     <option value="organize">只整理目录</option>
                   </select>
                 </label>
-                <label>
+                <label className="field-sm">
                   中文预处理
                   <select
                     value={config.chinese || "none"}
@@ -816,7 +832,7 @@ export function LibrarySettings({
             }}
           >
             <h2>音频指纹识别</h2>
-            <label>
+            <label className="field-md">
               AcoustID 应用 Key
               <input
                 type="password"
@@ -876,8 +892,8 @@ export function LibrarySettings({
               <strong>启用 Navidrome</strong>
             </span>
           </label>
-          <div className="settings-grid">
-            <label>
+          <div className="field-row">
+            <label className="field-lg">
               服务地址
               <input
                 placeholder="http://服务器IP:4533"
@@ -890,7 +906,7 @@ export function LibrarySettings({
                 }
               />
             </label>
-            <label>
+            <label className="field-sm">
               用户名
               <input
                 autoComplete="off"
@@ -903,7 +919,9 @@ export function LibrarySettings({
                 }
               />
             </label>
-            <label>
+          </div>
+          <div className="field-row">
+            <label className="field-md">
               密码
               <input
                 type="password"
@@ -917,7 +935,7 @@ export function LibrarySettings({
                 onChange={(e) => setPassword(e.target.value)}
               />
             </label>
-            <label>
+            <label className="field-md">
               API Key
               <input
                 type="password"
@@ -970,8 +988,8 @@ export function LibrarySettings({
           </label>
           {config.navidrome.delete_enabled && (
             <>
-              <div className="settings-grid">
-                <label>
+              <div className="field-row">
+                <label className="field-md">
                   MeloKeep 中的共享目录
                   <input
                     value={config.navidrome.music_root || ""}
@@ -984,7 +1002,7 @@ export function LibrarySettings({
                     }
                   />
                 </label>
-                <label>
+                <label className="field-md">
                   Navidrome 中的同一目录
                   <input
                     value={config.navidrome.server_music_root || ""}

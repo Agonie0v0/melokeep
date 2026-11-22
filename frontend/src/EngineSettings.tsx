@@ -142,24 +142,10 @@ export function EngineSettings({
           }
         }}
       >
-        <div className="settings-save">
-          <button
-            className="primary"
-            disabled={busy || !config.music_sources.length}
-          >
-            <Check />
-            {busy ? "正在保存…" : "保存设置"}
-          </button>
-          {error && <p role="alert">{error}</p>}
-          {message && <p role="status">{message}</p>}
-          {!config.music_sources.length && (
-            <p role="status">请选择至少一个音源后保存。</p>
-          )}
-        </div>
         <section className="settings-section settings-basics">
           <h2>基础设置</h2>
-          <div className="settings-grid">
-            <label>
+          <div className="field-row">
+            <label className="field-md">
               下载目录
               <input
                 value={String(config.global_client_cfg.work_dir || "")}
@@ -167,58 +153,7 @@ export function EngineSettings({
                 required
               />
             </label>
-            {[["search_size_per_source", "每个音源结果数", 1, 50]].map(
-              ([key, label, min, max]) => (
-                <label key={key}>
-                  {label}
-                  <input
-                    type="number"
-                    min={min}
-                    max={max}
-                    required
-                    value={Number(config.global_client_cfg[key] ?? min)}
-                    onChange={(e) =>
-                      updateGlobal(String(key), Number(e.target.value))
-                    }
-                  />
-                </label>
-              ),
-            )}
-            <label>
-              默认下载并发数
-              <input
-                type="number"
-                min="1"
-                max="4"
-                required
-                value={config.default_threads}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    default_threads: Number(e.target.value),
-                  })
-                }
-              />
-            </label>
-            <label>
-              请求超时
-              <input
-                type="number"
-                min="0"
-                max="300"
-                required
-                placeholder="秒，0 表示不限"
-                title="单位：秒，0 表示不限"
-                value={config.request_timeout}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    request_timeout: Number(e.target.value),
-                  })
-                }
-              />
-            </label>
-            <label>
+            <label className="field-sm">
               目录组织
               <select
                 aria-label="目录组织"
@@ -239,7 +174,7 @@ export function EngineSettings({
                 ))}
               </select>
             </label>
-            <label>
+            <label className="field-sm">
               歌词保存
               <select
                 aria-label="歌词保存"
@@ -261,11 +196,68 @@ export function EngineSettings({
               </select>
             </label>
           </div>
+          <div className="field-row">
+            {[["search_size_per_source", "每个音源结果数", 1, 50]].map(
+              ([key, label, min, max]) => (
+                <label key={key} className="field-xs">
+                  {label}
+                  <input
+                    type="number"
+                    min={min}
+                    max={max}
+                    required
+                    value={Number(config.global_client_cfg[key] ?? min)}
+                    onChange={(e) =>
+                      updateGlobal(String(key), Number(e.target.value))
+                    }
+                  />
+                </label>
+              ),
+            )}
+            <label className="field-xs">
+              默认下载并发数
+              <input
+                type="number"
+                min="1"
+                max="4"
+                required
+                value={config.default_threads}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    default_threads: Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+            <label className="field-xs">
+              请求超时
+              <span className="field-unit" aria-hidden="true">
+                （秒）
+              </span>
+              <input
+                type="number"
+                min="0"
+                max="300"
+                required
+                aria-label="请求超时"
+                placeholder="秒，0 表示不限"
+                title="单位：秒，0 表示不限"
+                value={config.request_timeout}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    request_timeout: Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+          </div>
         </section>
         <section className="settings-section settings-proxy">
           <h2>项目代理</h2>
-          <div className="settings-grid">
-            <label>
+          <div className="field-row">
+            <label className="field-lg">
               项目 HTTP / HTTPS 代理
               <input
                 value={config.proxy_url}
@@ -275,7 +267,7 @@ export function EngineSettings({
                 placeholder="留空不使用代理"
               />
             </label>
-            <label>
+            <label className="field-sm">
               音源代理作用范围
               <select
                 aria-label="音源代理作用范围"
@@ -444,7 +436,7 @@ export function EngineSettings({
                         音源插件」面板配置。
                       </p>
                     )}
-                    <label>
+                    <label className="field-xl">
                       Cookie / API Key
                       <textarea
                         aria-label="Cookie"
@@ -463,8 +455,8 @@ export function EngineSettings({
                         placeholder="未配置；如 Jamendo 可填写 client_id=你的应用ID"
                       />
                     </label>
-                    <div className="settings-grid">
-                      <label>
+                    <div className="field-row">
+                      <label className="field-sm">
                         音源代理
                         <select
                           aria-label="音源代理"
@@ -503,6 +495,20 @@ export function EngineSettings({
             </div>
           </SourceDisclosure>
         </section>
+        <div className="settings-save settings-sticky-bar">
+          <button
+            className="primary"
+            disabled={busy || !config.music_sources.length}
+          >
+            <Check />
+            {busy ? "正在保存…" : "保存设置"}
+          </button>
+          {error && <p role="alert">{error}</p>}
+          {message && <p role="status">{message}</p>}
+          {!config.music_sources.length && (
+            <p role="status">请选择至少一个音源后保存。</p>
+          )}
+        </div>
       </form>
       <PluginSettings onChanged={saved} />
     </div>

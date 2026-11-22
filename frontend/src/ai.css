@@ -1327,13 +1327,9 @@
   flex-wrap: wrap;
 }
 
-.ai-actions > .primary,
-.ai-actions > button:last-child:not(:first-child) {
-  margin-left: auto;
-}
-
 .ai-settings {
-  max-width: 760px;
+  max-width: none;
+  width: 100%;
 }
 
 .ai-settings p {
@@ -1355,9 +1351,28 @@
   min-width: 0;
 }
 
+.ai-settings fieldset > .field-row {
+  margin: 0;
+}
+
 .ai-settings fieldset > label:not(.ready-filter) {
   display: grid;
   gap: 8px;
+}
+
+.ai-settings fieldset > label.field-md {
+  width: min(100%, 340px);
+  max-width: 340px;
+}
+
+.ai-settings fieldset > label.field-lg {
+  width: min(100%, 480px);
+  max-width: 480px;
+}
+
+.ai-settings fieldset > label.field-xl {
+  width: min(100%, 560px);
+  max-width: 560px;
 }
 
 .ai-settings input:not([type="checkbox"]),
@@ -1427,6 +1442,13 @@
 @media (max-width: 600px) {
   .ai-settings .settings-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-settings fieldset > label.field-md,
+  .ai-settings fieldset > label.field-lg,
+  .ai-settings fieldset > label.field-xl {
+    width: 100%;
+    max-width: 100%;
   }
 
   .ai-workspace .filter-group {

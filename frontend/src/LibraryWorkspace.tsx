@@ -1,6 +1,10 @@
 import { useState, type ComponentProps } from "react";
 import { Folder, History, Library, WandSparkles } from "lucide-react";
-import { MusicLibrary } from "./MusicLibrary";
+import {
+  getOrderedTagEntries,
+  MusicLibrary,
+  tagSpanClass,
+} from "./MusicLibrary";
 import { NavidromeLibrary } from "./NavidromeLibrary";
 import { LibraryJobs } from "./LibraryJobs";
 import { tagLabels } from "./LibrarySettings";
@@ -266,6 +270,9 @@ export function LibraryWorkspace({
               } as Record<string, string>
             )[operation.action] || "音乐处理"
           }
+          className={
+            operation.action === "edit" ? "library-batch-modal" : undefined
+          }
           close={busy ? undefined : () => setOperation(null)}
         >
           <form
@@ -315,8 +322,8 @@ export function LibraryWorkspace({
             {operation.action === "edit" && (
               <>
                 <div className="batch-tag-fields">
-                  {Object.entries(tagLabels).map(([key, label]) => (
-                    <label key={key}>
+                  {getOrderedTagEntries(tagLabels).map(([key, label]) => (
+                    <label key={key} className={tagSpanClass(key)}>
                       <span className="check-label">
                         <input
                           type="checkbox"
@@ -510,8 +517,8 @@ export function LibraryWorkspace({
             )}
             {["convert", "split"].includes(operation.action) && (
               <>
-                <div className="settings-grid">
-                  <label>
+                <div className="field-row">
+                  <label className="field-xs">
                     输出格式
                     <select
                       value={format}
@@ -530,7 +537,7 @@ export function LibraryWorkspace({
                     </select>
                   </label>
                   {["mp3", "m4a", "opus"].includes(format) && (
-                    <label>
+                    <label className="field-xs">
                       码率（kbps）
                       <input
                         type="number"
@@ -541,7 +548,7 @@ export function LibraryWorkspace({
                       />
                     </label>
                   )}
-                  <label>
+                  <label className="field-sm">
                     采样率
                     <select
                       value={sampleRate}

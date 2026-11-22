@@ -115,9 +115,14 @@ export function BotSettings() {
     setMessage("");
     setTestResult(null);
   }
-  function field(key: keyof BotConfig, label: string, placeholder = "") {
+  function field(
+    key: keyof BotConfig,
+    label: string,
+    placeholder = "",
+    sizeClass = "field-md",
+  ) {
     return (
-      <label key={key}>
+      <label key={key} className={sizeClass}>
         {label}
         <input
           value={String(config![key] ?? "")}
@@ -127,9 +132,9 @@ export function BotSettings() {
       </label>
     );
   }
-  function secret(key: string, label: string) {
+  function secret(key: string, label: string, sizeClass = "field-md") {
     return (
-      <div className="bot-secret" key={key}>
+      <div className={`bot-secret ${sizeClass}`} key={key}>
         <label>
           {label}
           <input
@@ -235,15 +240,24 @@ export function BotSettings() {
     >
       <section className="settings-section settings-basics">
         <h2>文件交付与下载链接</h2>
-        <div className="settings-grid">
-          {field("public_url", "公网访问地址", "http://192.168.1.20:8765")}
-          <label>
+        <div className="field-row">
+          {field(
+            "public_url",
+            "公网访问地址",
+            "http://192.168.1.20:8765",
+            "field-lg",
+          )}
+          <label className="field-xs">
             下载链接有效期
+            <span className="field-unit" aria-hidden="true">
+              （秒）
+            </span>
             <input
               type="number"
               min="60"
               max="604800"
               required
+              aria-label="下载链接有效期"
               placeholder="秒"
               title="单位：秒"
               value={config.link_ttl_seconds}
@@ -252,7 +266,12 @@ export function BotSettings() {
               }
             />
           </label>
-          {field("bot_sources", "机器人音源", "留空跟随 Web 设置，逗号分隔")}
+          {field(
+            "bot_sources",
+            "机器人音源",
+            "留空跟随 Web 设置，逗号分隔",
+            "field-sm",
+          )}
         </div>
       </section>
       <section className="settings-section settings-behavior">
@@ -321,20 +340,22 @@ export function BotSettings() {
           />
           启用 Telegram
         </label>
-        <div className="settings-grid">
-          {secret("tg_token", "Telegram Bot Token")}
+        <div className="field-row">
+          {secret("tg_token", "Telegram Bot Token", "field-lg")}
           {field(
             "tg_allowed_users",
             "Telegram 用户白名单",
             "数字用户 ID，多个用逗号分隔",
+            "field-md",
           )}
           {!config.tg_local_enabled &&
             field(
               "tg_api_url",
               "Telegram Bot API 地址",
               "https://api.telegram.org",
+              "field-lg",
             )}
-          <label>
+          <label className="field-sm">
             Telegram 代理
             <select
               aria-label="Telegram 代理"
@@ -369,13 +390,14 @@ export function BotSettings() {
                 ? ` · ${config.local_api_status.detail}`
                 : ""}
             </p>
-            <div className="settings-grid">
+            <div className="field-row">
               {field(
                 "tg_local_api_id",
                 "Telegram API ID",
                 "my.telegram.org 的应用 API ID",
+                "field-sm",
               )}
-              {secret("tg_local_api_hash", "Telegram API Hash")}
+              {secret("tg_local_api_hash", "Telegram API Hash", "field-md")}
             </div>
           </div>
         )}
@@ -408,24 +430,26 @@ export function BotSettings() {
           />
           启用企业微信
         </label>
-        <div className="settings-grid">
-          {field("wecom_corp_id", "企业微信 CorpID")}
-          {field("wecom_agent_id", "企业微信 AgentID")}
-          {secret("wecom_secret", "企业微信 Secret")}
+        <div className="field-row">
+          {field("wecom_corp_id", "企业微信 CorpID", "", "field-md")}
+          {field("wecom_agent_id", "企业微信 AgentID", "", "field-sm")}
+          {secret("wecom_secret", "企业微信 Secret", "field-lg")}
           {field(
             "wecom_api_url",
             "企业微信 API 转发地址",
             "https://qyapi.weixin.qq.com",
+            "field-lg",
           )}
-          {secret("wecom_token", "企业微信回调 Token")}
-          {secret("wecom_aes_key", "企业微信 EncodingAESKey")}
+          {secret("wecom_token", "企业微信回调 Token", "field-md")}
+          {secret("wecom_aes_key", "企业微信 EncodingAESKey", "field-lg")}
           {field(
             "wecom_allowed_users",
             "企业微信用户白名单",
             "留空允许全部成员；限制时填 UserID，逗号分隔",
+            "field-md",
           )}
         </div>
-        <label>
+        <label className="field-lg">
           企业微信回调地址
           <input
             readOnly
@@ -459,20 +483,18 @@ export function BotSettings() {
         ).map(([channel, label]) => (
           <details className="source-setting" key={channel}>
             <summary>{label}</summary>
-            <div className="settings-grid">
-              <label className="ready-filter">
-                <input
-                  type="checkbox"
-                  checked={Boolean(config[`${channel}_enabled`])}
-                  onChange={(e) =>
-                    update(`${channel}_enabled`, e.target.checked)
-                  }
-                />
-                启用 {label} 下载通知
-              </label>
-              {secret(`${channel}_webhook`, `${label} Webhook`)}
+            <label className="ready-filter">
+              <input
+                type="checkbox"
+                checked={Boolean(config[`${channel}_enabled`])}
+                onChange={(e) => update(`${channel}_enabled`, e.target.checked)}
+              />
+              启用 {label} 下载通知
+            </label>
+            <div className="field-row">
+              {secret(`${channel}_webhook`, `${label} Webhook`, "field-lg")}
               {channel !== "discord" &&
-                secret(`${channel}_sign_secret`, "加签密钥")}
+                secret(`${channel}_sign_secret`, "加签密钥", "field-md")}
             </div>
             <button
               type="button"
@@ -507,17 +529,18 @@ export function BotSettings() {
               />
               启用 {label} 对话机器人
             </label>
-            <div className="settings-grid">
+            <div className="field-row">
               {channel === "feishu" && (
                 <>
-                  {field("feishu_app_id", "飞书 App ID")}
-                  {secret("feishu_app_secret", "飞书 App Secret")}
+                  {field("feishu_app_id", "飞书 App ID", "", "field-md")}
+                  {secret("feishu_app_secret", "飞书 App Secret", "field-lg")}
                   {secret(
                     "feishu_verification_token",
                     "飞书 Verification Token",
+                    "field-lg",
                   )}
-                  {secret("feishu_encrypt_key", "飞书 Encrypt Key")}
-                  <label>
+                  {secret("feishu_encrypt_key", "飞书 Encrypt Key", "field-lg")}
+                  <label className="field-sm">
                     飞书区域
                     <select
                       value={config.feishu_region || "feishu"}
@@ -531,23 +554,40 @@ export function BotSettings() {
               )}
               {channel === "dingtalk" && (
                 <>
-                  {field("dingtalk_client_id", "钉钉 Client ID / AppKey")}
+                  {field(
+                    "dingtalk_client_id",
+                    "钉钉 Client ID / AppKey",
+                    "",
+                    "field-md",
+                  )}
                   {secret(
                     "dingtalk_client_secret",
                     "钉钉 Client Secret / AppSecret",
+                    "field-lg",
                   )}
-                  {field("dingtalk_robot_code", "钉钉 Robot Code")}
+                  {field(
+                    "dingtalk_robot_code",
+                    "钉钉 Robot Code",
+                    "",
+                    "field-md",
+                  )}
                 </>
               )}
               {channel === "discord" && (
                 <>
-                  {field("discord_application_id", "Discord Application ID")}
+                  {field(
+                    "discord_application_id",
+                    "Discord Application ID",
+                    "",
+                    "field-md",
+                  )}
                   {field(
                     "discord_public_key",
                     "Discord Public Key",
                     "64 位十六进制公钥",
+                    "field-lg",
                   )}
-                  {secret("discord_bot_token", "Discord Bot Token")}
+                  {secret("discord_bot_token", "Discord Bot Token", "field-lg")}
                 </>
               )}
               {field(
@@ -558,9 +598,10 @@ export function BotSettings() {
                   : channel === "dingtalk"
                     ? "企业 UserID / senderStaffId，逗号分隔"
                     : "数字用户 ID，逗号分隔",
+                "field-md",
               )}
             </div>
-            <label>
+            <label className="field-lg">
               {label} 消息回调地址
               <input
                 readOnly

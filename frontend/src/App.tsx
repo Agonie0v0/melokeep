@@ -3437,28 +3437,30 @@ export function App() {
                   </div>
                 ) : (
                   <>
-                    <label>
-                      歌单名称（可选）
-                      <input
-                        value={importName}
-                        onChange={(e) => setImportName(e.target.value)}
-                        maxLength={100}
-                        placeholder="例如：通勤时光"
-                      />
-                    </label>
-                    <label>
-                      歌单音源
-                      <select
-                        value={importSource}
-                        onChange={(e) => setImportSource(e.target.value)}
-                      >
-                        {playlistSources.map((s) => (
-                          <option value={s.id} key={s.id}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="field-row">
+                      <label className="field-md">
+                        歌单名称（可选）
+                        <input
+                          value={importName}
+                          onChange={(e) => setImportName(e.target.value)}
+                          maxLength={100}
+                          placeholder="例如：通勤时光"
+                        />
+                      </label>
+                      <label className="field-sm">
+                        歌单音源
+                        <select
+                          value={importSource}
+                          onChange={(e) => setImportSource(e.target.value)}
+                        >
+                          {playlistSources.map((s) => (
+                            <option value={s.id} key={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                     <label>
                       歌单链接 / ID
                       <input

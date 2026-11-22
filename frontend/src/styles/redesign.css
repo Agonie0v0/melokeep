@@ -364,7 +364,9 @@
 }
 
 .searchbox {
-  max-width: 100%;
+  max-width: 780px;
+  width: 100%;
+  margin-inline: auto;
   border-radius: 12px;
   padding: 6px 8px 6px 14px;
   background: var(--surface);
@@ -441,7 +443,9 @@
 }
 
 .form-panel {
-  max-width: 600px;
+  max-width: 580px;
+  width: 100%;
+  margin-inline: auto;
 }
 
 .form-panel input,
@@ -459,14 +463,16 @@
 }
 
 .settings-section input[type="number"],
-.workbench-options input[type="number"],
-.form-panel input[type="number"] {
+.workbench-options input[type="number"] {
   max-width: 156px;
   font-variant-numeric: tabular-nums;
 }
 
-.settings-section select,
-.form-panel select {
+.form-panel input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-section select {
   max-width: 280px;
 }
 
@@ -478,9 +484,18 @@
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
     [type="color"]
   ):not([type="number"]):not([readonly]),
-.form-panel input:not([type="number"]),
 .workbench-options input:not([type="number"]):not([type="checkbox"]) {
   max-width: 440px;
+}
+
+.form-panel
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+    [type="color"]
+  ),
+.form-panel select,
+.form-panel textarea {
+  width: 100%;
+  max-width: 100%;
 }
 
 .settings-section input[readonly],
@@ -3591,6 +3606,10 @@
   border: 0;
 }
 
+.channel-status.status-dot-label::before {
+  display: none;
+}
+
 .settings-workspace .settings-section .update-header {
   align-items: center;
   margin-bottom: 18px;
@@ -3638,6 +3657,167 @@
 .settings-workspace .settings-section input[type="number"],
 .settings-workspace .ai-settings input[type="number"] {
   max-width: 156px;
+}
+
+/* 9.6 语义化流式表单行与宽度等级体系 */
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px 18px;
+}
+
+.field-row > label,
+.field-row > .bot-secret {
+  margin: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.settings-section .field-row {
+  margin: 14px 0;
+}
+
+.source-setting .field-row {
+  margin: 12px 0;
+}
+
+.form-panel .field-row {
+  margin: 16px 0;
+}
+
+.field-row + .field-row {
+  margin-top: 14px;
+}
+
+.settings-section .field-row:first-child,
+.settings-section > h2 + .field-row,
+.source-setting .field-row:first-child,
+.form-panel .field-row:first-child {
+  margin-top: 0;
+}
+
+.settings-section .field-row:last-child,
+.source-setting .field-row:last-child,
+.form-panel .field-row:last-child {
+  margin-bottom: 0;
+}
+
+.field-xs,
+.settings-workspace
+  :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+  :is(label, .bot-secret).field-xs {
+  width: min(100%, 148px);
+  max-width: 148px;
+}
+
+.field-sm,
+.settings-workspace
+  :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+  :is(label, .bot-secret).field-sm {
+  width: min(100%, 220px);
+  max-width: 220px;
+}
+
+.field-md,
+.settings-workspace
+  :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+  :is(label, .bot-secret).field-md {
+  width: min(100%, 340px);
+  max-width: 340px;
+}
+
+.field-lg,
+.settings-workspace
+  :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+  :is(label, .bot-secret).field-lg {
+  width: min(100%, 480px);
+  max-width: 480px;
+}
+
+.field-xl,
+.settings-workspace
+  :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+  :is(label, .bot-secret).field-xl {
+  width: min(100%, 560px);
+  max-width: 560px;
+}
+
+:is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select,
+    textarea
+  ),
+.settings-workspace
+  .settings-section
+  :is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+        [type="color"]
+      ),
+    select,
+    textarea
+  ) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.settings-form
+  .settings-section
+  > label:is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl):not(
+    :last-child
+  ),
+.settings-form
+  .source-setting
+  > label:is(.field-xs, .field-sm, .field-md, .field-lg, .field-xl):not(
+    :last-child
+  ) {
+  margin-bottom: 14px;
+}
+
+@media (min-width: 601px) {
+  .form-panel .field-row > .field-md {
+    flex: 1 1 240px;
+    width: auto;
+    max-width: none;
+  }
+
+  .form-panel .field-row > .field-sm {
+    flex: 0 1 180px;
+    width: min(100%, 180px);
+    max-width: 180px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .settings-workspace
+    .bot-settings
+    .settings-basics
+    .field-row:has(> .field-lg):has(> .field-md)
+    > .field-md {
+    flex: 1 1 220px;
+    width: auto;
+    max-width: 340px;
+  }
+
+  .settings-workspace
+    .settings-section
+    .field-row:has(> .field-md + .field-md + .field-md)
+    > .field-md {
+    flex: 1 1 260px;
+    width: auto;
+    max-width: 340px;
+  }
+}
+
+.field-unit {
+  font-weight: 400;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-left: 2px;
 }
 
 .bot-toggle-grid {
@@ -4137,6 +4317,31 @@
   .settings-workspace .bot-settings .settings-sources > .settings-grid,
   .settings-workspace .bot-settings .settings-behavior > .settings-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .field-row > .field-xs,
+  .field-row > .field-sm,
+  .field-row > .field-md,
+  .field-row > .field-lg,
+  .field-row > .field-xl,
+  label.field-xs,
+  label.field-sm,
+  label.field-md,
+  label.field-lg,
+  label.field-xl,
+  .bot-secret.field-md,
+  .bot-secret.field-lg,
+  .settings-workspace
+    :is(.settings-section, .source-setting, .plugin-import-panel, .ai-settings)
+    :is(label, .bot-secret):is(
+      .field-xs,
+      .field-sm,
+      .field-md,
+      .field-lg,
+      .field-xl
+    ) {
+    width: 100%;
+    max-width: 100%;
+    flex-basis: 100%;
   }
   .search-view .results {
     padding: 8px 10px;

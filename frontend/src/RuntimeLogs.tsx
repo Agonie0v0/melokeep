@@ -137,7 +137,7 @@ export function RuntimeLogs({ active }: { active: boolean }) {
       </div>
       <div className="log-filters">
         <label className="log-search">
-          <Search />
+          <Search aria-hidden="true" />
           <input
             aria-label="搜索日志"
             placeholder="搜索报错、音源或任务编号"

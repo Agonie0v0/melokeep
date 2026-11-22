@@ -308,24 +308,36 @@
 }
 .library-match-score-field {
   grid-column: 1 / -1;
+  width: 100%;
+  max-width: 540px;
 }
 .library-match-score-controls {
   display: flex;
   align-items: center;
   gap: 12px;
+  max-width: 540px;
 }
+.settings-section
+  .library-match-score-field
+  .library-match-score-controls
+  input[type="range"],
 .library-match-score-controls input[type="range"] {
-  flex: 1 1 220px;
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 440px;
   accent-color: var(--accent);
 }
 .library-match-score-controls input[type="number"] {
-  width: 86px;
+  width: 78px !important;
+  max-width: 78px !important;
+  flex: 0 0 78px;
   min-height: 36px;
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 .library-job-filters {
   gap: 8px;
@@ -1019,14 +1031,19 @@
 .restore-confirm p {
   line-height: 1.7;
 }
+.modal-dialog.library-batch-modal {
+  width: min(660px, 100%);
+}
 .batch-tag-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px 14px;
 }
 .library-batch-edit .batch-tag-fields > label {
   min-width: 0;
   margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 .library-batch-edit input[type="checkbox"] {
   display: inline-block;
@@ -1060,17 +1077,40 @@
   max-width: 100%;
   padding: 12px;
 }
-.library-batch-edit .settings-grid > label {
+.library-batch-edit .field-row {
+  margin: 12px 0;
+}
+.library-batch-edit .settings-grid > label,
+.library-batch-edit .field-row > label {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
   margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.library-batch-edit .settings-grid > label input:not([type="checkbox"]),
+.library-batch-edit .field-row > label input:not([type="checkbox"]),
+.library-batch-edit .field-row > label select {
+  margin-top: 0;
+  height: 38px;
+  padding: 7px 10px;
+}
+@media (min-width: 601px) {
+  .library-batch-edit .field-row > .field-xs {
+    flex: 0 1 132px;
+  }
+  .library-batch-edit .field-row > .field-sm {
+    flex: 1 1 160px;
+    max-width: 220px;
+  }
 }
 .library-batch-edit select {
   display: block;
   width: 100%;
-  padding: 10px 12px;
+  height: 38px;
+  padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--subtle);
@@ -1194,6 +1234,11 @@
   }
   .batch-tag-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-tag-fields > .tag-span-2,
+  .batch-tag-fields > .tag-span-3,
+  .batch-tag-fields > .tag-span-6 {
+    grid-column: auto;
   }
   .library-batch-edit .settings-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1702,8 +1747,35 @@
     align-items: start;
   }
   .processing-workflow .library-layout {
-    grid-template-columns: var(--library-tree-width, 250px) minmax(0, 1fr);
+    grid-template-columns: var(--library-tree-width, 224px) minmax(0, 1fr);
     gap: 18px;
+  }
+  .processing-workflow .music-table .library-album {
+    display: none;
+  }
+  .processing-workflow .music-table th.library-selection,
+  .processing-workflow .music-table td.library-selection {
+    width: 34px;
+  }
+  .processing-workflow .music-table th.library-artist,
+  .processing-workflow .music-table td.library-artist {
+    width: 96px;
+  }
+  .processing-workflow .music-table th.library-duration,
+  .processing-workflow .music-table td.library-duration {
+    width: 100px;
+  }
+  .processing-workflow .music-table thead th:last-child {
+    width: 144px;
+  }
+  .processing-workflow .library-actions {
+    gap: 6px;
+    margin-left: -2px;
+  }
+  .processing-workflow .song-actions .icon-button,
+  .processing-workflow .file-actions .icon-button {
+    width: 32px;
+    height: 32px;
   }
   .processing-workflow .library-workbench {
     order: 0;

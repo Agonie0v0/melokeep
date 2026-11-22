@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   Play,
   Pencil,
+  Search,
   Trash2,
   Download,
   Music2,
@@ -46,6 +47,62 @@ function readSavedTreeWidth(): number | null {
 
 function clampTreeWidth(width: number): number {
   return Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, Math.round(width)));
+}
+
+const TAG_FIELD_ORDER = [
+  "title",
+  "artist",
+  "album",
+  "album_artist",
+  "date",
+  "track_number",
+  "disc_number",
+  "genre",
+  "language",
+  "bpm",
+  "composer",
+  "lyricist",
+  "publisher",
+  "grouping",
+  "copyright",
+  "isrc",
+  "comment",
+] as const;
+
+const TAG_SPAN_2_KEYS = new Set([
+  "date",
+  "track_number",
+  "disc_number",
+  "genre",
+  "language",
+  "bpm",
+]);
+
+/** Return the 6-column semantic grid span class for an audio tag field. */
+export function tagSpanClass(key: string): string {
+  if (key === "comment") return "tag-span-6";
+  if (TAG_SPAN_2_KEYS.has(key)) return "tag-span-2";
+  return "tag-span-3";
+}
+
+/** Return tag entries ordered for the 6-column semantic grid, keeping any unlisted keys at the end. */
+export function getOrderedTagEntries(
+  labels: Record<string, string> = tagLabels,
+): Array<[string, string]> {
+  const ordered: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const key of TAG_FIELD_ORDER) {
+    if (Object.prototype.hasOwnProperty.call(labels, key)) {
+      ordered.push([key, labels[key]]);
+      seen.add(key);
+    }
+  }
+  for (const [key, label] of Object.entries(labels)) {
+    if (!seen.has(key)) {
+      ordered.push([key, label]);
+    }
+  }
+  return ordered;
 }
 
 type FolderEntry = { root: string; name: string };
@@ -1102,18 +1159,21 @@ export function MusicLibrary({
             </div>
           )}
           <div className="library-filters">
-            <input
-              className="management-search"
-              aria-label="搜索音乐文件"
-              placeholder="搜索歌曲、歌手或专辑"
-              value={query}
-              onChange={(e) => {
-                const next = e.target.value;
-                setQuery(next);
-                setSelected([]);
-                notifyFilters(next, folder, sort);
-              }}
-            />
+            <div className="library-filter-search">
+              <Search aria-hidden="true" />
+              <input
+                className="management-search"
+                aria-label="搜索音乐文件"
+                placeholder="搜索歌曲、歌手或专辑"
+                value={query}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setQuery(next);
+                  setSelected([]);
+                  notifyFilters(next, folder, sort);
+                }}
+              />
+            </div>
             <select
               aria-label="音乐库排序"
               value={sort}
@@ -1568,6 +1628,7 @@ export function MusicLibrary({
       {editing && (
         <Modal
           title="编辑歌曲信息"
+          className="library-edit-modal"
           close={saving ? undefined : () => setEditing(null)}
         >
           <form
@@ -1639,18 +1700,20 @@ export function MusicLibrary({
                 </button>
               </div>
             )}
-            {Object.entries(tagLabels).map(([key, label]) => (
-              <label key={key}>
-                {label}
-                <input
-                  maxLength={300}
-                  value={draft[key] || ""}
-                  onChange={(e) =>
-                    setDraft({ ...draft, [key]: e.target.value })
-                  }
-                />
-              </label>
-            ))}
+            <div className="library-edit-grid">
+              {getOrderedTagEntries().map(([key, label]) => (
+                <label key={key} className={tagSpanClass(key)}>
+                  {label}
+                  <input
+                    maxLength={300}
+                    value={draft[key] || ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, [key]: e.target.value })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
             {editError && <p role="alert">{editError}</p>}
             <div className="management-toolbar">
               <button

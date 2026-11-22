@@ -205,7 +205,7 @@ export function AISettings() {
               />
               启用 AI 助手
             </label>
-            <label>
+            <label className="field-lg">
               API 基础地址
               <input
                 name="base_url"
@@ -215,8 +215,8 @@ export function AISettings() {
                 onChange={(e) => update("base_url", e.target.value)}
               />
             </label>
-            <div className="settings-grid">
-              <label>
+            <div className="field-row">
+              <label className="field-sm">
                 接口类型
                 <select
                   name="api_type"
@@ -230,7 +230,7 @@ export function AISettings() {
                   <option value="responses">Responses</option>
                 </select>
               </label>
-              <label>
+              <label className="field-sm">
                 AI 请求代理
                 <select
                   name="proxy_mode"
@@ -261,7 +261,7 @@ export function AISettings() {
               />{" "}
               流式显示回复
             </label>
-            <label>
+            <label className="field-lg">
               API Key
               <input
                 name="api_key"
@@ -308,7 +308,7 @@ export function AISettings() {
               </p>
             )}
             {models.length > 0 && (
-              <label>
+              <label className="field-md">
                 选择可用模型
                 <select
                   aria-label="选择可用模型"
@@ -326,7 +326,7 @@ export function AISettings() {
                 </select>
               </label>
             )}
-            <label>
+            <label className="field-md">
               模型名称
               <input
                 name="model"
@@ -336,7 +336,7 @@ export function AISettings() {
                 onChange={(e) => update("model", e.target.value)}
               />
             </label>
-            <label>
+            <label className="field-xl">
               音乐偏好
               <textarea
                 name="preferences"
