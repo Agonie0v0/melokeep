@@ -13,6 +13,9 @@ export const ARCHIVE_UNCATEGORIZED = "未分类";
 export const ARCHIVE_FILTER_ALL = "__all__";
 export const ARCHIVE_FILTER_INVALID = "__invalid__";
 
+export const SOURCE_FILTER_ALL = "__all__";
+export const SOURCE_FILTER_SELECTED = "__selected__";
+
 export const PLUGIN_STATUS_ALL = "all" as const;
 export const PLUGIN_STATUS_ENABLED = "enabled" as const;
 export const PLUGIN_STATUS_DISABLED = "disabled" as const;
@@ -25,6 +28,13 @@ export interface ArchiveCategoryBucket {
   category: string;
   count: number;
   ids: string[];
+}
+
+export interface SourceCategoryBucket {
+  category: string;
+  count: number;
+  selectedCount: number;
+  keys: string[];
 }
 
 const MASKED_SECRET_VALUES = new Set([
@@ -328,4 +338,114 @@ export function filterInstalledPlugins(
 
     return true;
   });
+}
+
+export function availableSourceCategory(
+  source: Pick<AvailableSource, "category">,
+): string {
+  return (source.category || "").trim() || ARCHIVE_UNCATEGORIZED;
+}
+
+export function getAvailableSourceCategoryBuckets(
+  sources: AvailableSource[],
+  selectedKeys: string[],
+): SourceCategoryBucket[] {
+  const selectedSet = new Set(selectedKeys);
+  const buckets = new Map<string, SourceCategoryBucket>();
+
+  for (const source of sources) {
+    const key = sourceEngineKey(source);
+    if (!key) continue;
+    const category = availableSourceCategory(source);
+    let bucket = buckets.get(category);
+    if (!bucket) {
+      bucket = { category, count: 0, selectedCount: 0, keys: [] };
+      buckets.set(category, bucket);
+    }
+    if (!bucket.keys.includes(key)) {
+      bucket.keys.push(key);
+      bucket.count = bucket.keys.length;
+      if (selectedSet.has(key)) {
+        bucket.selectedCount += 1;
+      }
+    }
+  }
+
+  const list = Array.from(buckets.values());
+  list.sort((a, b) => {
+    if (a.category === ARCHIVE_UNCATEGORIZED) return 1;
+    if (b.category === ARCHIVE_UNCATEGORIZED) return -1;
+    return 0;
+  });
+  return list;
+}
+
+export function filterAvailableSources(
+  sources: AvailableSource[],
+  options: { query: string; category: string; selectedKeys: string[] },
+): AvailableSource[] {
+  const needle = options.query.trim().toLowerCase();
+  const category = options.category;
+  const selectedSet =
+    category === SOURCE_FILTER_SELECTED ? new Set(options.selectedKeys) : null;
+
+  return sources.filter((source) => {
+    if (category === SOURCE_FILTER_SELECTED) {
+      if (!selectedSet!.has(sourceEngineKey(source))) return false;
+    } else if (category && category !== SOURCE_FILTER_ALL) {
+      if (availableSourceCategory(source) !== category) return false;
+    }
+
+    if (needle) {
+      const fields = [
+        source.id,
+        source.engine_name,
+        source.label,
+        source.category,
+        source.description,
+        source.plugin_id,
+      ];
+      if (
+        !fields.some((value) => (value || "").toLowerCase().includes(needle))
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+export function selectOnlySourceKeys(targetKeys: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const key of targetKeys) {
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+export function toggleSourceKeysSelection(
+  selectedKeys: string[],
+  targetKeys: string[],
+): string[] {
+  const uniqueTargets = selectOnlySourceKeys(targetKeys);
+  if (!uniqueTargets.length) return selectedKeys;
+  const current = selectOnlySourceKeys(selectedKeys);
+  const selectedSet = new Set(current);
+  const allSelected = uniqueTargets.every((key) => selectedSet.has(key));
+  if (allSelected) {
+    const removeSet = new Set(uniqueTargets);
+    return current.filter((key) => !removeSet.has(key));
+  }
+  const next = [...current];
+  for (const key of uniqueTargets) {
+    if (!selectedSet.has(key)) {
+      selectedSet.add(key);
+      next.push(key);
+    }
+  }
+  return next;
 }

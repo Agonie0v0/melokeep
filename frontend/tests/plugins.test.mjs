@@ -10,14 +10,19 @@ import {
   PLUGIN_STATUS_ALL,
   PLUGIN_STATUS_DISABLED,
   PLUGIN_STATUS_ENABLED,
+  SOURCE_FILTER_ALL,
+  SOURCE_FILTER_SELECTED,
   archiveEntryCategory,
+  availableSourceCategory,
   buildPluginSettingsPayload,
   filterArchiveEntries,
+  filterAvailableSources,
   filterInstalledPlugins,
   formatAllowedOrigins,
   formatFileSize,
   formatMetadataSourceLabel,
   getArchiveCategoryBuckets,
+  getAvailableSourceCategoryBuckets,
   getInstalledPluginCategories,
   getValidArchivePluginIds,
   isMaskedSecretValue,
@@ -26,9 +31,11 @@ import {
   parseAllowedOrigins,
   pickPlaylistImportSource,
   pluginCapabilityBadges,
+  selectOnlySourceKeys,
   sourceEngineKey,
   toggleArchiveCategorySelection,
   toggleArchiveIdSelection,
+  toggleSourceKeysSelection,
 } from "../src/plugin-utils.ts";
 
 test("parseAllowedOrigins splits lines/commas and deduplicates entries", () => {
@@ -503,4 +510,169 @@ test("installed plugin helpers extract categories and filter by query, status, a
     ),
     [],
   );
+});
+
+test("available source category helpers aggregate, filter, and toggle source keys", () => {
+  const sources = [
+    {
+      id: "open-music",
+      engine_name: "OpenMusicClient",
+      label: "示例音乐源",
+      category: "开放音乐",
+      origin: "builtin",
+      description: "CC0 free audio catalog",
+    },
+    {
+      id: "open-podcast",
+      engine_name: "OpenPodcastClient",
+      label: "示例播客源",
+      category: "  开放播客  ",
+      origin: "builtin",
+      description: "Open podcast feed",
+    },
+    {
+      id: "open-radio",
+      label: "示例电台源",
+      category: "",
+      origin: "plugin",
+      plugin_id: "open-radio-plugin",
+      description: "Community radio streams",
+    },
+    {
+      id: "open-music-alt",
+      engine_name: "OpenMusicAltClient",
+      label: "示例古典源",
+      category: "开放音乐",
+      origin: "plugin",
+      plugin_id: "open-music-alt-plugin",
+      description: "Public domain recordings",
+    },
+  ];
+
+  assert.equal(availableSourceCategory(sources[0]), "开放音乐");
+  assert.equal(availableSourceCategory(sources[1]), "开放播客");
+  assert.equal(availableSourceCategory(sources[2]), ARCHIVE_UNCATEGORIZED);
+
+  assert.deepEqual(
+    getAvailableSourceCategoryBuckets(sources, [
+      "OpenMusicClient",
+      "open-radio",
+    ]),
+    [
+      {
+        category: "开放音乐",
+        count: 2,
+        selectedCount: 1,
+        keys: ["OpenMusicClient", "OpenMusicAltClient"],
+      },
+      {
+        category: "开放播客",
+        count: 1,
+        selectedCount: 0,
+        keys: ["OpenPodcastClient"],
+      },
+      {
+        category: ARCHIVE_UNCATEGORIZED,
+        count: 1,
+        selectedCount: 1,
+        keys: ["open-radio"],
+      },
+    ],
+  );
+
+  // Filter by all, selected, specific category, and uncategorized
+  assert.equal(
+    filterAvailableSources(sources, {
+      query: "",
+      category: SOURCE_FILTER_ALL,
+      selectedKeys: ["OpenMusicClient"],
+    }).length,
+    4,
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "",
+      category: SOURCE_FILTER_SELECTED,
+      selectedKeys: ["OpenPodcastClient", "open-radio"],
+    }).map((s) => s.id),
+    ["open-podcast", "open-radio"],
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "",
+      category: "开放音乐",
+      selectedKeys: [],
+    }).map((s) => s.id),
+    ["open-music", "open-music-alt"],
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "",
+      category: ARCHIVE_UNCATEGORIZED,
+      selectedKeys: [],
+    }).map((s) => s.id),
+    ["open-radio"],
+  );
+
+  // Case-insensitive search across id, engine_name, label, category, description, and plugin_id
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "CC0",
+      category: SOURCE_FILTER_ALL,
+      selectedKeys: [],
+    }).map((s) => s.id),
+    ["open-music"],
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "open-radio-plugin",
+      category: SOURCE_FILTER_ALL,
+      selectedKeys: [],
+    }).map((s) => s.id),
+    ["open-radio"],
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "OPENPODCASTCLIENT",
+      category: "开放播客",
+      selectedKeys: [],
+    }).map((s) => s.id),
+    ["open-podcast"],
+  );
+  assert.deepEqual(
+    filterAvailableSources(sources, {
+      query: "示例古典源",
+      category: "开放播客",
+      selectedKeys: [],
+    }),
+    [],
+  );
+
+  // Select-only and toggle helpers deduplicate and handle full vs partial category selection
+  assert.deepEqual(
+    selectOnlySourceKeys([
+      "OpenMusicClient",
+      "",
+      "OpenPodcastClient",
+      "OpenMusicClient",
+    ]),
+    ["OpenMusicClient", "OpenPodcastClient"],
+  );
+  let selected = ["OpenMusicClient"];
+  selected = toggleSourceKeysSelection(selected, [
+    "OpenMusicClient",
+    "OpenMusicAltClient",
+  ]);
+  assert.deepEqual(selected, ["OpenMusicClient", "OpenMusicAltClient"]);
+  selected = toggleSourceKeysSelection(selected, ["OpenPodcastClient"]);
+  assert.deepEqual(selected, [
+    "OpenMusicClient",
+    "OpenMusicAltClient",
+    "OpenPodcastClient",
+  ]);
+  selected = toggleSourceKeysSelection(selected, [
+    "OpenMusicClient",
+    "OpenMusicAltClient",
+  ]);
+  assert.deepEqual(selected, ["OpenPodcastClient"]);
 });

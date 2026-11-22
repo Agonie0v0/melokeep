@@ -931,7 +931,9 @@ func (f *searchFlight) run(snap config.Snapshot) {
 			if f.ctx.Err() != nil {
 				return
 			}
-			if runCtx.Err() == nil {
+			// 整部合集条目（Episodes != 0，包括 > 0 与 -1）通过分集浏览与按需播放/懒解析下载处理，
+			// 搜索阶段跳过预解析可避免多余上游请求与日志噪音。
+			if cand.Episodes == 0 && runCtx.Err() == nil {
 				resolved, rErr := f.src.provider.Resolve(reqCtx, cand, model.QualityPolicy{AllowPreview: true})
 				if rErr == nil && len(resolved) > 0 {
 					f.resolvedCount.Add(1)

@@ -1098,3 +1098,225 @@ func TestSearchServiceLogsLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchSkipsPreResolveForCollectionTracks(t *testing.T) {
+	st := openTestStore(t)
+	var resolveCalls atomic.Int64
+	var resolveMu sync.Mutex
+	var resolvedSourceIDs []string
+
+	openPodcast := &mockProvider{
+		id:         "open-podcast",
+		engineName: "OpenPodcastClient",
+		searchFn: func(ctx context.Context, opts model.SearchOptions, emit func(model.ProviderTrack) error) (model.SearchSummary, error) {
+			if err := emit(model.ProviderTrack{
+				PublicID: model.NewUUID(),
+				Source:   "open-podcast",
+				SourceID: "album:100",
+				Title:    "示例有声书合集",
+				Artist:   "示例主播",
+				Album:    "示例有声书合集",
+				Duration: 3600,
+				Episodes: 120,
+			}); err != nil {
+				return model.SearchSummary{}, err
+			}
+			if err := emit(model.ProviderTrack{
+				PublicID: model.NewUUID(),
+				Source:   "open-podcast",
+				SourceID: "track:200",
+				Title:    "示例单曲",
+				Artist:   "示例主播",
+				Album:    "示例专辑",
+				Duration: 180,
+				Episodes: 0,
+			}); err != nil {
+				return model.SearchSummary{}, err
+			}
+			return model.SearchSummary{Count: 2}, nil
+		},
+		resolveFn: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			resolveCalls.Add(1)
+			resolveMu.Lock()
+			resolvedSourceIDs = append(resolvedSourceIDs, track.SourceID)
+			resolveMu.Unlock()
+
+			br := 192
+			sz := int64(4 << 20)
+			return []model.ResolvedMedia{{
+				VariantID: track.SourceID + ":mp3:192:full",
+				Variant: model.MediaVariant{
+					VariantID:    track.SourceID + ":mp3:192:full",
+					Label:        "MP3 192k",
+					Codec:        "mp3",
+					Bitrate:      &br,
+					Availability: "verified",
+					Evidence:     "probe",
+					SizeBytes:    &sz,
+				},
+				URL:       "https://cdn.example.com/" + track.SourceID + ".mp3",
+				Codec:     "mp3",
+				Bitrate:   &br,
+				SizeBytes: &sz,
+			}}, nil
+		},
+	}
+
+	timings := search.DefaultTimings()
+	timings.BatchPersistInterval = 5 * time.Millisecond
+	svc := search.NewService(st, search.MapProviderLookup{
+		"open-podcast": openPodcast,
+	}, config.DefaultResourceBudgets(), search.WithTimings(timings))
+	defer svc.Close()
+
+	rt := config.DefaultRuntimeConfig()
+	rt.Sources = []string{"open-podcast"}
+	rt.ResultsPerSource = 5
+	rt.SearchTimeoutSeconds = 5
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	jobID, err := svc.CreateSearch(ctx, actor, snap, search.CreateRequest{
+		Keyword: "示例有声书",
+		Sources: []string{"open-podcast"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSearch: %v", err)
+	}
+	sub, err := svc.Subscribe(ctx, jobID, 0, "")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer sub.Close()
+
+	events := readAllEvents(t, ctx, sub)
+	var tracks []model.TrackDTO
+	tracksBySourceID := make(map[string]model.TrackDTO)
+	for _, ev := range events {
+		if ev.Type == "track" {
+			var dto model.TrackDTO
+			if err := json.Unmarshal(ev.Data, &dto); err != nil {
+				t.Fatalf("unmarshal track dto: %v", err)
+			}
+			tracks = append(tracks, dto)
+			tracksBySourceID[dto.SourceID] = dto
+		}
+	}
+
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 track events, got %d", len(tracks))
+	}
+	resolveMu.Lock()
+	gotIDs := append([]string(nil), resolvedSourceIDs...)
+	resolveMu.Unlock()
+	if got := resolveCalls.Load(); got != 1 {
+		t.Fatalf("expected resolveFn to be called exactly once, got %d (sourceIDs=%v)", got, gotIDs)
+	}
+	if len(gotIDs) != 1 || gotIDs[0] != "track:200" {
+		t.Fatalf("expected resolveFn called only for track:200, got %v", gotIDs)
+	}
+
+	albumDTO, ok := tracksBySourceID["album:100"]
+	if !ok {
+		t.Fatal("missing SSE track event for album:100")
+	}
+	if albumDTO.Title != "示例有声书合集" {
+		t.Fatalf("unexpected album title: %q", albumDTO.Title)
+	}
+	if albumDTO.Episodes != 120 {
+		t.Fatalf("expected album:100 Episodes == 120, got %d", albumDTO.Episodes)
+	}
+	if len(albumDTO.Qualities) != 0 {
+		t.Fatalf("expected album:100 to have no pre-resolved qualities, got %+v", albumDTO.Qualities)
+	}
+	if _, cached := svc.CachedResolved(albumDTO.ID, snap.Revision); cached {
+		t.Fatalf("expected album:100 not to be cached in resolved media cache")
+	}
+
+	trackDTO, ok := tracksBySourceID["track:200"]
+	if !ok {
+		t.Fatal("missing SSE track event for track:200")
+	}
+	if trackDTO.Title != "示例单曲" {
+		t.Fatalf("unexpected track title: %q", trackDTO.Title)
+	}
+	if trackDTO.Episodes != 0 {
+		t.Fatalf("expected track:200 Episodes == 0, got %d", trackDTO.Episodes)
+	}
+	if len(trackDTO.Qualities) != 1 || trackDTO.Qualities[0].Codec != "mp3" {
+		t.Fatalf("expected track:200 to have pre-resolved quality, got %+v", trackDTO.Qualities)
+	}
+	if trackDTO.Playback.State != "ready" {
+		t.Fatalf("expected track:200 playback state ready, got %+v", trackDTO.Playback)
+	}
+	if cached, ok := svc.CachedResolved(trackDTO.ID, snap.Revision); !ok || len(cached) != 1 {
+		t.Fatalf("expected track:200 resolved media cached, got ok=%v len=%d", ok, len(cached))
+	}
+
+	t.Run("skips_unknown_episode_count", func(t *testing.T) {
+		var unknownResolveCalls atomic.Int64
+		unknownProv := &mockProvider{
+			id:         "open-podcast",
+			engineName: "OpenPodcastClient",
+			searchFn: func(ctx context.Context, opts model.SearchOptions, emit func(model.ProviderTrack) error) (model.SearchSummary, error) {
+				if err := emit(model.ProviderTrack{
+					PublicID: model.NewUUID(),
+					Source:   "open-podcast",
+					SourceID: "album:101",
+					Title:    "示例未知集数合集",
+					Artist:   "示例主播",
+					Album:    "示例未知集数合集",
+					Duration: 1800,
+					Episodes: -1,
+				}); err != nil {
+					return model.SearchSummary{}, err
+				}
+				return model.SearchSummary{Count: 1}, nil
+			},
+			resolveFn: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+				unknownResolveCalls.Add(1)
+				return nil, nil
+			},
+		}
+
+		subSvc := search.NewService(openTestStore(t), search.MapProviderLookup{
+			"open-podcast": unknownProv,
+		}, config.DefaultResourceBudgets(), search.WithTimings(timings))
+		defer subSvc.Close()
+
+		subJobID, err := subSvc.CreateSearch(ctx, actor, snap, search.CreateRequest{
+			Keyword: "示例未知集数合集",
+			Sources: []string{"open-podcast"},
+		})
+		if err != nil {
+			t.Fatalf("CreateSearch: %v", err)
+		}
+		subEventsCh, err := subSvc.Subscribe(ctx, subJobID, 0, "")
+		if err != nil {
+			t.Fatalf("Subscribe: %v", err)
+		}
+		defer subEventsCh.Close()
+
+		subEvents := readAllEvents(t, ctx, subEventsCh)
+		var unknownTracks []model.TrackDTO
+		for _, ev := range subEvents {
+			if ev.Type == "track" {
+				var dto model.TrackDTO
+				if err := json.Unmarshal(ev.Data, &dto); err != nil {
+					t.Fatalf("unmarshal track dto: %v", err)
+				}
+				unknownTracks = append(unknownTracks, dto)
+			}
+		}
+		if len(unknownTracks) != 1 {
+			t.Fatalf("expected 1 track event, got %d", len(unknownTracks))
+		}
+		if unknownTracks[0].Episodes != -1 {
+			t.Fatalf("expected album:101 Episodes == -1, got %d", unknownTracks[0].Episodes)
+		}
+		if got := unknownResolveCalls.Load(); got != 0 {
+			t.Fatalf("expected resolveFn not called for Episodes == -1, got %d", got)
+		}
+	})
+}

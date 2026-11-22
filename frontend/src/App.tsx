@@ -77,7 +77,15 @@ import {
   type UIPreferences,
 } from "./preferences";
 import { updateTargetKey, updateTargetLabel } from "./UpdateSettings";
-import { isPluginSource, pickPlaylistImportSource } from "./plugin-utils";
+import {
+  SOURCE_FILTER_ALL,
+  availableSourceCategory,
+  getAvailableSourceCategoryBuckets,
+  isPluginSource,
+  pickPlaylistImportSource,
+  sourceEngineKey,
+} from "./plugin-utils";
+import { QuickSourceModal } from "./QuickSourceModal";
 import type {
   BatchQualityPolicy,
   EpisodePage,
@@ -262,11 +270,35 @@ export function App() {
     [statuses, setStatuses] = useState<Record<string, SourceStatus>>({}),
     [firstMs, setFirstMs] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null),
+    [showQuickSources, setShowQuickSources] = useState(false),
+    [searchCategoryFilter, setSearchCategoryFilter] =
+      useState<string>(SOURCE_FILTER_ALL),
     [sourceFilter, setSourceFilter] = useState("all"),
     [filter, setFilter] = useState("all"),
     [sort, setSort] = useState("relevance"),
     [selected, setSelected] = useState<Set<string>>(new Set());
   const sources = config?.available_sources ?? [];
+  const enabledSearchSources = useMemo(
+    () => sources.filter((s) => Boolean(config?.sources.includes(s.id))),
+    [sources, config?.sources],
+  );
+  const searchCategoryBuckets = useMemo(
+    () => getAvailableSourceCategoryBuckets(enabledSearchSources, []),
+    [enabledSearchSources],
+  );
+  const searchCategorySourceIds = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const s of enabledSearchSources) {
+      const category = availableSourceCategory(s);
+      let ids = map.get(category);
+      if (!ids) {
+        ids = new Set<string>();
+        map.set(category, ids);
+      }
+      ids.add(s.id);
+    }
+    return map;
+  }, [enabledSearchSources]);
   const playlistSources = useMemo(
     () => sources.filter((s) => Boolean(s.capability?.playlist)),
     [sources],
@@ -1033,15 +1065,75 @@ export function App() {
       : view === "playlists"
         ? activePlaylist?.tracks || []
         : tracks;
+  const effectiveSearchCategory =
+    view === "search" &&
+    !episodeContext &&
+    searchCategoryBuckets.length > 1 &&
+    searchCategoryFilter !== SOURCE_FILTER_ALL &&
+    searchCategorySourceIds.has(searchCategoryFilter)
+      ? searchCategoryFilter
+      : SOURCE_FILTER_ALL;
+  useEffect(() => {
+    if (
+      searchCategoryFilter !== SOURCE_FILTER_ALL &&
+      (searchCategoryBuckets.length <= 1 ||
+        !searchCategorySourceIds.has(searchCategoryFilter))
+    ) {
+      setSearchCategoryFilter(SOURCE_FILTER_ALL);
+    }
+  }, [
+    searchCategoryBuckets.length,
+    searchCategoryFilter,
+    searchCategorySourceIds,
+  ]);
+  useEffect(() => {
+    if (
+      view === "search" &&
+      !episodeContext &&
+      sourceFilter !== "all" &&
+      enabledSearchSources.length > 0 &&
+      !enabledSearchSources.some((s) => s.id === sourceFilter)
+    ) {
+      setSourceFilter("all");
+    }
+  }, [view, episodeContext, sourceFilter, enabledSearchSources]);
+  const activeSearchCategoryIds =
+    effectiveSearchCategory !== SOURCE_FILTER_ALL
+      ? (searchCategorySourceIds.get(effectiveSearchCategory) ?? null)
+      : null;
+  const categoryFilteredTracks = useMemo(() => {
+    if (!activeSearchCategoryIds) return tableTracks;
+    return tableTracks.filter((track) =>
+      activeSearchCategoryIds.has(track.source),
+    );
+  }, [tableTracks, activeSearchCategoryIds]);
+  const visibleSearchSources = useMemo(() => {
+    if (!activeSearchCategoryIds) return enabledSearchSources;
+    return enabledSearchSources.filter((s) =>
+      activeSearchCategoryIds.has(s.id),
+    );
+  }, [enabledSearchSources, activeSearchCategoryIds]);
+  function handleSelectSearchCategory(nextCategory: string) {
+    setSearchCategoryFilter(nextCategory);
+    if (nextCategory === SOURCE_FILTER_ALL) return;
+    if (sourceFilter !== "all") {
+      const allowed = searchCategorySourceIds.get(nextCategory);
+      if (!allowed || !allowed.has(sourceFilter)) {
+        setSourceFilter("all");
+      }
+    }
+  }
   const display = useMemo(
-    () => selectResults(tableTracks, sourceFilter, filter, false, sort),
-    [tableTracks, sourceFilter, filter, sort],
+    () =>
+      selectResults(categoryFilteredTracks, sourceFilter, filter, false, sort),
+    [categoryFilteredTracks, sourceFilter, filter, sort],
   );
   const lastSearch = useRef("");
   async function search(keyword = query) {
     if (!keyword.trim() || !config) return;
     ++episodeLoadSeq.current;
     setEpisodeContext(null);
+    setSearchCategoryFilter(SOURCE_FILTER_ALL);
     const generation = ++searchGeneration.current;
     eventSource.current?.close();
     const previousJob = searchJob.current;
@@ -1513,6 +1605,7 @@ export function App() {
       savedSourceFilter,
     });
     setView("search");
+    setSearchCategoryFilter(SOURCE_FILTER_ALL);
     setSourceFilter("all");
     setFilter("all");
     setSort("relevance");
@@ -2088,6 +2181,7 @@ export function App() {
     }
   }
   function resetCollectionFilters() {
+    setSearchCategoryFilter(SOURCE_FILTER_ALL);
     setSourceFilter("all");
     setFilter("all");
     setSort("relevance");
@@ -3319,6 +3413,7 @@ export function App() {
                 setView(name);
                 if (name === "playlists")
                   setPlaylistRefresh((value) => value + 1);
+                setSearchCategoryFilter(SOURCE_FILTER_ALL);
                 setSourceFilter("all");
                 setSelected(new Set());
               }}
@@ -3428,6 +3523,7 @@ export function App() {
                 aria-current={view === "playlists" ? "page" : undefined}
                 onClick={() => {
                   setView("playlists");
+                  setSearchCategoryFilter(SOURCE_FILTER_ALL);
                   setSelected(new Set());
                 }}
               >
@@ -3514,7 +3610,8 @@ export function App() {
                       <button
                         type="button"
                         className="scope"
-                        onClick={() => openSettings()}
+                        title="快速按分类切换搜索音源"
+                        onClick={() => setShowQuickSources(true)}
                       >
                         音源设置
                       </button>
@@ -3567,7 +3664,10 @@ export function App() {
                           <h2>从收藏开始听</h2>
                           <button
                             className="text-button"
-                            onClick={() => setView("favorites")}
+                            onClick={() => {
+                              resetCollectionFilters();
+                              setView("favorites");
+                            }}
                           >
                             查看全部
                             <ArrowRight />
@@ -3622,38 +3722,87 @@ export function App() {
                         </div>
                       </div>
                     )}
+                    {!episodeContext && searchCategoryBuckets.length > 1 && (
+                      <div
+                        className="search-source-categories"
+                        role="group"
+                        aria-label="按音源分类筛选结果"
+                      >
+                        <button
+                          type="button"
+                          className={
+                            effectiveSearchCategory === SOURCE_FILTER_ALL
+                              ? "plugin-archive-chip is-active"
+                              : "plugin-archive-chip"
+                          }
+                          aria-pressed={
+                            effectiveSearchCategory === SOURCE_FILTER_ALL
+                          }
+                          onClick={() =>
+                            handleSelectSearchCategory(SOURCE_FILTER_ALL)
+                          }
+                        >
+                          全部分类
+                        </button>
+                        {searchCategoryBuckets.map((bucket) => {
+                          const ids = searchCategorySourceIds.get(
+                            bucket.category,
+                          );
+                          const count = ids
+                            ? tracks.filter((t) => ids.has(t.source)).length
+                            : 0;
+                          const active =
+                            effectiveSearchCategory === bucket.category;
+                          return (
+                            <button
+                              type="button"
+                              key={bucket.category}
+                              className={
+                                active
+                                  ? "plugin-archive-chip is-active"
+                                  : "plugin-archive-chip"
+                              }
+                              aria-pressed={active}
+                              onClick={() =>
+                                handleSelectSearchCategory(bucket.category)
+                              }
+                            >
+                              {bucket.category} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div className="sources">
                       <button
                         className={`source ${sourceFilter === "all" ? "active" : ""}`}
                         aria-pressed={sourceFilter === "all"}
                         onClick={() => setSourceFilter("all")}
                       >
-                        全部音源<span>{tracks.length}</span>
+                        全部音源<span>{categoryFilteredTracks.length}</span>
                       </button>
-                      {sources
-                        .filter((s) => config?.sources.includes(s.id))
-                        .map((s) => {
-                          const st = statuses[s.id]?.state;
-                          return (
-                            <button
-                              key={s.id}
-                              className={`source ${sourceFilter === s.id ? "active" : ""} ${st === "failed" ? "failed" : ""}`}
-                              aria-pressed={sourceFilter === s.id}
-                              onClick={() => setSourceFilter(s.id)}
-                            >
-                              {(st === "searching" || st === "failed") && (
-                                <i aria-hidden="true" />
-                              )}
-                              {s.label}
-                              <span>
-                                {st === "searching"
-                                  ? "搜索中"
-                                  : tracks.filter((t) => t.source === s.id)
-                                      .length}
-                              </span>
-                            </button>
-                          );
-                        })}
+                      {visibleSearchSources.map((s) => {
+                        const st = statuses[s.id]?.state;
+                        return (
+                          <button
+                            key={s.id}
+                            className={`source ${sourceFilter === s.id ? "active" : ""} ${st === "failed" ? "failed" : ""}`}
+                            aria-pressed={sourceFilter === s.id}
+                            onClick={() => setSourceFilter(s.id)}
+                          >
+                            {(st === "searching" || st === "failed") && (
+                              <i aria-hidden="true" />
+                            )}
+                            {s.label}
+                            <span>
+                              {st === "searching"
+                                ? "搜索中"
+                                : tracks.filter((t) => t.source === s.id)
+                                    .length}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 )}
@@ -4897,6 +5046,25 @@ export function App() {
             </button>
           </div>
         </Modal>
+      )}
+      {showQuickSources && (
+        <QuickSourceModal
+          sources={sources}
+          fallbackSelectedKeys={enabledSearchSources.map((s) =>
+            sourceEngineKey(s),
+          )}
+          onClose={() => setShowQuickSources(false)}
+          onOpenFullSettings={() => {
+            setShowQuickSources(false);
+            openSettings("engine");
+          }}
+          onSaved={async (count) => {
+            const cfg = await api<Config>("/config");
+            setConfig(cfg);
+            setShowQuickSources(false);
+            setNotice(`已更新搜索音源（${count} 个）`);
+          }}
+        />
       )}
       {loginRequired && (
         <Modal

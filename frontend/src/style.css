@@ -7863,3 +7863,304 @@ tr.current {
     margin-left: 0;
   }
 }
+
+/* Source category filter bar, quick source modal, and search category chips */
+.source-filter-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+
+.source-filter-toolbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.source-filter-toolbar .plugin-search-field {
+  flex: 1 1 220px;
+  max-width: 320px;
+  min-width: 180px;
+}
+
+.source-filter-toolbar .plugin-search-field input,
+.settings-section .source-filter-toolbar .plugin-search-field input {
+  width: 100%;
+  height: 34px;
+  margin-top: 0;
+  padding: 0 28px 0 30px;
+  font-size: 12.5px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+:root[data-theme="dark"] .source-filter-toolbar .plugin-search-field input,
+:root[data-theme="dark"]
+  .settings-section
+  .source-filter-toolbar
+  .plugin-search-field
+  input {
+  background: var(--subtle);
+}
+
+.source-filter-toolbar .plugin-search-field input:focus-visible {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--soft);
+  outline: none;
+}
+
+.source-filter-toolbar .source-picker-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  flex: 1 1 280px;
+}
+
+.source-filter-toolbar .source-picker-actions button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.source-filter-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.source-filter-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--subtle);
+  border: 1px dashed var(--line);
+  margin-top: 8px;
+}
+
+.source-filter-empty > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  flex: none;
+}
+
+.source-filter-empty > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.source-filter-empty strong {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.source-filter-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.modal-dialog.quick-source-modal {
+  width: min(780px, 100%);
+}
+
+.quick-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  max-height: min(46dvh, 420px);
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.quick-source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    border-color 150ms,
+    background 150ms;
+}
+
+:root[data-theme="dark"] .quick-source-item {
+  background: var(--subtle);
+}
+
+.quick-source-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--hover);
+}
+
+.quick-source-item.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--soft) 55%, var(--surface));
+}
+
+:root[data-theme="dark"] .quick-source-item.is-selected {
+  background: color-mix(in srgb, var(--soft) 75%, var(--subtle));
+}
+
+.quick-source-item.has-error {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.quick-source-item input[type="checkbox"] {
+  margin: 2px 0 0;
+  flex: none;
+}
+
+.quick-source-item-body {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-source-item-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.quick-source-item-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.quick-source-item-error {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.quick-source-status,
+.quick-source-hint {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.quick-source-error {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.quick-source-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.quick-source-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.quick-source-full-link {
+  font-size: 12.5px;
+}
+
+.search-source-categories {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 8px;
+}
+
+.search-source-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.search-source-categories .plugin-archive-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .source-filter-toolbar .plugin-search-field {
+    max-width: none;
+    flex: 1 1 100%;
+  }
+
+  .source-filter-count {
+    margin-left: 0;
+  }
+
+  .modal-dialog.quick-source-modal {
+    padding: 20px 16px;
+  }
+
+  .quick-source-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: min(44dvh, 340px);
+  }
+
+  .quick-source-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .quick-source-footer-actions {
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .search-source-categories {
+    gap: 5px;
+    margin-bottom: 6px;
+  }
+
+  .search-source-categories .plugin-archive-chip {
+    padding: 3px 9px;
+    min-height: 26px;
+    font-size: 11.5px;
+  }
+}

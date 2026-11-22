@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Search } from "lucide-react";
 import { api } from "./api";
 import { PluginSettings } from "./PluginSettings";
-import { isPluginSource, sourceEngineKey } from "./plugin-utils";
+import {
+  SOURCE_FILTER_ALL,
+  SOURCE_FILTER_SELECTED,
+  availableSourceCategory,
+  filterAvailableSources,
+  isPluginSource,
+  selectOnlySourceKeys,
+  sourceEngineKey,
+} from "./plugin-utils";
 import { SourceDisclosure } from "./SourceDisclosure";
+import { SourceFilterBar } from "./SourceFilterBar";
 import type { AvailableSource } from "./types";
 
 type JsonObject = Record<string, unknown>;
@@ -31,7 +40,63 @@ export function EngineSettings({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [proxyQuery, setProxyQuery] = useState("");
+  const [proxyCategory, setProxyCategory] = useState(SOURCE_FILTER_ALL);
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceCategory, setSourceCategory] = useState(SOURCE_FILTER_ALL);
   const globalKeys = ["work_dir", "search_size_per_source"];
+
+  const availableCategories = useMemo(
+    () => new Set(sources.map((source) => availableSourceCategory(source))),
+    [sources],
+  );
+  const effectiveProxyCategory =
+    proxyCategory === SOURCE_FILTER_ALL ||
+    proxyCategory === SOURCE_FILTER_SELECTED ||
+    availableCategories.has(proxyCategory)
+      ? proxyCategory
+      : SOURCE_FILTER_ALL;
+  const effectiveSourceCategory =
+    sourceCategory === SOURCE_FILTER_ALL ||
+    sourceCategory === SOURCE_FILTER_SELECTED ||
+    availableCategories.has(sourceCategory)
+      ? sourceCategory
+      : SOURCE_FILTER_ALL;
+
+  useEffect(() => {
+    if (effectiveProxyCategory !== proxyCategory) {
+      setProxyCategory(SOURCE_FILTER_ALL);
+    }
+  }, [effectiveProxyCategory, proxyCategory]);
+
+  useEffect(() => {
+    if (effectiveSourceCategory !== sourceCategory) {
+      setSourceCategory(SOURCE_FILTER_ALL);
+    }
+  }, [effectiveSourceCategory, sourceCategory]);
+
+  const proxySources = config?.proxy_sources ?? [];
+  const musicSources = config?.music_sources ?? [];
+
+  const filteredProxySources = useMemo(
+    () =>
+      filterAvailableSources(sources, {
+        query: proxyQuery,
+        category: effectiveProxyCategory,
+        selectedKeys: proxySources,
+      }),
+    [sources, proxyQuery, effectiveProxyCategory, proxySources],
+  );
+
+  const filteredMusicSources = useMemo(
+    () =>
+      filterAvailableSources(sources, {
+        query: sourceQuery,
+        category: effectiveSourceCategory,
+        selectedKeys: musicSources,
+      }),
+    [sources, sourceQuery, effectiveSourceCategory, musicSources],
+  );
   function hydrate(raw: EngineConfig) {
     const globalCfg =
       raw?.global_client_cfg && typeof raw.global_client_cfg === "object"
@@ -286,60 +351,95 @@ export function EngineSettings({
             <SourceDisclosure
               summary={`代理音源 · 已选 ${config.proxy_sources.length} 个`}
             >
-              <div className="source-picker-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      proxy_sources: sources
-                        .filter((source) => source.proxy_recommended)
-                        .map((source) => sourceEngineKey(source)),
-                    })
-                  }
-                >
-                  选择推荐音源
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setConfig({ ...config, proxy_sources: [] })}
-                >
-                  清空代理选择
-                </button>
-                <span>{config.proxy_sources.length} 个音源使用全局代理</span>
-              </div>
-              <fieldset className="source-picker">
-                <legend>使用全局代理的音源</legend>
-                {sources.map((source) => {
-                  const name = sourceEngineKey(source);
-                  const pluginOrigin = isPluginSource(source);
-                  return (
-                    <label className="check-label" key={source.id}>
-                      <input
-                        type="checkbox"
-                        checked={config.proxy_sources.includes(name)}
-                        onChange={(e) =>
-                          setConfig({
-                            ...config,
-                            proxy_sources: e.target.checked
-                              ? [...config.proxy_sources, name]
-                              : config.proxy_sources.filter((v) => v !== name),
-                          })
-                        }
-                      />
-                      <span>{source.label}</span>
-                      <small
-                        className={`origin-badge ${pluginOrigin ? "is-plugin" : "is-builtin"}`}
-                      >
-                        {pluginOrigin ? "自定义插件" : "内置开放源"}
-                      </small>
-                      {source.proxy_recommended && <small>推荐代理</small>}
-                    </label>
-                  );
-                })}
-              </fieldset>
+              <SourceFilterBar
+                sources={sources}
+                selectedKeys={config.proxy_sources}
+                query={proxyQuery}
+                onQueryChange={setProxyQuery}
+                category={effectiveProxyCategory}
+                onCategoryChange={setProxyCategory}
+                filteredSources={filteredProxySources}
+                onSelectKeys={(next) =>
+                  setConfig({ ...config, proxy_sources: next })
+                }
+                selectedLabel="已选代理"
+                clearLabel="清空代理选择"
+                disabled={busy}
+                extraActions={
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      setConfig({
+                        ...config,
+                        proxy_sources: selectOnlySourceKeys(
+                          sources
+                            .filter((source) => source.proxy_recommended)
+                            .map((source) => sourceEngineKey(source)),
+                        ),
+                      })
+                    }
+                  >
+                    选择推荐音源
+                  </button>
+                }
+              />
+              {filteredProxySources.length ? (
+                <fieldset className="source-picker">
+                  <legend>使用全局代理的音源</legend>
+                  {filteredProxySources.map((source) => {
+                    const name = sourceEngineKey(source);
+                    const pluginOrigin = isPluginSource(source);
+                    return (
+                      <label className="check-label" key={source.id}>
+                        <input
+                          type="checkbox"
+                          checked={config.proxy_sources.includes(name)}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              proxy_sources: e.target.checked
+                                ? selectOnlySourceKeys([
+                                    ...config.proxy_sources,
+                                    name,
+                                  ])
+                                : config.proxy_sources.filter(
+                                    (v) => v !== name,
+                                  ),
+                            })
+                          }
+                        />
+                        <span>{source.label}</span>
+                        <small
+                          className={`origin-badge ${pluginOrigin ? "is-plugin" : "is-builtin"}`}
+                        >
+                          {pluginOrigin ? "自定义插件" : "内置开放源"}
+                        </small>
+                        {source.proxy_recommended && <small>推荐代理</small>}
+                      </label>
+                    );
+                  })}
+                </fieldset>
+              ) : (
+                <div className="source-filter-empty" role="status">
+                  <Search aria-hidden="true" />
+                  <div>
+                    <strong>没有符合筛选条件的代理音源</strong>
+                    <p>可以清空搜索词或切换分类，查看全部可用音源。</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setProxyQuery("");
+                      setProxyCategory(SOURCE_FILTER_ALL);
+                    }}
+                  >
+                    重置筛选
+                  </button>
+                </div>
+              )}
             </SourceDisclosure>
           )}
         </section>
@@ -348,151 +448,166 @@ export function EngineSettings({
           <SourceDisclosure
             summary={`搜索音源与账号 · 已选 ${config.music_sources.length} / ${sources.length} 个`}
           >
-            <div className="source-picker-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() =>
-                  setConfig({
-                    ...config,
-                    music_sources: sources.map((s) => sourceEngineKey(s)),
-                  })
-                }
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setConfig({ ...config, music_sources: [] })}
-              >
-                取消全选
-              </button>
-              <span>{config.music_sources.length} 个音源已选择</span>
-            </div>
-            <div className="source-settings-grid">
-              {sources.map((source) => {
-                const name = sourceEngineKey(source);
-                const pluginOrigin = isPluginSource(source);
-                return (
-                  <details key={source.id} className="source-setting">
-                    <summary>
-                      <span className="source-setting-heading">
-                        <span>{source.label}</span>
-                        <span
-                          className={`origin-badge ${pluginOrigin ? "is-plugin" : "is-builtin"}`}
-                        >
-                          {pluginOrigin ? "自定义插件" : "内置开放源"}
+            <SourceFilterBar
+              sources={sources}
+              selectedKeys={config.music_sources}
+              query={sourceQuery}
+              onQueryChange={setSourceQuery}
+              category={effectiveSourceCategory}
+              onCategoryChange={setSourceCategory}
+              filteredSources={filteredMusicSources}
+              onSelectKeys={(next) =>
+                setConfig({ ...config, music_sources: next })
+              }
+              selectedLabel="已启用"
+              disabled={busy}
+            />
+            {filteredMusicSources.length ? (
+              <div className="source-settings-grid">
+                {filteredMusicSources.map((source) => {
+                  const name = sourceEngineKey(source);
+                  const pluginOrigin = isPluginSource(source);
+                  return (
+                    <details key={source.id} className="source-setting">
+                      <summary>
+                        <span className="source-setting-heading">
+                          <span>{source.label}</span>
+                          <span
+                            className={`origin-badge ${pluginOrigin ? "is-plugin" : "is-builtin"}`}
+                          >
+                            {pluginOrigin ? "自定义插件" : "内置开放源"}
+                          </span>
+                          {source.category && (
+                            <span className="origin-badge">
+                              {source.category}
+                            </span>
+                          )}
+                          {pluginOrigin && source.version && (
+                            <span className="origin-badge">
+                              v{source.version}
+                            </span>
+                          )}
                         </span>
-                        {source.category && (
-                          <span className="origin-badge">
-                            {source.category}
-                          </span>
-                        )}
-                        {pluginOrigin && source.version && (
-                          <span className="origin-badge">
-                            v{source.version}
-                          </span>
-                        )}
-                      </span>
-                      <label
-                        className="check-label"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          aria-label={`启用 ${source.label}`}
-                          checked={config.music_sources.includes(name)}
+                        <label
+                          className="check-label"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`启用 ${source.label}`}
+                            checked={config.music_sources.includes(name)}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                music_sources: e.target.checked
+                                  ? selectOnlySourceKeys([
+                                      ...config.music_sources,
+                                      name,
+                                    ])
+                                  : config.music_sources.filter(
+                                      (v) => v !== name,
+                                    ),
+                              })
+                            }
+                          />
+                        </label>
+                      </summary>
+                      {source.description && (
+                        <p className="setting-help">{source.description}</p>
+                      )}
+                      {source.capability?.note && (
+                        <p className="setting-help" role="status">
+                          {source.capability.note}
+                        </p>
+                      )}
+                      {source.init_error && (
+                        <p className="setting-help" role="status">
+                          暂不可用：{source.init_error}。补全配置后再次保存。
+                        </p>
+                      )}
+                      {pluginOrigin && (
+                        <p className="setting-help">
+                          此音源由自定义 JS
+                          插件提供，插件专属参数与内网白名单请在下方「自定义 JS
+                          音源插件」面板配置。
+                        </p>
+                      )}
+                      <label className="field-xl">
+                        Cookie / API Key
+                        <textarea
+                          aria-label="Cookie"
+                          spellCheck={false}
+                          autoComplete="off"
+                          value={cookieText(config.cookies[name])}
                           onChange={(e) =>
                             setConfig({
                               ...config,
-                              music_sources: e.target.checked
-                                ? [...config.music_sources, name]
-                                : config.music_sources.filter(
-                                    (v) => v !== name,
-                                  ),
+                              cookies: {
+                                ...config.cookies,
+                                [name]: e.target.value,
+                              },
                             })
                           }
+                          placeholder="未配置；如 Jamendo 可填写 client_id=你的应用ID"
                         />
                       </label>
-                    </summary>
-                    {source.description && (
-                      <p className="setting-help">{source.description}</p>
-                    )}
-                    {source.capability?.note && (
-                      <p className="setting-help" role="status">
-                        {source.capability.note}
-                      </p>
-                    )}
-                    {source.init_error && (
-                      <p className="setting-help" role="status">
-                        暂不可用：{source.init_error}。补全配置后再次保存。
-                      </p>
-                    )}
-                    {pluginOrigin && (
-                      <p className="setting-help">
-                        此音源由自定义 JS
-                        插件提供，插件专属参数与内网白名单请在下方「自定义 JS
-                        音源插件」面板配置。
-                      </p>
-                    )}
-                    <label className="field-xl">
-                      Cookie / API Key
-                      <textarea
-                        aria-label="Cookie"
-                        spellCheck={false}
-                        autoComplete="off"
-                        value={cookieText(config.cookies[name])}
-                        onChange={(e) =>
-                          setConfig({
-                            ...config,
-                            cookies: {
-                              ...config.cookies,
-                              [name]: e.target.value,
-                            },
-                          })
-                        }
-                        placeholder="未配置；如 Jamendo 可填写 client_id=你的应用ID"
-                      />
-                    </label>
-                    <div className="field-row">
-                      <label className="field-sm">
-                        音源代理
-                        <select
-                          aria-label="音源代理"
-                          value={
-                            config.proxy_scope === "all" ||
-                            (config.proxy_scope === "selected" &&
-                              config.proxy_sources.includes(name))
-                              ? "project"
-                              : "direct"
-                          }
-                          onChange={(e) => {
-                            const selected =
-                              config.proxy_scope === "all"
-                                ? sources.map((s) => sourceEngineKey(s))
-                                : config.proxy_scope === "selected"
-                                  ? config.proxy_sources
-                                  : [];
-                            setConfig({
-                              ...config,
-                              proxy_scope: "selected",
-                              proxy_sources:
-                                e.target.value === "project"
-                                  ? [...new Set([...selected, name])]
-                                  : selected.filter((v) => v !== name),
-                            });
-                          }}
-                        >
-                          <option value="direct">不使用代理</option>
-                          <option value="project">使用项目代理</option>
-                        </select>
-                      </label>
-                    </div>
-                  </details>
-                );
-              })}
-            </div>
+                      <div className="field-row">
+                        <label className="field-sm">
+                          音源代理
+                          <select
+                            aria-label="音源代理"
+                            value={
+                              config.proxy_scope === "all" ||
+                              (config.proxy_scope === "selected" &&
+                                config.proxy_sources.includes(name))
+                                ? "project"
+                                : "direct"
+                            }
+                            onChange={(e) => {
+                              const selected =
+                                config.proxy_scope === "all"
+                                  ? sources.map((s) => sourceEngineKey(s))
+                                  : config.proxy_scope === "selected"
+                                    ? config.proxy_sources
+                                    : [];
+                              setConfig({
+                                ...config,
+                                proxy_scope: "selected",
+                                proxy_sources:
+                                  e.target.value === "project"
+                                    ? [...new Set([...selected, name])]
+                                    : selected.filter((v) => v !== name),
+                              });
+                            }}
+                          >
+                            <option value="direct">不使用代理</option>
+                            <option value="project">使用项目代理</option>
+                          </select>
+                        </label>
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="source-filter-empty" role="status">
+                <Search aria-hidden="true" />
+                <div>
+                  <strong>没有符合筛选条件的音源</strong>
+                  <p>可以清空搜索词或切换分类，查看全部可用音源。</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setSourceQuery("");
+                    setSourceCategory(SOURCE_FILTER_ALL);
+                  }}
+                >
+                  重置筛选
+                </button>
+              </div>
+            )}
           </SourceDisclosure>
         </section>
         <div className="settings-save settings-sticky-bar">
