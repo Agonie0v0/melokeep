@@ -65,6 +65,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -81,8 +83,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.ImageLoader
+import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
+import io.github.agonie0v0.melokeep.shared.MeloLocalLibraryController
+import io.github.agonie0v0.melokeep.shared.MeloSearchController
+import io.github.agonie0v0.melokeep.shared.MeloServerProfile
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
+import io.github.agonie0v0.melokeep.shared.MeloStudioController
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
 import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import kotlinx.coroutines.Dispatchers
@@ -188,29 +196,138 @@ private fun panelBottomPadding(nestedInSheet: Boolean) = if (nestedInSheet) 32.d
 // 1. 服务连接面板（MeloKeep / Navidrome）
 // =============================================================================
 
-@Composable
-internal fun SettingsMeloKeepConnectionPanel(
-	modifier: Modifier = Modifier,
-	nestedInSheet: Boolean = false
+internal class MeloServerConnectionFormState(
+	private val controller: MeloSettingsController,
+	private val focusManager: FocusManager,
+	private val deviceName: String,
+	private val refreshContext: () -> Unit,
+	private val addingNewServerState: androidx.compose.runtime.MutableState<Boolean>,
+	private val displayNameState: androidx.compose.runtime.MutableState<String>,
+	private val baseUrlState: androidx.compose.runtime.MutableState<String>,
+	private val usernameState: androidx.compose.runtime.MutableState<String>,
+	private val passwordState: androidx.compose.runtime.MutableState<String>,
+	private val passwordVisibleState: androidx.compose.runtime.MutableState<Boolean>,
+	internal val pendingNewProfileBaselineKeyState: androidx.compose.runtime.MutableState<String?>,
+	internal val awaitingEditLoginRefreshState: androidx.compose.runtime.MutableState<Boolean>,
 ) {
-	val controller = koinInject<MeloSettingsController>()
+	var addingNewServer: Boolean by addingNewServerState
+	var displayNameInput: String by displayNameState
+	var baseUrlInput: String by baseUrlState
+	var usernameInput: String by usernameState
+	var passwordInput: String by passwordState
+	var passwordVisible: Boolean by passwordVisibleState
+	var pendingNewProfileBaselineKey: String? by pendingNewProfileBaselineKeyState
+	var awaitingEditLoginRefresh: Boolean by awaitingEditLoginRefreshState
+	internal var suppressNextDisplayNameBlur: Boolean = false
+
+	fun startAddingNew() {
+		addingNewServer = true
+		pendingNewProfileBaselineKey = null
+		awaitingEditLoginRefresh = false
+		displayNameInput = ""
+		baseUrlInput = ""
+		usernameInput = ""
+		passwordInput = ""
+		controller.clearError()
+	}
+
+	fun cancelAddingNew(currentState: MeloSettingsUiState) {
+		val cfg = currentState.serverConfig
+		addingNewServer = false
+		pendingNewProfileBaselineKey = null
+		awaitingEditLoginRefresh = false
+		displayNameInput = cfg.displayName
+		baseUrlInput = cfg.baseUrl
+		usernameInput = cfg.username
+		passwordInput = ""
+		controller.clearError()
+	}
+
+	fun selectProfile(profile: MeloServerProfile, currentActiveProfileId: String?) {
+		val isDifferentProfile = profile.id != currentActiveProfileId
+		addingNewServer = false
+		pendingNewProfileBaselineKey = null
+		awaitingEditLoginRefresh = false
+		passwordInput = ""
+		displayNameInput = profile.config.displayName
+		baseUrlInput = profile.config.baseUrl
+		usernameInput = profile.config.username
+		controller.clearError()
+		if (isDifferentProfile) {
+			controller.switchProfile(profile.id)
+			refreshContext()
+		}
+	}
+
+	fun deleteProfile(profile: MeloServerProfile, currentActiveProfileId: String?) {
+		val deletingActive = profile.id == currentActiveProfileId
+		controller.deleteProfile(profile.id)
+		if (deletingActive) {
+			passwordInput = ""
+		}
+		refreshContext()
+	}
+
+	fun commitDisplayNameIfNeeded(currentState: MeloSettingsUiState) {
+		if (suppressNextDisplayNameBlur) {
+			suppressNextDisplayNameBlur = false
+			return
+		}
+		if (addingNewServer || currentState.activeProfileId == null || currentState.testingConnection) {
+			return
+		}
+		val trimmed = displayNameInput.trim()
+		if (trimmed != currentState.serverConfig.displayName) {
+			controller.updateDisplayName(trimmed)
+		}
+	}
+
+	fun submit(currentState: MeloSettingsUiState) {
+		if (baseUrlInput.isBlank() || currentState.testingConnection) return
+		suppressNextDisplayNameBlur = true
+		focusManager.clearFocus()
+		if (addingNewServer) {
+			pendingNewProfileBaselineKey = currentState.profiles.joinToString("\u0000") { it.id }
+			awaitingEditLoginRefresh = false
+		} else {
+			pendingNewProfileBaselineKey = null
+			awaitingEditLoginRefresh = true
+		}
+		controller.testAndLogin(
+			baseUrl = baseUrlInput,
+			username = usernameInput,
+			password = passwordInput,
+			deviceName = deviceName,
+			displayName = displayNameInput.trim(),
+			profileId = if (addingNewServer) null else currentState.activeProfileId,
+			createNew = addingNewServer
+		)
+	}
+}
+
+@Composable
+internal fun rememberMeloServerContextRefresher(): () -> Unit {
+	val localController = koinInject<MeloLocalLibraryController>()
+	val studioController = koinInject<MeloStudioController>()
+	val searchController = koinInject<MeloSearchController>()
+	val sessionManager = koinInject<SessionManager>()
+	return remember(localController, studioController, searchController, sessionManager) {
+		{
+			sessionManager.ttlLruCache.clear()
+			localController.refreshAll()
+			studioController.loadLibraryFiles(reset = true)
+			searchController.loadSources()
+		}
+	}
+}
+
+@Composable
+internal fun rememberMeloServerConnectionFormState(
+	controller: MeloSettingsController,
+	state: MeloSettingsUiState,
+): MeloServerConnectionFormState {
 	val focusManager = LocalFocusManager.current
-	val state by controller.state.collectAsStateWithLifecycle()
-	val serverConfig = state.serverConfig
-	val positiveColor = rememberThemePositiveColor()
-
-	var displayNameInput by rememberSaveable(serverConfig.displayName) {
-		mutableStateOf(serverConfig.displayName)
-	}
-	var baseUrlInput by rememberSaveable(serverConfig.baseUrl) {
-		mutableStateOf(serverConfig.baseUrl)
-	}
-	var usernameInput by rememberSaveable(serverConfig.username) {
-		mutableStateOf(serverConfig.username)
-	}
-	var passwordInput by rememberSaveable { mutableStateOf("") }
-	var passwordVisible by rememberSaveable { mutableStateOf(false) }
-
+	val refreshContext = rememberMeloServerContextRefresher()
 	val deviceName = remember {
 		listOf(Build.MANUFACTURER, Build.MODEL)
 			.map { it.trim() }
@@ -219,6 +336,630 @@ internal fun SettingsMeloKeepConnectionPanel(
 			.joinToString(" ")
 			.ifBlank { "MeloKeep Android" }
 	}
+	val serverConfig = state.serverConfig
+
+	val addingNewServerState = rememberSaveable { mutableStateOf(false) }
+	val displayNameState = rememberSaveable { mutableStateOf(serverConfig.displayName) }
+	val baseUrlState = rememberSaveable { mutableStateOf(serverConfig.baseUrl) }
+	val usernameState = rememberSaveable { mutableStateOf(serverConfig.username) }
+	val passwordState = rememberSaveable { mutableStateOf("") }
+	val passwordVisibleState = rememberSaveable { mutableStateOf(false) }
+	val pendingNewProfileBaselineKeyState = rememberSaveable { mutableStateOf<String?>(null) }
+	val awaitingEditLoginRefreshState = rememberSaveable { mutableStateOf(false) }
+
+	val formState = remember(
+		controller,
+		focusManager,
+		deviceName,
+		refreshContext,
+		addingNewServerState,
+		displayNameState,
+		baseUrlState,
+		usernameState,
+		passwordState,
+		passwordVisibleState,
+		pendingNewProfileBaselineKeyState,
+		awaitingEditLoginRefreshState
+	) {
+		MeloServerConnectionFormState(
+			controller = controller,
+			focusManager = focusManager,
+			deviceName = deviceName,
+			refreshContext = refreshContext,
+			addingNewServerState = addingNewServerState,
+			displayNameState = displayNameState,
+			baseUrlState = baseUrlState,
+			usernameState = usernameState,
+			passwordState = passwordState,
+			passwordVisibleState = passwordVisibleState,
+			pendingNewProfileBaselineKeyState = pendingNewProfileBaselineKeyState,
+			awaitingEditLoginRefreshState = awaitingEditLoginRefreshState
+		)
+	}
+
+	LaunchedEffect(
+		formState.addingNewServer,
+		state.activeProfileId,
+		serverConfig.baseUrl,
+		serverConfig.displayName,
+		serverConfig.username
+	) {
+		if (!formState.addingNewServer) {
+			formState.displayNameInput = serverConfig.displayName
+			formState.baseUrlInput = serverConfig.baseUrl
+			formState.usernameInput = serverConfig.username
+		}
+	}
+
+	LaunchedEffect(
+		state.testingConnection,
+		state.activeProfileId,
+		state.connectionMessage,
+		state.errorMessage
+	) {
+		if (state.testingConnection) return@LaunchedEffect
+
+		val baselineKey = formState.pendingNewProfileBaselineKey
+		if (baselineKey != null) {
+			val baselineIds = if (baselineKey.isEmpty()) {
+				emptySet()
+			} else {
+				baselineKey.split('\u0000').toSet()
+			}
+			val activeId = state.activeProfileId
+			if (activeId != null && activeId !in baselineIds) {
+				formState.pendingNewProfileBaselineKey = null
+				formState.addingNewServer = false
+				formState.passwordInput = ""
+				refreshContext()
+			} else if (!state.errorMessage.isNullOrBlank()) {
+				formState.pendingNewProfileBaselineKey = null
+			}
+		}
+
+		if (formState.awaitingEditLoginRefresh) {
+			if (!state.connectionMessage.isNullOrBlank() && state.errorMessage.isNullOrBlank()) {
+				formState.awaitingEditLoginRefresh = false
+				formState.passwordInput = ""
+				refreshContext()
+			} else if (!state.errorMessage.isNullOrBlank()) {
+				formState.awaitingEditLoginRefresh = false
+			}
+		}
+	}
+
+	return formState
+}
+
+@Composable
+internal fun MeloSavedServersCard(
+	profiles: List<MeloServerProfile>,
+	activeProfileId: String?,
+	addingNewServer: Boolean,
+	testingConnection: Boolean,
+	onToggleAddNew: () -> Unit,
+	onSelectProfile: (MeloServerProfile) -> Unit,
+	onDeleteProfile: (MeloServerProfile) -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	val positiveColor = rememberThemePositiveColor()
+	var pendingDeleteProfile by remember { mutableStateOf<MeloServerProfile?>(null) }
+
+	Column(
+		modifier = modifier,
+		verticalArrangement = Arrangement.spacedBy(8.dp)
+	) {
+		MeloSectionLabel(
+			title = "已保存服务 (${profiles.size})",
+			trailing = {
+				Surface(
+					onClick = onToggleAddNew,
+					enabled = !testingConnection,
+					shape = CircleShape,
+					color = if (addingNewServer) {
+						MaterialTheme.colorScheme.surfaceContainerHigh
+					} else {
+						MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+					},
+					border = BorderStroke(
+						MeloHairlineWidth,
+						if (addingNewServer) {
+							MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+						} else {
+							MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+						}
+					)
+				) {
+					Text(
+						text = if (addingNewServer) "取消新增" else "+ 添加新服务",
+						style = MaterialTheme.typography.labelMedium,
+						fontWeight = FontWeight.Medium,
+						color = if (addingNewServer) {
+							MaterialTheme.colorScheme.onSurfaceVariant
+						} else {
+							MaterialTheme.colorScheme.primary
+						},
+						modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+					)
+				}
+			}
+		)
+
+		MeloGroupedCard {
+			if (profiles.isEmpty()) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clickable(enabled = !testingConnection && !addingNewServer, onClick = onToggleAddNew)
+						.padding(horizontal = 16.dp, vertical = 14.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					Text(
+						text = if (addingNewServer) {
+							"正在新增服务，请在下方填写地址并测试添加"
+						} else {
+							"暂无已保存服务，连接后自动保存，也可点击右上角「+ 添加新服务」"
+						},
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
+				}
+			} else {
+				profiles.forEachIndexed { idx, profile ->
+					val isActive = profile.id == activeProfileId
+					val cfg = profile.config
+					val accountLabel = when {
+						!cfg.isAuthenticated -> "未认证"
+						cfg.authEnabled && cfg.username.isNotBlank() -> cfg.username
+						else -> "免密"
+					}
+					val rowBg = if (isActive && !addingNewServer) {
+						MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+					} else {
+						Color.Transparent
+					}
+
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.background(rowBg)
+							.clickable(enabled = !testingConnection) {
+								onSelectProfile(profile)
+							}
+							.padding(start = 16.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(12.dp)
+					) {
+						Box(
+							modifier = Modifier
+								.size(8.dp)
+								.clip(CircleShape)
+								.background(
+									when {
+										isActive && cfg.isAuthenticated -> positiveColor
+										isActive -> MaterialTheme.colorScheme.primary
+										cfg.isAuthenticated -> positiveColor.copy(alpha = 0.45f)
+										else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+									}
+								)
+						)
+						Column(
+							modifier = Modifier.weight(1f),
+							verticalArrangement = Arrangement.spacedBy(2.dp)
+						) {
+							Row(
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(6.dp)
+							) {
+								Text(
+									text = cfg.effectiveName,
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
+									color = if (isActive) {
+										MaterialTheme.colorScheme.primary
+									} else {
+										MaterialTheme.colorScheme.onSurface
+									},
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+									modifier = Modifier.weight(1f, fill = false)
+								)
+								if (isActive) {
+									Surface(
+										shape = CircleShape,
+										color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+									) {
+										Text(
+											text = "当前",
+											style = MaterialTheme.typography.labelSmall,
+											fontWeight = FontWeight.Medium,
+											color = MaterialTheme.colorScheme.primary,
+											modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+										)
+									}
+								}
+							}
+							Text(
+								text = listOfNotNull(
+									cfg.baseUrl.takeIf { it.isNotBlank() },
+									accountLabel
+								).joinToString(" · "),
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis
+							)
+						}
+						IconButton(
+							onClick = { pendingDeleteProfile = profile },
+							enabled = !testingConnection,
+							modifier = Modifier.size(34.dp)
+						) {
+							Icon(
+								imageVector = Icons.Outlined.Delete,
+								contentDescription = "删除服务器配置",
+								tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+								modifier = Modifier.size(18.dp)
+							)
+						}
+					}
+
+					if (idx < profiles.lastIndex) {
+						MeloHairlineDivider(startIndent = 16.dp)
+					}
+				}
+			}
+		}
+	}
+
+	pendingDeleteProfile?.let { target ->
+		AlertDialog(
+			onDismissRequest = { pendingDeleteProfile = null },
+			title = { Text("删除服务器配置") },
+			text = {
+				Text(
+					"确定删除「${target.config.effectiveName}」（${target.config.baseUrl.ifBlank { "未填写地址" }}）？"
+				)
+			},
+			confirmButton = {
+				TextButton(
+					onClick = {
+						val toDelete = target
+						pendingDeleteProfile = null
+						onDeleteProfile(toDelete)
+					}
+				) {
+					Text("删除", color = MaterialTheme.colorScheme.error)
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingDeleteProfile = null }) {
+					Text("取消")
+				}
+			}
+		)
+	}
+}
+
+@Composable
+internal fun MeloServerCredentialsSection(
+	state: MeloSettingsUiState,
+	formState: MeloServerConnectionFormState,
+	onRefreshConfig: () -> Unit,
+	onLogout: () -> Unit,
+	sectionTitle: String = "服务与凭据",
+	newSectionTitle: String = "添加新服务",
+	editSubmitLabel: String? = null,
+	showConnectionSummaryBanner: Boolean = false,
+	modifier: Modifier = Modifier,
+) {
+	val serverConfig = state.serverConfig
+	val positiveColor = rememberThemePositiveColor()
+	var displayNameHadFocus by remember { mutableStateOf(false) }
+
+	Column(
+		modifier = modifier,
+		verticalArrangement = Arrangement.spacedBy(8.dp)
+	) {
+		MeloSectionLabel(
+			title = if (formState.addingNewServer) newSectionTitle else sectionTitle,
+			trailing = {
+				if (formState.addingNewServer) {
+					Text(
+						text = "新增模式",
+						style = MaterialTheme.typography.labelSmall,
+						color = MaterialTheme.colorScheme.primary
+					)
+				} else {
+					Text(
+						text = if (serverConfig.isAuthenticated) "已连接" else "未连接",
+						style = MaterialTheme.typography.labelSmall,
+						color = if (serverConfig.isAuthenticated) {
+							positiveColor
+						} else {
+							MaterialTheme.colorScheme.onSurfaceVariant
+						}
+					)
+				}
+			}
+		)
+
+		MeloGroupedCard {
+			if (showConnectionSummaryBanner && !formState.addingNewServer) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clickable(enabled = serverConfig.isAuthenticated, onClick = onRefreshConfig)
+						.padding(horizontal = 16.dp, vertical = 13.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					Box(
+						modifier = Modifier
+							.size(8.dp)
+							.clip(CircleShape)
+							.background(
+								if (serverConfig.isAuthenticated) {
+									positiveColor
+								} else {
+									MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+								}
+							)
+					)
+					val desc = when {
+						!state.connectionMessage.isNullOrBlank() -> state.connectionMessage.orEmpty()
+						serverConfig.isAuthenticated && serverConfig.authEnabled ->
+							"${serverConfig.baseUrl} · ${serverConfig.username}"
+						serverConfig.isAuthenticated ->
+							"${serverConfig.baseUrl} · 免密"
+						else -> "未配置服务器地址"
+					}
+					Text(
+						text = desc,
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+						modifier = Modifier.weight(1f)
+					)
+				}
+
+				MeloHairlineDivider(startIndent = 16.dp)
+			}
+
+			Column(
+				modifier = Modifier.padding(16.dp),
+				verticalArrangement = Arrangement.spacedBy(10.dp)
+			) {
+				OutlinedTextField(
+					value = formState.displayNameInput,
+					onValueChange = { formState.displayNameInput = it },
+					singleLine = true,
+					modifier = Modifier
+						.fillMaxWidth()
+						.onFocusChanged { focusState ->
+							if (focusState.isFocused) {
+								displayNameHadFocus = true
+								formState.suppressNextDisplayNameBlur = false
+							} else if (displayNameHadFocus) {
+								displayNameHadFocus = false
+								formState.commitDisplayNameIfNeeded(state)
+							}
+						},
+					label = { Text("服务名称（可选，如 家里 NAS）") },
+					placeholder = { Text("默认显示 MeloKeep") },
+					keyboardOptions = KeyboardOptions(
+						autoCorrectEnabled = false,
+						imeAction = ImeAction.Next
+					),
+					shape = RoundedCornerShape(12.dp)
+				)
+
+				OutlinedTextField(
+					value = formState.baseUrlInput,
+					onValueChange = { formState.baseUrlInput = it },
+					singleLine = true,
+					modifier = Modifier.fillMaxWidth(),
+					label = { Text("服务器地址") },
+					placeholder = { Text("https://music.example.com 或 http://192.168.1.10:8765") },
+					keyboardOptions = KeyboardOptions(
+						autoCorrectEnabled = false,
+						keyboardType = KeyboardType.Uri,
+						imeAction = ImeAction.Next
+					),
+					shape = RoundedCornerShape(12.dp)
+				)
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(10.dp)
+				) {
+					OutlinedTextField(
+						value = formState.usernameInput,
+						onValueChange = { formState.usernameInput = it },
+						singleLine = true,
+						modifier = Modifier.weight(1f),
+						label = { Text("用户名（可选）") },
+						keyboardOptions = KeyboardOptions(
+							autoCorrectEnabled = false,
+							imeAction = ImeAction.Next
+						),
+						shape = RoundedCornerShape(12.dp)
+					)
+					OutlinedTextField(
+						value = formState.passwordInput,
+						onValueChange = { formState.passwordInput = it },
+						singleLine = true,
+						modifier = Modifier.weight(1f),
+						label = { Text("密码") },
+						visualTransformation = if (formState.passwordVisible) {
+							VisualTransformation.None
+						} else {
+							PasswordVisualTransformation()
+						},
+						trailingIcon = {
+							IconButton(onClick = { formState.passwordVisible = !formState.passwordVisible }) {
+								Icon(
+									imageVector = if (formState.passwordVisible) MeloIcons.VisibilityOff else MeloIcons.Visibility,
+									contentDescription = "切换密码可见性"
+								)
+							}
+						},
+						keyboardOptions = KeyboardOptions(
+							autoCorrectEnabled = false,
+							keyboardType = KeyboardType.Password,
+							imeAction = ImeAction.Done
+						),
+						keyboardActions = KeyboardActions(
+							onDone = {
+								if (formState.baseUrlInput.isNotBlank()) {
+									formState.submit(state)
+								}
+							}
+						),
+						shape = RoundedCornerShape(12.dp)
+					)
+				}
+
+				if (!state.errorMessage.isNullOrBlank()) {
+					Text(
+						text = state.errorMessage.orEmpty(),
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.error
+					)
+				} else if (!state.noticeMessage.isNullOrBlank()) {
+					Text(
+						text = state.noticeMessage.orEmpty(),
+						style = MaterialTheme.typography.bodySmall,
+						color = positiveColor
+					)
+				}
+
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(top = 2.dp),
+					horizontalArrangement = Arrangement.spacedBy(10.dp),
+					verticalAlignment = Alignment.CenterVertically
+				) {
+					val idleSubmitText = when {
+						formState.addingNewServer -> "测试并添加服务"
+						!editSubmitLabel.isNullOrBlank() -> editSubmitLabel
+						serverConfig.isAuthenticated -> "保存并重新认证"
+						else -> "连接并登录"
+					}
+					Button(
+						modifier = Modifier
+							.weight(1f)
+							.height(44.dp),
+						shape = RoundedCornerShape(12.dp),
+						enabled = !state.testingConnection && formState.baseUrlInput.isNotBlank(),
+						onClick = { formState.submit(state) }
+					) {
+						if (state.testingConnection) {
+							CircularProgressIndicator(
+								modifier = Modifier.size(16.dp),
+								strokeWidth = 2.dp,
+								color = MaterialTheme.colorScheme.onPrimary
+							)
+							Spacer(Modifier.width(8.dp))
+							Text("连接中…")
+						} else {
+							Text(idleSubmitText)
+						}
+					}
+
+					if (formState.addingNewServer) {
+						OutlinedButton(
+							onClick = { formState.cancelAddingNew(state) },
+							enabled = !state.testingConnection,
+							modifier = Modifier.height(44.dp),
+							shape = RoundedCornerShape(12.dp)
+						) {
+							Text("取消新增")
+						}
+					} else if (serverConfig.isAuthenticated) {
+						OutlinedButton(
+							onClick = {
+								formState.passwordInput = ""
+								onLogout()
+							},
+							modifier = Modifier.height(44.dp),
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(
+								MeloHairlineWidth,
+								MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+							),
+							colors = ButtonDefaults.outlinedButtonColors(
+								contentColor = MaterialTheme.colorScheme.error
+							)
+						) {
+							Icon(Icons.Outlined.Logout, null, modifier = Modifier.size(16.dp))
+							Spacer(Modifier.width(6.dp))
+							Text("退出")
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+internal fun MeloConnectionSecuritySection(
+	modifier: Modifier = Modifier,
+) {
+	val preferenceManager = koinInject<PreferenceManager>()
+	val meloApiClient = koinInject<MeloKeepApiClient>()
+	val sessionManager = koinInject<SessionManager>()
+	val exoStateHolder = koinInject<ExoStateHolder>()
+	val snackBarState = LocalSnackBarState.current
+	val scope = rememberCoroutineScope()
+
+	Column(
+		modifier = modifier,
+		verticalArrangement = Arrangement.spacedBy(8.dp)
+	) {
+		MeloSectionLabel(title = "连接安全选项")
+		MeloGroupedCard {
+			SettingsToggleRow(
+				title = "忽略自签名 SSL 证书",
+				subtitle = "反代域名使用自签证书或证书域名不匹配时开启",
+				checked = preferenceManager.dangerousSslNoopEnabled,
+				onCheckedChange = { checked ->
+					preferenceManager.dangerousSslNoopEnabled = checked
+					meloApiClient.refreshHttpClient()
+					sessionManager.refreshClient()
+					exoStateHolder.reloadNetworkDataSource()
+					scope.launch {
+						snackBarState.currentSnackbarData?.dismiss()
+						snackBarState.showSnackbar(
+							if (checked) {
+								"已开启忽略自签名 SSL 证书，网络客户端已刷新（若封面加载仍异常请重启应用）"
+							} else {
+								"已恢复系统 SSL 证书校验，网络客户端已刷新"
+							}
+						)
+					}
+				}
+			)
+		}
+	}
+}
+
+@Composable
+internal fun SettingsMeloKeepConnectionPanel(
+	modifier: Modifier = Modifier,
+	nestedInSheet: Boolean = false
+) {
+	val controller = koinInject<MeloSettingsController>()
+	val state by controller.state.collectAsStateWithLifecycle()
+	val serverConfig = state.serverConfig
+	val formState = rememberMeloServerConnectionFormState(
+		controller = controller,
+		state = state
+	)
 
 	LaunchedEffect(serverConfig.isAuthenticated) {
 		if (serverConfig.isAuthenticated) {
@@ -243,193 +984,39 @@ internal fun SettingsMeloKeepConnectionPanel(
 		),
 		verticalArrangement = Arrangement.spacedBy(18.dp)
 	) {
-		item(key = "melokeep-connection") {
-			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				MeloSectionLabel(
-					title = "服务与凭据",
-					trailing = {
-						Text(
-							text = if (serverConfig.isAuthenticated) "已连接" else "未连接",
-							style = MaterialTheme.typography.labelSmall,
-							color = if (serverConfig.isAuthenticated) {
-								positiveColor
-							} else {
-								MaterialTheme.colorScheme.onSurfaceVariant
-							}
-						)
+		item(key = "melokeep-saved-profiles") {
+			MeloSavedServersCard(
+				profiles = state.profiles,
+				activeProfileId = state.activeProfileId,
+				addingNewServer = formState.addingNewServer,
+				testingConnection = state.testingConnection,
+				onToggleAddNew = {
+					if (formState.addingNewServer) {
+						formState.cancelAddingNew(state)
+					} else {
+						formState.startAddingNew()
 					}
-				)
-				MeloGroupedCard {
-					Column(
-						modifier = Modifier.padding(16.dp),
-						verticalArrangement = Arrangement.spacedBy(10.dp)
-					) {
-						OutlinedTextField(
-							value = displayNameInput,
-							onValueChange = {
-								displayNameInput = it
-								controller.updateDisplayName(it.trim())
-							},
-							singleLine = true,
-							modifier = Modifier.fillMaxWidth(),
-							label = { Text("服务名称（可选，如 家里 NAS）") },
-							placeholder = { Text("默认显示 MeloKeep") },
-							keyboardOptions = KeyboardOptions(
-								autoCorrectEnabled = false,
-								imeAction = ImeAction.Next
-							),
-							shape = RoundedCornerShape(12.dp)
-						)
-
-						OutlinedTextField(
-							value = baseUrlInput,
-							onValueChange = { baseUrlInput = it },
-							singleLine = true,
-							modifier = Modifier.fillMaxWidth(),
-							label = { Text("服务器地址") },
-							placeholder = { Text("http://192.168.1.10:8765") },
-							keyboardOptions = KeyboardOptions(
-								autoCorrectEnabled = false,
-								keyboardType = KeyboardType.Uri,
-								imeAction = ImeAction.Next
-							),
-							shape = RoundedCornerShape(12.dp)
-						)
-
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(10.dp)
-						) {
-							OutlinedTextField(
-								value = usernameInput,
-								onValueChange = { usernameInput = it },
-								singleLine = true,
-								modifier = Modifier.weight(1f),
-								label = { Text("用户名（可选）") },
-								keyboardOptions = KeyboardOptions(
-									autoCorrectEnabled = false,
-									imeAction = ImeAction.Next
-								),
-								shape = RoundedCornerShape(12.dp)
-							)
-							OutlinedTextField(
-								value = passwordInput,
-								onValueChange = { passwordInput = it },
-								singleLine = true,
-								modifier = Modifier.weight(1f),
-								label = { Text("密码") },
-								visualTransformation = if (passwordVisible) {
-									VisualTransformation.None
-								} else {
-									PasswordVisualTransformation()
-								},
-								trailingIcon = {
-									IconButton(onClick = { passwordVisible = !passwordVisible }) {
-										Icon(
-											imageVector = if (passwordVisible) MeloIcons.VisibilityOff else MeloIcons.Visibility,
-											contentDescription = "切换密码可见性"
-										)
-									}
-								},
-								keyboardOptions = KeyboardOptions(
-									autoCorrectEnabled = false,
-									keyboardType = KeyboardType.Password,
-									imeAction = ImeAction.Done
-								),
-								keyboardActions = KeyboardActions(
-									onDone = {
-										focusManager.clearFocus()
-										if (baseUrlInput.isNotBlank()) {
-											controller.testAndLogin(
-												baseUrl = baseUrlInput,
-												username = usernameInput,
-												password = passwordInput,
-												deviceName = deviceName,
-												displayName = displayNameInput.trim()
-											)
-										}
-									}
-								),
-								shape = RoundedCornerShape(12.dp)
-							)
-						}
-
-						if (!state.errorMessage.isNullOrBlank()) {
-							Text(
-								text = state.errorMessage.orEmpty(),
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.error
-							)
-						} else if (!state.noticeMessage.isNullOrBlank()) {
-							Text(
-								text = state.noticeMessage.orEmpty(),
-								style = MaterialTheme.typography.bodySmall,
-								color = positiveColor
-							)
-						}
-
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(top = 2.dp),
-							horizontalArrangement = Arrangement.spacedBy(10.dp),
-							verticalAlignment = Alignment.CenterVertically
-						) {
-							Button(
-								modifier = Modifier
-									.weight(1f)
-									.height(44.dp),
-								shape = RoundedCornerShape(12.dp),
-								enabled = !state.testingConnection && baseUrlInput.isNotBlank(),
-								onClick = {
-									focusManager.clearFocus()
-									controller.testAndLogin(
-										baseUrl = baseUrlInput,
-										username = usernameInput,
-										password = passwordInput,
-										deviceName = deviceName,
-										displayName = displayNameInput.trim()
-									)
-								}
-							) {
-								if (state.testingConnection) {
-									CircularProgressIndicator(
-										modifier = Modifier.size(16.dp),
-										strokeWidth = 2.dp,
-										color = MaterialTheme.colorScheme.onPrimary
-									)
-									Spacer(Modifier.width(8.dp))
-									Text("连接中…")
-								} else {
-									Text(if (serverConfig.isAuthenticated) "保存并重新认证" else "连接并登录")
-								}
-							}
-
-							if (serverConfig.isAuthenticated) {
-								OutlinedButton(
-									onClick = {
-										passwordInput = ""
-										controller.logout()
-									},
-									modifier = Modifier.height(44.dp),
-									shape = RoundedCornerShape(12.dp),
-									border = BorderStroke(
-										MeloHairlineWidth,
-										MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-									),
-									colors = ButtonDefaults.outlinedButtonColors(
-										contentColor = MaterialTheme.colorScheme.error
-									)
-								) {
-									Icon(Icons.Outlined.Logout, null, modifier = Modifier.size(16.dp))
-									Spacer(Modifier.width(6.dp))
-									Text("退出")
-								}
-							}
-						}
-					}
+				},
+				onSelectProfile = { profile ->
+					formState.selectProfile(profile, state.activeProfileId)
+				},
+				onDeleteProfile = { profile ->
+					formState.deleteProfile(profile, state.activeProfileId)
 				}
-			}
+			)
+		}
+
+		item(key = "melokeep-connection") {
+			MeloServerCredentialsSection(
+				state = state,
+				formState = formState,
+				onRefreshConfig = controller::loadConfig,
+				onLogout = controller::logout
+			)
+		}
+
+		item(key = "melokeep-connection-security") {
+			MeloConnectionSecuritySection()
 		}
 
 		if (serverConfig.isAuthenticated && state.devices.isNotEmpty()) {
@@ -523,6 +1110,7 @@ internal fun SettingsNavidromeConnectionPanel(
 	val permissionManager = koinInject<PermissionManager>()
 	val preferenceManager = koinInject<PreferenceManager>()
 	val exoStateHolder = koinInject<ExoStateHolder>()
+	val meloApiClient = koinInject<MeloKeepApiClient>()
 	val focusManager = LocalFocusManager.current
 	val scope = rememberCoroutineScope()
 	val positiveColor = rememberThemePositiveColor()
@@ -861,6 +1449,7 @@ internal fun SettingsNavidromeConnectionPanel(
 							onValueChange = {
 								customHeadersInput = it
 								preferenceManager.customHeaders = it
+								meloApiClient.refreshHttpClient()
 								sessionManager.refreshClient()
 								exoStateHolder.reloadNetworkDataSource()
 							},
@@ -878,6 +1467,7 @@ internal fun SettingsNavidromeConnectionPanel(
 								proxyUrlInput = it
 								if (it.isBlank() || PROXY_URL_REGEX.matches(it)) {
 									preferenceManager.proxyUrl = it
+									meloApiClient.refreshHttpClient()
 									sessionManager.refreshClient()
 									exoStateHolder.reloadNetworkDataSource()
 								}
@@ -903,6 +1493,7 @@ internal fun SettingsNavidromeConnectionPanel(
 						checked = preferenceManager.dangerousSslNoopEnabled,
 						onCheckedChange = { checked ->
 							preferenceManager.dangerousSslNoopEnabled = checked
+							meloApiClient.refreshHttpClient()
 							sessionManager.refreshClient()
 							exoStateHolder.reloadNetworkDataSource()
 						}

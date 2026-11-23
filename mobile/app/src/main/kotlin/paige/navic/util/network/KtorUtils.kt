@@ -50,14 +50,19 @@ fun buildOkHttpConfig(
 	proxyUrl: String? = null,
 	trustAllCerts: Boolean = false,
 	dnsResolver: Dns? = null,
-	customHeaders: Map<String, String>? = null
+	customHeaders: Map<String, String>? = null,
+	connectTimeoutSeconds: Long = 3L,
+	readTimeoutSeconds: Long? = null
 ): OkHttpClient.Builder {
 	return OkHttpClient.Builder().apply {
 		proxyUrl?.let {
 			proxy(extractProxyConfigFromUrl(it))
 		}
 
-		connectTimeout(3, TimeUnit.SECONDS)
+		connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
+		if (readTimeoutSeconds != null) {
+			readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+		}
 
 		if (trustAllCerts) {
 			val noopTrustManager = NoopTrustManager()
@@ -66,6 +71,7 @@ fun buildOkHttpConfig(
 			)?.let {
 				sslSocketFactory(it, noopTrustManager)
 			}
+			hostnameVerifier { _, _ -> true }
 		}
 
 		dnsResolver?.let {
@@ -94,13 +100,17 @@ fun createOkHttpClient(
 	proxyUrl: String?,
 	trustAllCerts: Boolean,
 	dnsResolver: Dns? = null,
-	customHeaders: Map<String, String>? = null
+	customHeaders: Map<String, String>? = null,
+	connectTimeoutSeconds: Long = 3L,
+	readTimeoutSeconds: Long? = null
 ): OkHttpClient {
 	return buildOkHttpConfig(
-		proxyUrl,
-		trustAllCerts,
-		dnsResolver,
-		customHeaders
+		proxyUrl = proxyUrl,
+		trustAllCerts = trustAllCerts,
+		dnsResolver = dnsResolver,
+		customHeaders = customHeaders,
+		connectTimeoutSeconds = connectTimeoutSeconds,
+		readTimeoutSeconds = readTimeoutSeconds
 	).build()
 }
 

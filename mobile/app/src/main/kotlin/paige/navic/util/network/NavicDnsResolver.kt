@@ -99,14 +99,12 @@ class NavicDnsResolver(
 			}
 
 			val localResolution = lookupResult.firstOrNull { it.isLocalOrPrivate() }
-			val localHost = hostMap[localResolution?.hostAddress]
+			val localHost = localResolution?.hostAddress?.let(hostMap::get)
 
-			val scheme = localHost?.extractScheme() ?: "http"
-			val port = localHost?.extractPort()
-
-			val newUrl = request.url.newBuilder().build(scheme, port)
-
-			if (localResolution != null) {
+			if (localResolution != null && localHost != null) {
+				val scheme = localHost.extractScheme() ?: "http"
+				val port = localHost.extractPort()
+				val newUrl = request.url.newBuilder().build(scheme, port)
 				request = request.newBuilder().url(newUrl).build()
 			}
 

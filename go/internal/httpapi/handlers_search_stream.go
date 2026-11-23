@@ -1441,6 +1441,10 @@ func (s *Server) handleCollectionCreate(w http.ResponseWriter, r *http.Request) 
 			tracks = append(tracks, dto)
 		}
 	}
+	if len(req.TrackIDs) > 0 && len(validRefs) == 0 {
+		writeError(w, http.StatusNotFound, "曲目不存在或已失效，无法创建并加入歌单")
+		return
+	}
 	source := "custom"
 	if len(tracks) > 0 && tracks[0].Source != "" {
 		source = tracks[0].Source
@@ -1519,15 +1523,28 @@ func (s *Server) handleCollectionAddTracks(w http.ResponseWriter, r *http.Reques
 	for _, it := range items {
 		existing[it.PublicID] = true
 	}
+	seen := make(map[string]bool, len(req.TrackIDs))
 	var toAdd []string
+	alreadyInCount := 0
+	missingCount := 0
 	for _, tid := range req.TrackIDs {
+		if seen[tid] {
+			continue
+		}
+		seen[tid] = true
 		if existing[tid] {
+			alreadyInCount++
 			continue
 		}
 		if _, found, lErr := s.loadTrackDTO(r.Context(), tid); lErr == nil && found {
-			existing[tid] = true
 			toAdd = append(toAdd, tid)
+		} else {
+			missingCount++
 		}
+	}
+	if len(req.TrackIDs) > 0 && len(toAdd) == 0 && alreadyInCount == 0 && missingCount > 0 {
+		writeError(w, http.StatusNotFound, "曲目不存在或已失效，无法加入歌单")
+		return
 	}
 	if len(toAdd) > 0 && len(items)+len(toAdd) > 3000 {
 		toAdd = toAdd[:3000-len(items)]
@@ -1545,7 +1562,11 @@ func (s *Server) handleCollectionAddTracks(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	dto := s.buildSavedPlaylistDTO(r.Context(), col, items)
-	dto.Detail = fmt.Sprintf("已向歌单“%s”加入 %d 首曲目，共 %d 首。", col.Name, len(toAdd), len(dto.Tracks))
+	if len(toAdd) == 0 && alreadyInCount > 0 {
+		dto.Detail = fmt.Sprintf("所选曲目已在歌单“%s”中，共 %d 首。", col.Name, len(dto.Tracks))
+	} else {
+		dto.Detail = fmt.Sprintf("已向歌单“%s”加入 %d 首曲目，共 %d 首。", col.Name, len(toAdd), len(dto.Tracks))
+	}
 	s.pushLog("info", dto.Detail, "playlist", ident)
 	writeJSON(w, http.StatusOK, dto)
 }

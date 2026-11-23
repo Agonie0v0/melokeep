@@ -101,8 +101,10 @@ fun NowPlayingMoreButton(
 				onShare = {
 					shareId = song.id
 				},
-				onAddToPlaylist = {
-					playlistDialogShown = true
+				onAddToPlaylist = if (!song.id.startsWith("device:") && !song.id.startsWith("radio_")) {
+					{ playlistDialogShown = true }
+				} else {
+					null
 				},
 				onTrackInfo = dropUnlessResumed {
 					expanded = false

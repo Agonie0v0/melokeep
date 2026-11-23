@@ -89,12 +89,16 @@ val viewModelModule = module {
 		)
 	}
 
-	viewModel { (songIds: List<String>, playlistToExclude: String?) ->
+	viewModel { params ->
 		PlaylistUpdateDialogViewModel(
-			songIds = songIds,
-			playlistToExclude = playlistToExclude,
+			songIds = params.get(),
+			playlistToExclude = params.getOrNull(),
 			sessionManager = get(),
-			snackBarManager = get()
+			snackBarManager = get(),
+			meloApiClient = get(),
+			meloSettingsStore = get(),
+			meloLocalController = get(),
+			playlistDao = get()
 		)
 	}
 
@@ -142,12 +146,16 @@ val viewModelModule = module {
 	viewModelOf(::ShareListViewModel)
 	viewModelOf(::DeletionViewModel)
 	viewModelOf(::ShareDialogViewModel)
-	viewModel { (songIds: List<String>) ->
+	viewModel { params ->
 		PlaylistCreateDialogViewModel(
-			songIds = songIds,
+			songIds = params.get(),
+			targetBackend = params.getOrNull(),
 			playlistDao = get(),
 			sessionManager = get(),
-			snackBarManager = get()
+			snackBarManager = get(),
+			meloApiClient = get(),
+			meloSettingsStore = get(),
+			meloLocalController = get()
 		)
 	}
 	viewModel { params ->

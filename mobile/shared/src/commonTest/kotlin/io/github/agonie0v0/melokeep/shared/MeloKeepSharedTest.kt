@@ -3126,6 +3126,338 @@ class MeloKeepSharedTest {
 			}
 		}
 	}
+
+	@Test
+	fun normalizeBaseUrlNormalizesDomainsLanUrlsSubpathsAndArtifacts() {
+		assertEquals("", MeloSettingsStore.normalizeBaseUrl(""))
+		assertEquals("", MeloSettingsStore.normalizeBaseUrl("   \n\t  "))
+		assertEquals("", MeloSettingsStore.normalizeBaseUrl("https://"))
+		assertEquals("", MeloSettingsStore.normalizeBaseUrl("/login"))
+
+		// Plain domains default to https:// while preserving path case
+		assertEquals("https://melo.example.com", MeloSettingsStore.normalizeBaseUrl("melo.example.com"))
+		assertEquals("https://melo.example.com/Music", MeloSettingsStore.normalizeBaseUrl("Melo.Example.COM/Music/"))
+		assertEquals("https://melo.example.com:443", MeloSettingsStore.normalizeBaseUrl("melo.example.com:443/"))
+
+		// LAN / IP / localhost / non-443 ports default to http://
+		assertEquals("http://192.168.31.15:8765", MeloSettingsStore.normalizeBaseUrl("192.168.31.15:8765/"))
+		assertEquals("http://192.168.1.10", MeloSettingsStore.normalizeBaseUrl("192.168.1.10"))
+		assertEquals("http://[::1]", MeloSettingsStore.normalizeBaseUrl("[::1]"))
+		assertEquals("http://[::1]:8765", MeloSettingsStore.normalizeBaseUrl("[::1]:8765/"))
+		assertEquals("http://localhost", MeloSettingsStore.normalizeBaseUrl("localhost"))
+		assertEquals("http://localhost:8765", MeloSettingsStore.normalizeBaseUrl("localhost:8765/"))
+		assertEquals("http://nas.local", MeloSettingsStore.normalizeBaseUrl("nas.local/"))
+		assertEquals("http://music.lan", MeloSettingsStore.normalizeBaseUrl("music.lan"))
+		assertEquals("http://box.example.com:8765", MeloSettingsStore.normalizeBaseUrl("box.example.com:8765"))
+		assertEquals("http://example.com:80", MeloSettingsStore.normalizeBaseUrl("example.com:80"))
+
+		// Cleans full-width punctuation, control chars, query, fragment, and trailing web/health suffixes
+		assertEquals(
+			"http://192.168.31.15:8765",
+			MeloSettingsStore.normalizeBaseUrl(" 192.168.31.15：8765／index.html?foo=1#top \n"),
+		)
+		assertEquals(
+			"https://melo.example.com/MeloKeep",
+			MeloSettingsStore.normalizeBaseUrl("HTTPS://Melo.Example.COM/MeloKeep/LOGIN/?next=/#sec"),
+		)
+		assertEquals(
+			"https://melo.example.com/subPath",
+			MeloSettingsStore.normalizeBaseUrl("melo.example.com/subPath/API/Health?v=2"),
+		)
+		assertEquals(
+			"http://melo.example.com/melokeep",
+			MeloSettingsStore.normalizeBaseUrl("http：//melo.example.com／melokeep／Index.html"),
+		)
+	}
+
+	@Test
+	fun probeServerHandlesHttpsFallbackRedirectsHtmlAndDiagnostics() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+
+		// 1. Plain domain: HTTPS fails with connection error -> auto-falls back to HTTP
+		val fallbackRequests = mutableListOf<String>()
+		val fallbackEngine = MockEngine { request ->
+			val url = request.url.toString()
+			fallbackRequests += url
+			when (url) {
+				"https://vps.example.com/api/health" -> throw RuntimeException("Connection refused")
+				"http://vps.example.com/api/health" -> respond(
+					content = """{"ok":true,"backend":"go","version":"1.5.0","sources":6}""",
+					status = HttpStatusCode.OK,
+					headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+				)
+				else -> respond("{}", HttpStatusCode.NotFound)
+			}
+		}
+		val fallbackClient = MeloKeepApiClient(store, fallbackEngine)
+		val fallbackProbe = fallbackClient.probeServer("vps.example.com")
+		assertEquals("http://vps.example.com", fallbackProbe.resolvedBaseUrl)
+		assertEquals("1.5.0", fallbackProbe.health.version)
+		assertEquals(
+			listOf("https://vps.example.com/api/health", "http://vps.example.com/api/health"),
+			fallbackRequests,
+		)
+		fallbackClient.close()
+
+		// 2. HTTP 301 redirect to HTTPS subpath -> resolvedBaseUrl becomes https://.../melokeep
+		val redirectEngine = MockEngine { request ->
+			val url = request.url.toString()
+			when (url) {
+				"http://proxy.example.com/api/health" -> respond(
+					content = "",
+					status = HttpStatusCode.MovedPermanently,
+					headers = headersOf(HttpHeaders.Location, "https://proxy.example.com/MeloKeep/api/health"),
+				)
+				"https://proxy.example.com/MeloKeep/api/health" -> respond(
+					content = """{"ok":true,"version":"1.6.0","sources":5}""",
+					status = HttpStatusCode.OK,
+					headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+				)
+				else -> respond("{}", HttpStatusCode.NotFound)
+			}
+		}
+		val redirectClient = MeloKeepApiClient(store, redirectEngine)
+		val redirectProbe = redirectClient.probeServer("http://proxy.example.com")
+		assertEquals("https://proxy.example.com/MeloKeep", redirectProbe.resolvedBaseUrl)
+		assertEquals("1.6.0", redirectProbe.health.version)
+		redirectClient.close()
+
+		// 3. HTML response throws clear Chinese diagnostic without downgrading to HTTP
+		var htmlFallbackAttempted = false
+		val htmlEngine = MockEngine { request ->
+			if (request.url.toString().startsWith("http://")) {
+				htmlFallbackAttempted = true
+			}
+			respond(
+				content = "<!DOCTYPE html><html><head><title>Login</title></head><body>Web UI</body></html>",
+				status = HttpStatusCode.OK,
+				headers = headersOf(HttpHeaders.ContentType, ContentType.Text.Html.toString()),
+			)
+		}
+		val htmlClient = MeloKeepApiClient(store, htmlEngine)
+		val htmlErr = assertFailsWith<MeloApiException> {
+			htmlClient.probeServer("spa.example.com")
+		}
+		assertFalse(htmlFallbackAttempted)
+		assertTrue(htmlErr.message.contains("返回的是网页而非 MeloKeep API"))
+		assertTrue(htmlErr.message.contains("https://spa.example.com/api/health"))
+		htmlClient.close()
+
+		// 4. All candidates fail -> keeps primary candidate's SSL/TLS diagnostic error
+		val sslEngine = MockEngine { request ->
+			val url = request.url.toString()
+			if (url.startsWith("https://")) {
+				throw RuntimeException("javax.net.ssl.SSLHandshakeException: PKIX path building failed")
+			} else {
+				throw RuntimeException("Connection refused")
+			}
+		}
+		val sslClient = MeloKeepApiClient(store, sslEngine)
+		val sslErr = assertFailsWith<MeloApiException> {
+			sslClient.probeServer("selfsigned.example.com")
+		}
+		assertTrue(sslErr.message.contains("HTTPS 证书校验失败"))
+		assertTrue(sslErr.message.contains("https://selfsigned.example.com/api/health"))
+		sslClient.close()
+
+		// 5. Case-insensitive baseUrl prefix handling in resolveMediaUrl + refreshHttpClient with factory
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "u",
+			bearerToken = "b",
+			tokenId = "t",
+			mediaToken = "mtok",
+			mediaTokenExpiresAt = 1900000000L,
+			authEnabled = true,
+		)
+		var engineCreateCount = 0
+		val factoryClient = MeloKeepApiClient(
+			settingsStore = store,
+			httpClientEngineFactory = {
+				engineCreateCount++
+				MockEngine {
+					respond(
+						content = """{"ok":true,"version":"1.0.0","sources":1}""",
+						status = HttpStatusCode.OK,
+						headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+					)
+				}
+			},
+		)
+		assertEquals(
+			"HTTPS://MELO.EXAMPLE.COM/api/stream/trk-1?media_token=mtok",
+			factoryClient.resolveMediaUrl("HTTPS://MELO.EXAMPLE.COM/api/stream/trk-1"),
+		)
+		assertEquals(1, engineCreateCount)
+		factoryClient.refreshHttpClient()
+		assertEquals(2, engineCreateCount)
+		assertTrue(factoryClient.health().ok)
+		factoryClient.close()
+	}
+
+	@Test
+	fun loginFollowsRedirectsAndPersistsResolvedHttpsBaseUrl() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		val postUrls = mutableListOf<String>()
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+
+		val engine = MockEngine { request ->
+			val url = request.url.toString()
+			if (request.method == HttpMethod.Post) {
+				postUrls += url
+			}
+			when (url) {
+				"http://vps.example.com/api/auth/login" -> respond(
+					content = "",
+					status = HttpStatusCode.MovedPermanently,
+					headers = headersOf(HttpHeaders.Location, "https://vps.example.com/api/auth/login"),
+				)
+				"https://vps.example.com/api/auth/login" -> respond(
+					content = """{"success":true,"auth_enabled":true,"token":"vps-tok","token_id":"tid-vps","media_token":"mt-vps","media_token_expires_at":1900000000}""",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val resp = client.login(
+			baseUrl = "http://vps.example.com",
+			username = "admin",
+			password = "secret",
+			displayName = "VPS 音乐盒",
+		)
+		assertTrue(resp.success)
+		assertEquals(
+			listOf("http://vps.example.com/api/auth/login", "https://vps.example.com/api/auth/login"),
+			postUrls,
+		)
+		assertEquals("https://vps.example.com", store.currentConfig().baseUrl)
+		assertEquals("vps-tok", store.currentConfig().bearerToken)
+		assertEquals("VPS 音乐盒", store.currentConfig().displayName)
+		assertEquals(1, store.profiles.value.size)
+		assertEquals("https://vps.example.com", store.profiles.value.single().config.baseUrl)
+		client.close()
+	}
+
+	@Test
+	fun settingsStoreAndControllerSupportMigrationAndMultiProfileSwitching() = runTest {
+		// 1. Auto-migration from legacy flat keys
+		val backing = InMemorySettings()
+		backing.putString("melokeep.base_url", "192.168.1.5:8765/")
+		backing.putString("melokeep.username", "nas-user")
+		backing.putString("melokeep.bearer_token", "tok-nas")
+		backing.putString("melokeep.token_id", "tid-nas")
+		backing.putString("melokeep.media_token", "mt-nas")
+		backing.putLong("melokeep.media_token_expires_at", 1900000000L)
+		backing.putBoolean("melokeep.enabled", true)
+		backing.putBoolean("melokeep.auth_enabled", true)
+		backing.putString("melokeep.display_name", "家里 NAS")
+
+		val store = MeloSettingsStore(backing)
+		assertEquals(1, store.profiles.value.size)
+		assertEquals("default", store.activeProfileId.value)
+		assertEquals("http://192.168.1.5:8765", store.currentConfig().baseUrl)
+		assertEquals("家里 NAS", store.currentConfig().displayName)
+		assertTrue(backing.hasKey(MeloSettingsStore.KEY_SERVER_PROFILES))
+		assertEquals("default", backing.getString(MeloSettingsStore.KEY_ACTIVE_PROFILE_ID, ""))
+
+		// 2. Controller adds a second server profile with createNew = true without overwriting the first
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+		val engine = MockEngine { request ->
+			val host = request.url.host
+			val path = request.url.encodedPath
+			when {
+				path == "/api/health" && host == "vps.example.com" -> respond(
+					"""{"ok":true,"version":"2.0.0","sources":8}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				path == "/api/auth/login" && host == "vps.example.com" -> respond(
+					"""{"success":true,"auth_enabled":true,"token":"tok-vps","token_id":"tid-vps","media_token":"mt-vps","media_token_expires_at":1950000000}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				path == "/api/config" && host == "vps.example.com" -> respond(
+					"""{"sources":["AudiusMusicClient"],"available_sources":[],"results_per_source":30}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				path == "/api/config" && host == "192.168.1.5" -> respond(
+					"""{"sources":["FMAMusicClient"],"available_sources":[],"results_per_source":15}""",
+					HttpStatusCode.OK,
+					jsonHeaders,
+				)
+				path == "/api/auth/devices" -> respond("""{"devices":[]}""", HttpStatusCode.OK, jsonHeaders)
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloSettingsController(client, scope)
+
+		controller.testAndLogin(
+			baseUrl = "vps.example.com",
+			username = "vps-admin",
+			password = "secret",
+			displayName = "VPS 盒子",
+			createNew = true,
+		)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.testingConnection && it.profiles.size == 2 }
+			}
+		}
+
+		val vpsProfileId = assertNotNull(controller.state.value.activeProfileId)
+		assertTrue(vpsProfileId != "default")
+		assertEquals("https://vps.example.com", controller.state.value.serverConfig.baseUrl)
+		assertEquals("tok-vps", controller.state.value.serverConfig.bearerToken)
+		assertEquals("VPS 盒子", controller.state.value.serverConfig.displayName)
+		assertEquals(30, controller.state.value.engineConfig?.resultsPerSource)
+
+		// Reloading store preserves both profiles and active selection
+		val reloadedStore = MeloSettingsStore(backing)
+		assertEquals(2, reloadedStore.profiles.value.size)
+		assertEquals(vpsProfileId, reloadedStore.activeProfileId.value)
+		assertEquals("tok-nas", reloadedStore.profiles.value.first { it.id == "default" }.config.bearerToken)
+		assertEquals("tok-vps", reloadedStore.profiles.value.first { it.id == vpsProfileId }.config.bearerToken)
+
+		// 3. Switch back to "default" profile -> preserves token and reloads NAS config
+		controller.switchProfile("default")
+		assertEquals("default", controller.state.value.activeProfileId)
+		assertEquals("http://192.168.1.5:8765", controller.state.value.serverConfig.baseUrl)
+		assertEquals("tok-nas", controller.state.value.serverConfig.bearerToken)
+		assertEquals("已切换到：家里 NAS", controller.state.value.noticeMessage)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.loadingConfig && it.engineConfig?.resultsPerSource == 15 }
+			}
+		}
+
+		// 4. Delete currently active profile ("default") -> auto-falls back to VPS profile
+		controller.deleteProfile("default")
+		assertEquals(1, controller.state.value.profiles.size)
+		assertEquals(vpsProfileId, controller.state.value.activeProfileId)
+		assertEquals("https://vps.example.com", controller.state.value.serverConfig.baseUrl)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.loadingConfig && it.engineConfig?.resultsPerSource == 30 }
+			}
+		}
+
+		// 5. Delete last remaining profile -> clears activeProfileId & config cleanly without resurrecting on reload
+		controller.deleteProfile(vpsProfileId)
+		assertTrue(controller.state.value.profiles.isEmpty())
+		assertNull(controller.state.value.activeProfileId)
+		assertEquals("", controller.state.value.serverConfig.baseUrl)
+		assertTrue(MeloSettingsStore(backing).profiles.value.isEmpty())
+
+		scope.cancel()
+		client.close()
+	}
 }
 
 class MeloSourceLabelRegistryTest {

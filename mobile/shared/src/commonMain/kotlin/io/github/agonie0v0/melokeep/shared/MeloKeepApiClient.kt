@@ -58,16 +58,33 @@ class MeloKeepApiClient(
 	val settingsStore: MeloSettingsStore,
 	httpClientEngine: HttpClientEngine? = null,
 	private val nowEpochSeconds: () -> Long = { Clock.System.now().epochSeconds },
+	private val httpClientEngineFactory: (() -> HttpClientEngine)? = null,
 ) {
-	private val httpClient: HttpClient = HttpClient(httpClientEngine ?: createPlatformHttpClientEngine()) {
-		expectSuccess = false
-		install(ContentNegotiation) {
-			json(meloJson)
+	private val fixedEngine: HttpClientEngine? = httpClientEngine
+
+	@kotlin.concurrent.Volatile
+	private var httpClient: HttpClient = buildHttpClient()
+
+	private fun buildHttpClient(): HttpClient {
+		val engine = httpClientEngineFactory?.invoke() ?: fixedEngine ?: createPlatformHttpClientEngine()
+		return HttpClient(engine) {
+			expectSuccess = false
+			install(ContentNegotiation) {
+				json(meloJson)
+			}
+			install(HttpTimeout) {
+				connectTimeoutMillis = 15_000L
+				socketTimeoutMillis = 120_000L
+				requestTimeoutMillis = 120_000L
+			}
 		}
-		install(HttpTimeout) {
-			connectTimeoutMillis = 15_000L
-			socketTimeoutMillis = 120_000L
-			requestTimeoutMillis = 120_000L
+	}
+
+	fun refreshHttpClient() {
+		val previous = httpClient
+		httpClient = buildHttpClient()
+		if (fixedEngine == null || httpClientEngineFactory != null) {
+			runCatching { previous.close() }
 		}
 	}
 
@@ -75,13 +92,162 @@ class MeloKeepApiClient(
 		httpClient.close()
 	}
 
-	suspend fun health(baseUrl: String? = null): MeloHealthInfo {
-		val url = buildUrl("/api/health", baseUrl)
-		val response = httpClient.get(url) {
-			applyMeloHeaders()
+	suspend fun probeServer(baseUrl: String? = null): MeloProbeResult {
+		val rawInput = (baseUrl ?: settingsStore.currentConfig().baseUrl)
+			.replace('\uFF1A', ':')
+			.replace('\uFF0F', '/')
+			.trim()
+		val normalized = MeloSettingsStore.normalizeBaseUrl(rawInput)
+		if (normalized.isEmpty()) {
+			throw MeloApiException(
+				0,
+				if (baseUrl != null) "请输入 MeloKeep 服务器地址" else "尚未配置 MeloKeep 服务器地址",
+			)
 		}
-		return decodeResponse(response)
+		val hasExplicitScheme = rawInput.contains("://")
+		val candidates = if (!hasExplicitScheme && normalized.startsWith("https://")) {
+			listOf(normalized, "http://" + normalized.removePrefix("https://"))
+		} else {
+			listOf(normalized)
+		}
+
+		var primaryFailure: MeloApiException? = null
+		for ((index, candidateBase) in candidates.withIndex()) {
+			try {
+				return probeSingleCandidate(candidateBase)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: MeloApiException) {
+				// Non-zero HTTP status indicates an HTTP server responded; do not downgrade HTTPS to HTTP.
+				if (e.statusCode > 0) {
+					throw e
+				}
+				if (primaryFailure == null) {
+					primaryFailure = e
+				}
+				if (index == candidates.lastIndex) {
+					throw primaryFailure
+				}
+			} catch (e: Throwable) {
+				val url = "$candidateBase/api/health"
+				val wrapped = MeloApiException(
+					statusCode = 0,
+					message = buildNetworkErrorMessage(url, e),
+					detail = buildTechnicalNetworkDetail(url, e),
+				)
+				if (primaryFailure == null) {
+					primaryFailure = wrapped
+				}
+				if (index == candidates.lastIndex) {
+					throw primaryFailure
+				}
+			}
+		}
+		throw primaryFailure ?: MeloApiException(0, "无法连接服务器 ($normalized/api/health)")
 	}
+
+	private suspend fun probeSingleCandidate(candidateBase: String): MeloProbeResult {
+		var currentUrl = "$candidateBase/api/health"
+		var response: HttpResponse? = null
+		for (hop in 0..MAX_REDIRECT_HOPS) {
+			val res = try {
+				httpClient.get(currentUrl) {
+					applyMeloHeaders()
+				}
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				throw MeloApiException(
+					statusCode = 0,
+					message = buildNetworkErrorMessage(currentUrl, e),
+					detail = buildTechnicalNetworkDetail(currentUrl, e),
+				)
+			}
+			val statusCode = res.status.value
+			if (statusCode in REDIRECT_STATUS_CODES) {
+				val location = res.headers[HttpHeaders.Location]?.trim()
+				if (!location.isNullOrBlank() && hop < MAX_REDIRECT_HOPS) {
+					currentUrl = resolveRedirectUrl(currentUrl, location)
+					continue
+				}
+			}
+			response = res
+			break
+		}
+
+		val finalResponse = response ?: throw MeloApiException(0, "重定向次数过多 ($currentUrl)")
+		val finalUrl = finalResponse.call.request.url.toString().ifBlank { currentUrl }
+		val statusCode = finalResponse.status.value
+		val bodyText = try {
+			finalResponse.bodyAsText()
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			throw MeloApiException(
+				statusCode = 0,
+				message = buildNetworkErrorMessage(finalUrl, e),
+				detail = buildTechnicalNetworkDetail(finalUrl, e),
+			)
+		}
+
+		if (statusCode in REDIRECT_STATUS_CODES) {
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = parseApiErrorMessage(bodyText, statusCode, finalResponse.headers[HttpHeaders.Location]),
+			)
+		}
+
+		if (isHtmlBody(bodyText)) {
+			if (statusCode in 500..599) {
+				throw MeloApiException(
+					statusCode = statusCode,
+					message = "反代或网关返回错误页面 (HTTP $statusCode)，请检查反代配置或后端运行状态",
+				)
+			}
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = "地址 ($finalUrl) 返回的是网页而非 MeloKeep API，请检查反代路径是否正确映射",
+			)
+		}
+
+		if (!finalResponse.status.isSuccess()) {
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = parseApiErrorMessage(bodyText, statusCode, finalResponse.headers[HttpHeaders.Location]),
+			)
+		}
+
+		val info = try {
+			if (bodyText.isBlank()) {
+				MeloHealthInfo()
+			} else {
+				meloJson.decodeFromString<MeloHealthInfo>(bodyText)
+			}
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Exception) {
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = "地址 ($finalUrl) 返回数据格式无效，请确认是否为 MeloKeep 服务",
+				detail = e.message ?: "JSON decode error",
+			)
+		}
+
+		if (!info.ok) {
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = "服务器返回异常健康状态 ($finalUrl)",
+			)
+		}
+
+		val resolvedBaseUrl = MeloSettingsStore.normalizeBaseUrl(finalUrl).ifBlank { candidateBase }
+		return MeloProbeResult(
+			health = info,
+			resolvedBaseUrl = resolvedBaseUrl,
+		)
+	}
+
+	suspend fun health(baseUrl: String? = null): MeloHealthInfo = probeServer(baseUrl).health
 
 	suspend fun fetchLatestGitHubRelease(
 		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
@@ -116,31 +282,67 @@ class MeloKeepApiClient(
 		username: String = "",
 		password: String = "",
 		deviceName: String = "MeloKeep Mobile",
-		displayName: String = settingsStore.currentConfig().displayName,
+		displayName: String? = null,
+		profileId: String? = null,
+		createNew: Boolean = false,
 	): MeloLoginResponse {
 		val normalizedBase = MeloSettingsStore.normalizeBaseUrl(baseUrl)
 		if (normalizedBase.isEmpty()) {
 			throw MeloApiException(0, "请输入 MeloKeep 服务器地址")
 		}
-		val url = "$normalizedBase/api/auth/login"
-		val response = httpClient.post(url) {
-			applyMeloHeaders(tokenOverride = "")
-			contentType(ContentType.Application.Json)
-			setBody(
-				MeloLoginRequest(
-					username = username,
-					password = password,
-					clientType = "app",
-					deviceName = deviceName.ifBlank { "MeloKeep Mobile" },
+		var currentBase = normalizedBase
+		var currentUrl = "$currentBase/api/auth/login"
+		var finalResponse: HttpResponse? = null
+
+		for (hop in 0..MAX_REDIRECT_HOPS) {
+			val res = try {
+				httpClient.post(currentUrl) {
+					applyMeloHeaders(tokenOverride = "")
+					contentType(ContentType.Application.Json)
+					setBody(
+						MeloLoginRequest(
+							username = username,
+							password = password,
+							clientType = "app",
+							deviceName = deviceName.ifBlank { "MeloKeep Mobile" },
+						)
+					)
+				}
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				throw MeloApiException(
+					statusCode = 0,
+					message = buildNetworkErrorMessage(currentUrl, e),
+					detail = buildTechnicalNetworkDetail(currentUrl, e),
 				)
-			)
+			}
+
+			val statusCode = res.status.value
+			if (statusCode in LOGIN_REDIRECT_STATUS_CODES) {
+				val location = res.headers[HttpHeaders.Location]?.trim()
+				if (!location.isNullOrBlank() && hop < MAX_REDIRECT_HOPS) {
+					val resolvedUrl = resolveRedirectUrl(currentUrl, location)
+					val (nextBase, nextPostUrl) = resolveLoginRedirectTarget(resolvedUrl, currentBase)
+					currentBase = nextBase
+					currentUrl = nextPostUrl
+					continue
+				}
+			}
+			finalResponse = res
+			break
 		}
+
+		val response = finalResponse ?: throw MeloApiException(0, "登录重定向次数过多 ($currentUrl)")
+		val actualUrl = response.call.request.url.toString().ifBlank { currentUrl }
+		val effectiveBaseUrl = extractBaseUrlFromLoginUrl(actualUrl) ?: currentBase
+
 		val loginResp: MeloLoginResponse = decodeResponse(response)
 		if (!loginResp.success) {
 			throw MeloApiException(response.status.value, "登录失败，请检查账号或密码")
 		}
 		settingsStore.saveSession(
-			baseUrl = normalizedBase,
+			baseUrl = effectiveBaseUrl,
 			username = if (loginResp.authEnabled) username else "",
 			bearerToken = loginResp.token,
 			tokenId = loginResp.tokenId,
@@ -149,6 +351,8 @@ class MeloKeepApiClient(
 			authEnabled = loginResp.authEnabled,
 			enabled = true,
 			displayName = displayName,
+			profileId = profileId,
+			createNew = createNew,
 		)
 		return loginResp
 	}
@@ -247,7 +451,9 @@ class MeloKeepApiClient(
 		}
 
 		val isOwnServerUrl = if (hasKnownScheme) {
-			base.isNotEmpty() && fullUrl.startsWith(base, ignoreCase = true)
+			base.isNotEmpty() &&
+				fullUrl.startsWith(base, ignoreCase = true) &&
+				(fullUrl.length == base.length || fullUrl[base.length] in charArrayOf('/', '?', '#'))
 		} else {
 			true
 		}
@@ -256,7 +462,11 @@ class MeloKeepApiClient(
 		}
 
 		val relativePathPart = if (hasKnownScheme && base.isNotEmpty()) {
-			fullUrl.removePrefix(base)
+			if (fullUrl.startsWith(base, ignoreCase = true)) {
+				fullUrl.substring(base.length)
+			} else {
+				fullUrl.removePrefix(base)
+			}
 		} else {
 			if (trimmed.startsWith("/")) trimmed else "/$trimmed"
 		}
@@ -311,7 +521,7 @@ class MeloKeepApiClient(
 					val errBody = runCatching { response.bodyAsText() }.getOrDefault("")
 					throw MeloApiException(
 						response.status.value,
-						parseApiErrorMessage(errBody, response.status.value),
+						parseApiErrorMessage(errBody, response.status.value, response.headers[HttpHeaders.Location]),
 					)
 				}
 				val channel = response.bodyAsChannel()
@@ -1054,10 +1264,17 @@ class MeloKeepApiClient(
 
 	private suspend inline fun <reified T> decodeResponse(response: HttpResponse): T {
 		val text = response.bodyAsText()
+		val statusCode = response.status.value
 		if (!response.status.isSuccess()) {
 			throw MeloApiException(
-				statusCode = response.status.value,
-				message = parseApiErrorMessage(text, response.status.value),
+				statusCode = statusCode,
+				message = parseApiErrorMessage(text, statusCode, response.headers[HttpHeaders.Location]),
+			)
+		}
+		if (isHtmlBody(text)) {
+			throw MeloApiException(
+				statusCode = statusCode,
+				message = "反代或网关返回错误页面 (HTTP $statusCode)，请检查反代配置或后端运行状态",
 			)
 		}
 		if (text.isBlank()) {
@@ -1069,7 +1286,7 @@ class MeloKeepApiClient(
 			throw e
 		} catch (e: Exception) {
 			throw MeloApiException(
-				statusCode = response.status.value,
+				statusCode = statusCode,
 				message = "服务返回数据解析失败: ${e.message ?: "格式错误"}",
 			)
 		}
@@ -1077,16 +1294,142 @@ class MeloKeepApiClient(
 
 	private suspend fun ensureSuccess(response: HttpResponse) {
 		val text = response.bodyAsText()
+		val statusCode = response.status.value
 		if (!response.status.isSuccess()) {
 			throw MeloApiException(
-				statusCode = response.status.value,
-				message = parseApiErrorMessage(text, response.status.value),
+				statusCode = statusCode,
+				message = parseApiErrorMessage(text, statusCode, response.headers[HttpHeaders.Location]),
 			)
 		}
 	}
 
 	companion object {
 		private const val MEDIA_TOKEN_REFRESH_BUFFER_SECONDS = 300L
+		private const val MAX_REDIRECT_HOPS = 3
+		private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
+		private val LOGIN_REDIRECT_STATUS_CODES = setOf(301, 302, 307, 308)
+
+		internal fun isHtmlBody(rawBody: String): Boolean {
+			val head = rawBody.trimStart().take(1024)
+			if (head.isEmpty()) return false
+			return head.contains("<!doctype", ignoreCase = true) || head.contains("<html", ignoreCase = true)
+		}
+
+		private fun resolveRedirectUrl(currentUrl: String, location: String): String {
+			val loc = location.trim()
+			if (loc.startsWith("http://", ignoreCase = true) || loc.startsWith("https://", ignoreCase = true)) {
+				return loc
+			}
+			val schemeSep = currentUrl.indexOf("://")
+			if (schemeSep < 0) return loc
+			val scheme = currentUrl.substring(0, schemeSep).lowercase()
+			if (loc.startsWith("//")) {
+				return "$scheme:$loc"
+			}
+			val origin = extractOrigin(currentUrl) ?: return loc
+			return if (loc.startsWith("/")) {
+				"$origin$loc"
+			} else {
+				val pathPart = currentUrl.substringBefore('#').substringBefore('?')
+				val lastSlash = pathPart.lastIndexOf('/')
+				val parentDir = if (lastSlash > schemeSep + 2) pathPart.substring(0, lastSlash) else origin
+				"$parentDir/$loc"
+			}
+		}
+
+		private fun extractOrigin(url: String): String? {
+			val schemeSep = url.indexOf("://")
+			if (schemeSep < 0) return null
+			val scheme = url.substring(0, schemeSep).lowercase()
+			val afterScheme = url.substring(schemeSep + 3)
+			val slashIdx = afterScheme.indexOf('/')
+			val authority = if (slashIdx >= 0) afterScheme.substring(0, slashIdx) else afterScheme
+			if (authority.isEmpty()) return null
+			return "$scheme://$authority"
+		}
+
+		private fun resolveLoginRedirectTarget(resolvedUrl: String, fallbackBase: String): Pair<String, String> {
+			val clean = resolvedUrl.substringBefore('#').substringBefore('?')
+			if (clean.endsWith("/api/auth/login", ignoreCase = true)) {
+				val nextBase = MeloSettingsStore.normalizeBaseUrl(clean.dropLast("/api/auth/login".length))
+					.ifBlank { fallbackBase }
+				return nextBase to resolvedUrl
+			}
+			val origin = extractOrigin(clean)
+			if (origin != null && clean.trimEnd('/') == origin) {
+				val nextBase = MeloSettingsStore.normalizeBaseUrl(clean).ifBlank { fallbackBase }
+				return nextBase to "$nextBase/api/auth/login"
+			}
+			val nextBase = MeloSettingsStore.normalizeBaseUrl(clean).ifBlank { fallbackBase }
+			return nextBase to resolvedUrl
+		}
+
+		private fun extractBaseUrlFromLoginUrl(url: String): String? {
+			val clean = url.substringBefore('#').substringBefore('?')
+			if (clean.endsWith("/api/auth/login", ignoreCase = true)) {
+				return MeloSettingsStore.normalizeBaseUrl(clean.dropLast("/api/auth/login".length))
+					.takeIf { it.isNotBlank() }
+			}
+			return null
+		}
+
+		private fun collectErrorDiagnosticText(throwable: Throwable): String {
+			val parts = mutableListOf<String>()
+			var current: Throwable? = throwable
+			var depth = 0
+			while (current != null && depth < 6) {
+				current::class.simpleName?.let { parts += it }
+				current.message?.trim()?.takeIf { it.isNotEmpty() }?.let { parts += it }
+				current = current.cause
+				depth++
+			}
+			return parts.joinToString(" | ")
+		}
+
+		private fun buildTechnicalNetworkDetail(url: String, throwable: Throwable): String {
+			val typeName = throwable::class.simpleName ?: "Exception"
+			val msg = throwable.message?.trim().orEmpty()
+			return if (msg.isNotEmpty()) "$typeName: $msg ($url)" else "$typeName ($url)"
+		}
+
+		internal fun buildNetworkErrorMessage(url: String, throwable: Throwable): String {
+			val combined = collectErrorDiagnosticText(throwable).lowercase()
+			return when {
+				combined.contains("ssl") ||
+					combined.contains("tls") ||
+					combined.contains("certificate") ||
+					combined.contains("certpath") ||
+					combined.contains("trust anchor") ||
+					combined.contains("handshake") ||
+					combined.contains("pkix") ||
+					combined.contains("x509") ->
+					"HTTPS 证书校验失败，若使用自签名证书请开启“忽略自签名 SSL 证书” ($url)"
+				combined.contains("unknownhost") ||
+					combined.contains("unknown host") ||
+					combined.contains("dns") ||
+					combined.contains("resolve") ||
+					combined.contains("nodename") ||
+					combined.contains("name or service not known") ||
+					combined.contains("eai_") ->
+					"域名解析失败 ($url)"
+				combined.contains("timeout") ||
+					combined.contains("timed out") ||
+					combined.contains("connect") ||
+					combined.contains("refused") ||
+					combined.contains("unreachable") ||
+					combined.contains("reset") ||
+					combined.contains("eof") ||
+					combined.contains("broken pipe") ||
+					combined.contains("socket") ->
+					"连接超时或端口未开放 ($url)"
+				else -> {
+					val rawMsg = throwable.message?.trim().takeIf { !it.isNullOrBlank() }
+						?: throwable::class.simpleName
+						?: "网络异常"
+					"无法连接服务器：$rawMsg ($url)"
+				}
+			}
+		}
 
 		private fun isProtectedMediaPath(pathOnly: String): Boolean {
 			return pathOnly.startsWith("/api/stream/") ||
@@ -1117,8 +1460,23 @@ class MeloKeepApiClient(
 			return "$mainPart$separator$key=${value.encodeURLParameter()}$fragmentPart"
 		}
 
-		internal fun parseApiErrorMessage(rawBody: String, statusCode: Int): String {
+		internal fun parseApiErrorMessage(
+			rawBody: String,
+			statusCode: Int,
+			location: String? = null,
+		): String {
+			if (statusCode in REDIRECT_STATUS_CODES) {
+				val loc = location?.trim()?.takeIf { it.isNotEmpty() }
+				return if (loc != null) {
+					"请求被重定向 ($statusCode -> $loc)，请检查反代配置或服务器地址"
+				} else {
+					"请求被重定向 ($statusCode)，请检查反代配置或服务器地址"
+				}
+			}
 			val trimmed = rawBody.trim()
+			if (isHtmlBody(trimmed)) {
+				return "反代或网关返回错误页面 (HTTP $statusCode)，请检查反代配置或后端运行状态"
+			}
 			if (trimmed.isEmpty()) {
 				return "请求失败 ($statusCode)"
 			}

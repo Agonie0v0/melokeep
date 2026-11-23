@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import io.github.agonie0v0.melokeep.shared.MeloSourceLabelRegistry
 import org.koin.compose.koinInject
 import paige.navic.database.entity.DownloadStatus
 import paige.navic.di.LocalNavStack
@@ -68,6 +69,7 @@ import paige.navic.melokeep.MeloGroupedCard
 import paige.navic.melokeep.MeloHairlineDivider
 import paige.navic.melokeep.MeloHairlineWidth
 import paige.navic.melokeep.MeloTrackMapper
+import paige.navic.melokeep.translateMeloSourceName
 import paige.navic.ui.component.common.CoverArt
 import paige.navic.ui.component.common.MarqueeText
 import paige.navic.ui.component.common.RatingRow
@@ -197,6 +199,7 @@ fun SongSheet(
 				song.bitRate,
 				song.duration,
 				song.isExternal,
+				song.genre,
 				song.id
 			) {
 				buildList {
@@ -212,9 +215,34 @@ fun SongSheet(
 						song.bitRate != null && song.bitRate > 0 -> add("${song.bitRate}k")
 					}
 					song.duration.takeIf { it.inWholeSeconds > 0 }?.toHoursMinutesSeconds()?.let(::add)
-					if (song.isExternal || MeloTrackMapper.isMeloSongId(song.id)) {
-						add("本地库")
+					val sourceLabel = when {
+						song.id.startsWith("device:") -> "手机本地"
+						song.id.startsWith("radio_") -> "电台"
+						MeloTrackMapper.isMeloSongId(song.id) -> {
+							val rawId = MeloTrackMapper.toRawTrackId(song.id)
+							if (
+								rawId.startsWith("asset:") ||
+								rawId.startsWith("file:") ||
+								song.genre.equals("local", ignoreCase = true)
+							) {
+								"MeloKeep 曲库"
+							} else {
+								val rawSource = song.genre?.trim().orEmpty()
+								if (rawSource.isNotEmpty()) {
+									MeloSourceLabelRegistry.resolve(rawSource)
+										?: translateMeloSourceName(rawSource).takeIf {
+											it.isNotBlank() && it != "未知音源"
+										}
+										?: rawSource
+								} else {
+									"在线音源"
+								}
+							}
+						}
+						song.isExternal -> "在线音源"
+						else -> null
 					}
+					sourceLabel?.let(::add)
 				}.joinToString(" · ")
 			}
 

@@ -157,6 +157,12 @@ fun MeloOnboardingScreen(
 		onClearNotice = meloSettingsController::clearNotice
 	)
 
+	LaunchedEffect(meloConfig.baseUrl, meloConfig.isAuthenticated) {
+		if (meloConfig.isAuthenticated && meloConfig.baseUrl.isNotBlank()) {
+			meloUrl = meloConfig.baseUrl
+		}
+	}
+
 	LaunchedEffect(Unit) {
 		loginManager.events.collect { event ->
 			when (event) {
@@ -226,12 +232,15 @@ fun MeloOnboardingScreen(
 					var meloConnectedOk = !shouldConnectMelo
 					try {
 						if (shouldConnectMelo) {
-							val health = apiClient.health(trimmedMeloUrl)
-							if (!health.ok) {
+							val probe = apiClient.probeServer(trimmedMeloUrl)
+							if (!probe.health.ok) {
 								throw IllegalStateException("MeloKeep 服务状态异常")
 							}
+							if (probe.resolvedBaseUrl.isNotBlank() && probe.resolvedBaseUrl != meloUrl.trim()) {
+								meloUrl = probe.resolvedBaseUrl
+							}
 							apiClient.login(
-								baseUrl = trimmedMeloUrl,
+								baseUrl = probe.resolvedBaseUrl,
 								username = meloUser.trim(),
 								password = meloPass,
 								deviceName = deviceName,
@@ -372,7 +381,7 @@ fun MeloOnboardingScreen(
 								singleLine = true,
 								shape = RoundedCornerShape(12.dp),
 								label = { Text("服务器地址", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-								placeholder = { Text("http://192.168.1.10:8765", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+								placeholder = { Text("https://music.example.com 或 http://192.168.1.10:8765", maxLines = 1, overflow = TextOverflow.Ellipsis) },
 								keyboardOptions = KeyboardOptions(
 									autoCorrectEnabled = false,
 									keyboardType = KeyboardType.Uri,
@@ -533,22 +542,35 @@ fun MeloOnboardingScreen(
 										focusManager.clearFocus()
 										probingHealth = true
 										healthStatusMessage = null
+										val originalInput = meloUrl.trim()
 										scope.launch {
-											runCatching { apiClient.health(meloUrl) }
-												.onSuccess { info ->
-													probingHealth = false
-													healthStatusSuccess = info.ok
-													healthStatusMessage = if (info.ok) {
-														"在线 · ${info.version.ifBlank { info.backend }} · ${info.sources} 音源"
+											try {
+												val probe = apiClient.probeServer(meloUrl)
+												val info = probe.health
+												val resolved = probe.resolvedBaseUrl
+												if (resolved.isNotBlank() && resolved != originalInput) {
+													meloUrl = resolved
+												}
+												probingHealth = false
+												healthStatusSuccess = info.ok
+												healthStatusMessage = if (info.ok) {
+													val versionLabel = info.version.ifBlank { info.backend }
+													if (resolved.isNotBlank() && resolved != originalInput) {
+														"在线 · $versionLabel · ${info.sources} 音源 · 已解析为 $resolved"
 													} else {
-														"服务返回异常状态"
+														"在线 · $versionLabel · ${info.sources} 音源"
 													}
+												} else {
+													"服务返回异常状态"
 												}
-												.onFailure { err ->
-													probingHealth = false
-													healthStatusSuccess = false
-													healthStatusMessage = "探测失败：${err.message ?: "无法访问"}"
-												}
+											} catch (e: CancellationException) {
+												probingHealth = false
+												throw e
+											} catch (err: Exception) {
+												probingHealth = false
+												healthStatusSuccess = false
+												healthStatusMessage = "探测失败：${err.message ?: "无法访问"}"
+											}
 										}
 									}
 								) {

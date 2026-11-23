@@ -2012,6 +2012,8 @@ class MeloAiController(
 
 data class MeloSettingsUiState(
 	val serverConfig: MeloServerConfig = MeloServerConfig(),
+	val profiles: List<MeloServerProfile> = emptyList(),
+	val activeProfileId: String? = null,
 	val engineConfig: MeloEngineConfig? = null,
 	val devices: List<MeloDeviceToken> = emptyList(),
 	val testingConnection: Boolean = false,
@@ -2027,7 +2029,11 @@ class MeloSettingsController(
 	private val scope: CoroutineScope,
 ) {
 	private val _state = MutableStateFlow(
-		MeloSettingsUiState(serverConfig = apiClient.settingsStore.currentConfig())
+		MeloSettingsUiState(
+			serverConfig = apiClient.settingsStore.currentConfig(),
+			profiles = apiClient.settingsStore.profiles.value,
+			activeProfileId = apiClient.settingsStore.activeProfileId.value,
+		)
 	)
 	val state: StateFlow<MeloSettingsUiState> = _state.asStateFlow()
 
@@ -2037,6 +2043,16 @@ class MeloSettingsController(
 				_state.update { it.copy(serverConfig = cfg) }
 			}
 		}
+		scope.launch {
+			apiClient.settingsStore.profiles.collect { list ->
+				_state.update { it.copy(profiles = list) }
+			}
+		}
+		scope.launch {
+			apiClient.settingsStore.activeProfileId.collect { id ->
+				_state.update { it.copy(activeProfileId = id) }
+			}
+		}
 	}
 
 	fun updateDisplayName(name: String) {
@@ -2044,6 +2060,8 @@ class MeloSettingsController(
 		_state.update {
 			it.copy(
 				serverConfig = updated,
+				profiles = apiClient.settingsStore.profiles.value,
+				activeProfileId = apiClient.settingsStore.activeProfileId.value,
 				noticeMessage = "已更新服务名称为：${updated.effectiveName}",
 			)
 		}
@@ -2054,7 +2072,9 @@ class MeloSettingsController(
 		username: String = "",
 		password: String = "",
 		deviceName: String = "MeloKeep Mobile",
-		displayName: String = apiClient.settingsStore.currentConfig().displayName,
+		displayName: String? = null,
+		profileId: String? = null,
+		createNew: Boolean = false,
 	) {
 		scope.launch {
 			_state.update {
@@ -2065,24 +2085,29 @@ class MeloSettingsController(
 				)
 			}
 			try {
-				val health = apiClient.health(baseUrl)
+				val probe = apiClient.probeServer(baseUrl)
 				val loginResp = apiClient.login(
-					baseUrl = baseUrl,
+					baseUrl = probe.resolvedBaseUrl,
 					username = username,
 					password = password,
 					deviceName = deviceName,
 					displayName = displayName,
+					profileId = profileId,
+					createNew = createNew,
 				)
 				val cfg = apiClient.getConfig()
 				val devices = runCatching { apiClient.listDevices() }.getOrDefault(emptyList())
 				val msg = if (loginResp.authEnabled) {
-					"已连接 MeloKeep ${health.version}（${health.sources} 个音源），登录成功"
+					"已连接 MeloKeep ${probe.health.version}（${probe.health.sources} 个音源），登录成功"
 				} else {
-					"已连接 MeloKeep ${health.version}（免密码模式，${health.sources} 个音源）"
+					"已连接 MeloKeep ${probe.health.version}（免密码模式，${probe.health.sources} 个音源）"
 				}
 				_state.update {
 					it.copy(
 						testingConnection = false,
+						serverConfig = apiClient.settingsStore.currentConfig(),
+						profiles = apiClient.settingsStore.profiles.value,
+						activeProfileId = apiClient.settingsStore.activeProfileId.value,
 						engineConfig = cfg,
 						devices = devices,
 						connectionMessage = msg,
@@ -2100,6 +2125,54 @@ class MeloSettingsController(
 					)
 				}
 			}
+		}
+	}
+
+	fun switchProfile(profileId: String) {
+		val switched = apiClient.settingsStore.switchProfile(profileId) ?: run {
+			_state.update { it.copy(errorMessage = "未找到对应的服务器配置") }
+			return
+		}
+		_state.update {
+			it.copy(
+				serverConfig = switched,
+				profiles = apiClient.settingsStore.profiles.value,
+				activeProfileId = apiClient.settingsStore.activeProfileId.value,
+				engineConfig = null,
+				devices = emptyList(),
+				connectionMessage = null,
+				errorMessage = null,
+				noticeMessage = "已切换到：${switched.effectiveName}",
+			)
+		}
+		if (switched.isAuthenticated) {
+			loadConfig()
+		}
+	}
+
+	fun deleteProfile(profileId: String) {
+		val prevActiveId = _state.value.activeProfileId
+		val nextConfig = apiClient.settingsStore.deleteProfile(profileId)
+		val nextActiveId = apiClient.settingsStore.activeProfileId.value
+		val activeChanged = prevActiveId == profileId || nextActiveId != prevActiveId
+		_state.update {
+			it.copy(
+				serverConfig = nextConfig,
+				profiles = apiClient.settingsStore.profiles.value,
+				activeProfileId = nextActiveId,
+				engineConfig = if (activeChanged) null else it.engineConfig,
+				devices = if (activeChanged) emptyList() else it.devices,
+				connectionMessage = if (activeChanged) null else it.connectionMessage,
+				errorMessage = null,
+				noticeMessage = if (activeChanged && nextConfig.isConfigured) {
+					"已删除服务器配置，已切换到：${nextConfig.effectiveName}"
+				} else {
+					"已删除服务器配置"
+				},
+			)
+		}
+		if (activeChanged && nextConfig.isAuthenticated) {
+			loadConfig()
 		}
 	}
 
@@ -2124,12 +2197,17 @@ class MeloSettingsController(
 	}
 
 	fun loadConfig() {
-		if (!apiClient.settingsStore.currentConfig().isConfigured) return
+		val current = apiClient.settingsStore.currentConfig()
+		if (!current.isConfigured) return
+		val targetProfileId = apiClient.settingsStore.activeProfileId.value
 		scope.launch {
 			_state.update { it.copy(loadingConfig = true, errorMessage = null) }
 			try {
 				val cfg = apiClient.getConfig()
 				val devices = runCatching { apiClient.listDevices() }.getOrDefault(emptyList())
+				if (apiClient.settingsStore.activeProfileId.value != targetProfileId) {
+					return@launch
+				}
 				_state.update {
 					it.copy(
 						loadingConfig = false,
@@ -2141,6 +2219,9 @@ class MeloSettingsController(
 				_state.update { it.copy(loadingConfig = false) }
 				throw e
 			} catch (e: Throwable) {
+				if (apiClient.settingsStore.activeProfileId.value != targetProfileId) {
+					return@launch
+				}
 				_state.update {
 					it.copy(
 						loadingConfig = false,

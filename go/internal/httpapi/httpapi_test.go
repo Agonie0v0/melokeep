@@ -3446,3 +3446,219 @@ func TestEngineConfigWorkDirValidationAndOpenDir(t *testing.T) {
 		t.Fatalf("expected non-desktop open-dir error to mention %q, got %d %s", wantTop, openRec2.Code, openRec2.Body.String())
 	}
 }
+
+func TestCollectionCreateAndAddTracksValidation(t *testing.T) {
+	srv, st, canonRoot := newTestServer(t, nil)
+	ctx := context.Background()
+
+	postJSON := func(path string, payload any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-MeloKeep-Request", "1")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	seedOnlineSearchTrack := func(pubID, sourceID, title string) {
+		t.Helper()
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source:     "AudiusMusicClient",
+			Locator:    sourceID,
+			RootSource: "AudiusMusicClient",
+			Title:      title,
+			Artist:     "Online Artist",
+			Album:      "Online Album",
+			DurationMS: 185000,
+		}, []model.MediaVariant{{
+			VariantID:    "engine:mp3:320",
+			Label:        "MP3 320k",
+			Codec:        "mp3",
+			Availability: "resolved",
+			Evidence:     "engine",
+		}})
+		if err != nil {
+			t.Fatalf("UpsertProviderTrack(%s): %v", pubID, err)
+		}
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: pubID,
+			Kind:     "candidate",
+			TargetID: trID,
+			Source:   "AudiusMusicClient",
+			SourceID: sourceID,
+		}, ""); err != nil {
+			t.Fatalf("PutPublicRef(%s): %v", pubID, err)
+		}
+		dto := model.TrackDTO{
+			ID:         pubID,
+			Source:     "AudiusMusicClient",
+			SourceID:   sourceID,
+			RootSource: "AudiusMusicClient",
+			Title:      title,
+			Artist:     "Online Artist",
+			Album:      "Online Album",
+			Duration:   185,
+			Playback: model.PlaybackDTO{
+				State: "pending",
+			},
+		}
+		rawDTO, err := json.Marshal(dto)
+		if err != nil {
+			t.Fatalf("marshal track_dto(%s): %v", pubID, err)
+		}
+		if _, err := st.PutDurableRecord(ctx, "track_dto", pubID, string(rawDTO), 0); err != nil {
+			t.Fatalf("PutDurableRecord track_dto(%s): %v", pubID, err)
+		}
+	}
+
+	// Seed two track_dto-persisted online search tracks and one local asset track.
+	track1 := "cand-online-01"
+	track2 := "cand-online-02"
+	seedOnlineSearchTrack(track1, "audius-src-01", "在线检索曲目一")
+	seedOnlineSearchTrack(track2, "audius-src-02", "在线检索曲目二")
+
+	localFile := filepath.Join(canonRoot, "local-pl.wav")
+	if err := os.WriteFile(localFile, []byte("RIFF0000WAVE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assetRec, err := st.UpsertAsset(ctx, store.AssetRecord{
+		RootID:   "root-1",
+		RelPath:  "local-pl.wav",
+		PathKey:  "local-pl.wav",
+		Name:     "local-pl.wav",
+		Status:   "active",
+		Editable: true,
+		Size:     12,
+		Title:    "本地曲目",
+	}, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localTrack := "asset:" + assetRec.ID
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: localTrack,
+		Kind:     "asset",
+		TargetID: assetRec.ID,
+		Source:   "local",
+		SourceID: assetRec.ID,
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Empty track_ids still creates an empty playlist (200 OK).
+	emptyRec := postJSON("/api/playlists", map[string]any{
+		"name":      "空白歌单",
+		"track_ids": []string{},
+	})
+	if emptyRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 creating empty playlist, got %d %s", emptyRec.Code, emptyRec.Body.String())
+	}
+	var emptyDTO model.SavedPlaylistDTO
+	if err := json.Unmarshal(emptyRec.Body.Bytes(), &emptyDTO); err != nil || len(emptyDTO.Tracks) != 0 {
+		t.Fatalf("unexpected empty playlist DTO: err=%v body=%s", err, emptyRec.Body.String())
+	}
+
+	// 2. Creating playlist with all invalid track_ids returns 404 and does NOT persist an empty playlist.
+	invalidCreateRec := postJSON("/api/playlists", map[string]any{
+		"name":      "无效歌单",
+		"track_ids": []string{"missing-1", "missing-1", "device:local-1", "radio_1"},
+	})
+	if invalidCreateRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for invalid create track_ids, got %d %s", invalidCreateRec.Code, invalidCreateRec.Body.String())
+	}
+	var errDTO model.ErrorDTO
+	_ = json.Unmarshal(invalidCreateRec.Body.Bytes(), &errDTO)
+	if errDTO.Detail != "曲目不存在或已失效，无法创建并加入歌单" {
+		t.Fatalf("unexpected create error detail: %v", errDTO.Detail)
+	}
+	cols, err := st.ListCollections(ctx, "", "playlist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cols {
+		if c.Name == "无效歌单" {
+			t.Fatalf("invalid playlist creation leaked collection %+v", c)
+		}
+	}
+
+	// 3. Creating playlist with valid track_dto-persisted online search track succeeds.
+	createRec := postJSON("/api/playlists", map[string]any{
+		"name":      "在线精选",
+		"track_ids": []string{track1, track1},
+	})
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 creating playlist with track_dto track, got %d %s", createRec.Code, createRec.Body.String())
+	}
+	var created model.SavedPlaylistDTO
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created playlist: %v", err)
+	}
+	if created.ID == "" || len(created.Tracks) != 1 || created.Tracks[0].ID != track1 || created.Tracks[0].Title != "在线检索曲目一" {
+		t.Fatalf("unexpected created playlist: %+v", created)
+	}
+
+	// 4. Adding all invalid track_ids to existing playlist returns 404 and leaves tracks untouched.
+	invalidAddRec := postJSON("/api/playlists/"+created.ID+"/tracks", map[string]any{
+		"track_ids": []string{"missing-2", "missing-2", "device:99"},
+	})
+	if invalidAddRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for invalid add track_ids, got %d %s", invalidAddRec.Code, invalidAddRec.Body.String())
+	}
+	var addErrDTO model.ErrorDTO
+	_ = json.Unmarshal(invalidAddRec.Body.Bytes(), &addErrDTO)
+	if addErrDTO.Detail != "曲目不存在或已失效，无法加入歌单" {
+		t.Fatalf("unexpected add error detail: %v", addErrDTO.Detail)
+	}
+
+	// 5. Adding new valid tracks (duplicate track2 in request + local asset track) adds deduplicated count once.
+	addRec := postJSON("/api/playlists/"+created.ID+"/tracks", map[string]any{
+		"track_ids": []string{track2, track2, localTrack},
+	})
+	if addRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 adding valid tracks, got %d %s", addRec.Code, addRec.Body.String())
+	}
+	var added model.SavedPlaylistDTO
+	if err := json.Unmarshal(addRec.Body.Bytes(), &added); err != nil {
+		t.Fatalf("unmarshal added playlist: %v", err)
+	}
+	wantAddDetail := "已向歌单“在线精选”加入 2 首曲目，共 3 首。"
+	if len(added.Tracks) != 3 || added.Detail != wantAddDetail {
+		t.Fatalf("unexpected add result: len=%d detail=%q want=%q", len(added.Tracks), added.Detail, wantAddDetail)
+	}
+
+	// 6. Re-adding already existing tracks returns 200 OK with "already in playlist" detail.
+	dupAddRec := postJSON("/api/playlists/"+created.ID+"/tracks", map[string]any{
+		"track_ids": []string{track1, track1, track2},
+	})
+	if dupAddRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 re-adding existing tracks, got %d %s", dupAddRec.Code, dupAddRec.Body.String())
+	}
+	var dupAdded model.SavedPlaylistDTO
+	if err := json.Unmarshal(dupAddRec.Body.Bytes(), &dupAdded); err != nil {
+		t.Fatalf("unmarshal dup add playlist: %v", err)
+	}
+	wantDupDetail := "所选曲目已在歌单“在线精选”中，共 3 首。"
+	if len(dupAdded.Tracks) != 3 || dupAdded.Detail != wantDupDetail {
+		t.Fatalf("unexpected duplicate add result: len=%d detail=%q want=%q", len(dupAdded.Tracks), dupAdded.Detail, wantDupDetail)
+	}
+
+	// 7. Re-adding an existing track alongside a missing ID also returns 200 OK with "already in playlist" detail.
+	mixedDupRec := postJSON("/api/playlists/"+created.ID+"/tracks", map[string]any{
+		"track_ids": []string{track1, "missing-3"},
+	})
+	if mixedDupRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for existing+missing tracks, got %d %s", mixedDupRec.Code, mixedDupRec.Body.String())
+	}
+	var mixedDup model.SavedPlaylistDTO
+	if err := json.Unmarshal(mixedDupRec.Body.Bytes(), &mixedDup); err != nil {
+		t.Fatalf("unmarshal mixed dup playlist: %v", err)
+	}
+	if len(mixedDup.Tracks) != 3 || mixedDup.Detail != wantDupDetail {
+		t.Fatalf("unexpected mixed duplicate add result: len=%d detail=%q want=%q", len(mixedDup.Tracks), mixedDup.Detail, wantDupDetail)
+	}
+}

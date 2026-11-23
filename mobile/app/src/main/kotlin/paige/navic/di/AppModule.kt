@@ -10,7 +10,11 @@ import com.russhwolf.settings.Settings
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.ui.navigation.PersistentViewModelStoreOwner
+import paige.navic.util.network.buildKtorEngine
+import paige.navic.util.network.createOkHttpClient
+import paige.navic.util.network.getProxyUrlOrNull
 
 import io.github.agonie0v0.melokeep.shared.MeloAiController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
@@ -23,7 +27,24 @@ import io.github.agonie0v0.melokeep.shared.MeloStudioController
 val appModule = module {
 	single { Settings() }
 	single { MeloSettingsStore(get()) }
-	single { MeloKeepApiClient(get()) }
+	single {
+		val preferenceManager: PreferenceManager = get()
+		MeloKeepApiClient(
+			settingsStore = get(),
+			httpClientEngineFactory = {
+				buildKtorEngine(
+					createOkHttpClient(
+						proxyUrl = preferenceManager.proxyUrl.getProxyUrlOrNull(),
+						trustAllCerts = preferenceManager.dangerousSslNoopEnabled,
+						dnsResolver = null,
+						customHeaders = preferenceManager.customHeadersMap(),
+						connectTimeoutSeconds = 15L,
+						readTimeoutSeconds = 0L,
+					)
+				)
+			}
+		)
+	}
 	single(named("meloScope")) {
 		kotlinx.coroutines.CoroutineScope(
 			kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate

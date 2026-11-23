@@ -45,6 +45,12 @@ data class MeloServerConfig(
 }
 
 @Serializable
+data class MeloServerProfile(
+	val id: String,
+	val config: MeloServerConfig = MeloServerConfig(),
+)
+
+@Serializable
 data class MeloHealthInfo(
 	val ok: Boolean = false,
 	val backend: String = "",
@@ -53,6 +59,11 @@ data class MeloHealthInfo(
 	val sources: Int = 0,
 	@SerialName("in_container")
 	val inContainer: Boolean = false,
+)
+
+data class MeloProbeResult(
+	val health: MeloHealthInfo,
+	val resolvedBaseUrl: String,
 )
 
 @Serializable
