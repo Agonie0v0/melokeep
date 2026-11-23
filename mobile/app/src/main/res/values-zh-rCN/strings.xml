@@ -147,7 +147,7 @@
     <string name="notice_copied">已复制。</string>
     <string name="notice_expiry">%1$s 后过期。</string>
     <string name="notice_loading_lyrics">加载歌词中...\n请稍等。</string>
-    <string name="info_app_version">Navic %1$s</string>
+    <string name="info_app_version">MeloKeep %1$s</string>
     <string name="info_action_is_permanent">此操作无法撤销</string>
     <string name="info_error">出错了。</string>
     <string name="info_error_show">查看详情</string>
@@ -342,11 +342,11 @@
     <string name="subtitle_app_icon_designer">设计者：%1$s</string>
     <string name="option_choose_app_icon">应用程序图标</string>
     <string name="option_dynamic_theming">动态主题</string>
-    <string name="info_app_icon">更改应用图标时，Navic 会自动退出，这是 Android 系统的限制。如果您的启动器启用了主题图标（动态图标配色），部分图标在主屏幕上可能显示为相同的样式。</string>
+    <string name="info_app_icon">更改应用图标时，MeloKeep 会自动退出，这是 Android 系统的限制。如果您的启动器启用了主题图标（动态图标配色），部分图标在主屏幕上可能显示为相同的样式。</string>
     <string name="title_download_quality">下载质量</string>
     <string name="title_track_info">音轨信息</string>
     <string name="subtitle_download_quality">调整下载质量</string>
-    <string name="subtitle_local_network_denied">您需要授予Navic对本地网络的访问权限，以便访问您的服务器。</string>
+    <string name="subtitle_local_network_denied">您需要授予 MeloKeep 对本地网络的访问权限，以便访问您的服务器。</string>
     <string name="option_download_custom_quality">使用自定义下载质量</string>
     <string name="option_cover_art_action_disabled">禁用</string>
     <string name="option_cover_art_action_show_lyrics">显示歌词</string>
@@ -360,7 +360,7 @@
     <string name="title_lyric_providers">歌词来源</string>
     <string name="title_audio_effects">音效</string>
     <string name="title_chat">聊天</string>
-    <string name="subtitle_notifications_denied">请授予 Navic 通知权限，以接收下载和同步通知。</string>
+    <string name="subtitle_notifications_denied">请授予 MeloKeep 通知权限，以接收下载和同步通知。</string>
     <string name="subtitle_equalizer">均衡器启用</string>
     <string name="subtitle_equalizer_disabled">均衡器禁用</string>
     <string name="subtitle_configure_lyric_providers">选择歌词获取来源</string>
@@ -401,7 +401,7 @@
     <string name="option_list_view_mode_grid">网格</string>
 	<string name="title_fonts_external">外部字体</string>
 	<string name="option_status_bar_lyrics_offset">状态栏歌词时间（− 延后 / + 提前）</string>
-	<string name="title_link_confirmation">即将离开 Navic</string>
+	<string name="title_link_confirmation">即将离开 MeloKeep</string>
 	<string name="title_sleep_timer_time">时间</string>
 	<string name="title_sleep_timer_songs">歌曲</string>
 	<string name="option_use_amoled_theme">使用 AMOLED 主题</string>

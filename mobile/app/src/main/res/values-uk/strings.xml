@@ -80,7 +80,7 @@
 	<string name="subtitle_download_quality">Налаштуйте якість завантаженої музики</string>
 	<string name="subtitle_dynamic_theming">Автоматично підбирати оформлення альбомів і виконавців за кольорами обкладинки</string>
 	<string name="subtitle_app_icon_designer">Дизайн: %1$s</string>
-	<string name="subtitle_local_network_denied">Щоб підключитися до сервера, надайте Navic доступ до локальної мережі.</string>
+	<string name="subtitle_local_network_denied">Щоб підключитися до сервера, надайте MeloKeep доступ до локальної мережі.</string>
 	<string name="subtitle_configure_lyric_providers">Виберіть, звідки завантажувати тексти пісень</string>
 	<string name="option_off">Вимкнено</string>
 	<string name="option_now_playing_background_style">Стиль фону</string>
@@ -352,7 +352,7 @@
 	<string name="notice_queue_duplicate">Ця пісня вже є в черзі. Додати її ще раз?</string>
 	<string name="notice_local_network_denied">Доступ заборонено</string>
 	<string name="notice_link_confirmation">Це посилання відкриє такий вебсайт:</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Цю дію неможливо скасувати</string>
 	<string name="info_error">Щось пішло не так.</string>
 	<string name="info_error_show">Показати подробиці</string>
@@ -415,8 +415,8 @@
 	<string name="info_repeat_off">Повтор вимкнено</string>
 	<string name="info_repeat_one">Повтор однієї композиції</string>
 	<string name="info_repeat_all">Повтор усіх композицій</string>
-	<string name="info_app_icon">Після зміни значка Navic закриється — цього вимагає Android. Якщо ваш лаунчер автоматично змінює кольори значків відповідно до теми, деякі варіанти на головному екрані можуть виглядати однаково.</string>
-	<string name="info_lyric_provider_disclaimer">Якщо ввімкнути LRCLIB та/або LyricsPlus, застосунок надсилатиме запити до сторонніх вебсервісів, не пов’язаних із Navic.</string>
+	<string name="info_app_icon">Після зміни значка MeloKeep закриється — цього вимагає Android. Якщо ваш лаунчер автоматично змінює кольори значків відповідно до теми, деякі варіанти на головному екрані можуть виглядати однаково.</string>
+	<string name="info_lyric_provider_disclaimer">Якщо ввімкнути LRCLIB та/або LyricsPlus, застосунок надсилатиме запити до сторонніх вебсервісів, не пов’язаних із MeloKeep.</string>
 	<string name="action_scroll_down">Прокрутити вниз</string>
 	<string name="title_audio_effects">Аудіоефекти</string>
 	<string name="subtitle_audio_effects">Налаштуйте звучання музики</string>
@@ -432,7 +432,7 @@
 	<string name="title_top_artists">Найпопулярніші виконавці</string>
 	<string name="title_top_albums">Найпопулярніші альбоми</string>
 	<string name="title_chat">Чат</string>
-	<string name="subtitle_notifications_denied">Щоб отримувати сповіщення про завантаження та синхронізацію, вам потрібно надати Navic дозвіл на надсилання сповіщень.</string>
+	<string name="subtitle_notifications_denied">Щоб отримувати сповіщення про завантаження та синхронізацію, вам потрібно надати MeloKeep дозвіл на надсилання сповіщень.</string>
 	<string name="subtitle_enable_ratings">Увімкнути 5-зіркові оцінки для музики</string>
 	<string name="option_hide_bottom_bar_if_idle">Приховувати під час бездіяльності</string>
 	<string name="option_account_instance">URL-адреса екземпляра</string>

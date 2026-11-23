@@ -163,6 +163,8 @@ import paige.navic.ui.theme.meloGlassSurface
 import paige.navic.ui.theme.meloGoldContainer
 import paige.navic.ui.theme.meloGoldText
 import paige.navic.ui.theme.tabularNums
+import paige.navic.util.getOrNull
+import paige.navic.util.peekOrNull
 import paige.navic.util.toHoursMinutesSeconds
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1683,17 +1685,21 @@ fun MeloLikedSongsScreen() {
 								)
 							}
 						} else {
+							val liveCount = songsLazyItems?.itemCount ?: 0
 							items(
-								count = itemCount,
-								key = { idx -> songsLazyItems?.peek(idx)?.id ?: "liked-song-$idx" },
+								count = liveCount,
+								key = { idx ->
+									songsLazyItems?.peekOrNull(idx)?.id?.let { "liked-song-$it" }
+										?: "liked-song-idx-$idx"
+								},
 								contentType = { "track" }
 							) { idx ->
-								val song = songsLazyItems?.get(idx)
+								val song = songsLazyItems?.getOrNull(idx)
 								if (song != null) {
 									val isSelected = selectedSongIds[song.id] == true
 									val dlStatus = downloadsMap[song.id]?.status
 									val isFirst = idx == 0
-									val isLast = idx == itemCount - 1
+									val isLast = idx == (songsLazyItems?.itemCount ?: 0) - 1
 									val qualityTag = remember(song.id, song.bitDepth, song.fileExtension, song.bitRate) {
 										libraryFormatQuietQuality(song.bitDepth, song.fileExtension, song.bitRate)
 									}
@@ -1829,7 +1835,6 @@ fun MeloLikedSongsScreen() {
 							)
 						}
 					} else {
-						val rowCount = (albumCount + 1) / 2
 						LazyColumn(
 							modifier = Modifier.fillMaxSize(),
 							contentPadding = PaddingValues(
@@ -1839,11 +1844,13 @@ fun MeloLikedSongsScreen() {
 								bottom = MeloBottomChromeClearance
 							)
 						) {
+							val liveCount = albumsLazyItems?.itemCount ?: 0
+							val liveRowCount = (liveCount + 1) / 2
 							items(
-								count = rowCount,
+								count = liveRowCount,
 								key = { rowIdx ->
-									albumsLazyItems?.peek(rowIdx * 2)?.id?.let { "liked-album-row-$it" }
-										?: "liked-album-row-$rowIdx"
+									albumsLazyItems?.peekOrNull(rowIdx * 2)?.id?.let { "liked-album-row-$it" }
+										?: "liked-album-row-idx-$rowIdx"
 								},
 								contentType = { "album-grid-row" }
 							) { rowIdx ->
@@ -1853,14 +1860,16 @@ fun MeloLikedSongsScreen() {
 										.padding(vertical = 6.dp),
 									horizontalArrangement = Arrangement.spacedBy(12.dp)
 								) {
-									val first = albumsLazyItems?.get(rowIdx * 2)
-									val second = albumsLazyItems?.get(rowIdx * 2 + 1)
+									val first = albumsLazyItems?.getOrNull(rowIdx * 2)
+									val second = albumsLazyItems?.getOrNull(rowIdx * 2 + 1)
 									if (first != null) {
 										ArtistAlbumGridCard(
 											album = first,
 											modifier = Modifier.weight(1f),
 											onClick = { backStack.add(Screen.CollectionDetail(first.id, "album")) }
 										)
+									} else {
+										Spacer(Modifier.weight(1f))
 									}
 									if (second != null) {
 										ArtistAlbumGridCard(
@@ -1897,15 +1906,19 @@ fun MeloLikedSongsScreen() {
 							),
 							verticalArrangement = Arrangement.spacedBy(0.dp)
 						) {
+							val liveCount = artistsLazyItems?.itemCount ?: 0
 							items(
-								count = artistCount,
-								key = { idx -> artistsLazyItems?.peek(idx)?.id ?: "liked-artist-$idx" },
+								count = liveCount,
+								key = { idx ->
+									artistsLazyItems?.peekOrNull(idx)?.id?.let { "liked-artist-$it" }
+										?: "liked-artist-idx-$idx"
+								},
 								contentType = { "artist" }
 							) { idx ->
-								val artist = artistsLazyItems?.get(idx)
+								val artist = artistsLazyItems?.getOrNull(idx)
 								if (artist != null) {
 									val isFirst = idx == 0
-									val isLast = idx == artistCount - 1
+									val isLast = idx == (artistsLazyItems?.itemCount ?: 0) - 1
 									Surface(
 										onClick = { backStack.add(Screen.ArtistDetail(artist.id)) },
 										shape = libraryGroupedItemShape(isFirst, isLast),

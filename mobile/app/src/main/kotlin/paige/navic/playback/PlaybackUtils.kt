@@ -132,7 +132,7 @@ object PlaybackUtils {
 		}
 
 		return ClientInfo(
-			name = "Navic",
+			name = "MeloKeep",
 			platform = "Android",
 			maxAudioBitrate = bitrateKbps * 1000,
 			maxTranscodingAudioBitrate = bitrateKbps * 1000,

@@ -105,7 +105,7 @@
 	<string name="notice_copied">Copié dans le presse-papiers.</string>
 	<string name="notice_expiry">Expire dans %1$s</string>
 	<string name="notice_loading_lyrics">Chargement des paroles...\nCela peut prendre un moment.</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Cette action est irréversible</string>
 	<string name="info_error">Une erreur s\'est produite.</string>
 	<string name="info_error_show">Afficher les détails</string>
@@ -356,7 +356,7 @@
 	<string name="subtitle_download_quality">Ajuster la qualité des morceaux téléchargés</string>
 	<string name="subtitle_dynamic_theming">Thème dynamique pour l\'affichage des albums et des artistes, en fonction de l\'illustration de couverture</string>
 	<string name="subtitle_app_icon_designer">Conçu par : %1$s</string>
-	<string name="subtitle_local_network_denied">Vous devez autoriser Navic à accéder à votre réseau local pour que votre serveur soit accessible.</string>
+	<string name="subtitle_local_network_denied">Vous devez autoriser MeloKeep à accéder à votre réseau local pour que votre serveur soit accessible.</string>
 	<string name="option_sort_year">Année</string>
 	<string name="option_choose_app_icon">Icône de l\'application</string>
 	<string name="option_download_custom_quality">Utiliser une qualité de téléchargement personnalisée</string>
@@ -364,7 +364,7 @@
 	<string name="action_open_settings">Ouvrir les paramètres</string>
 	<string name="notice_local_network_denied">Permission refusée</string>
 	<string name="info_download_quality">Les préréglages de meilleure qualité occupent davantage d\'espace de stockage et de données. Le transcodage peut allonger les délais de téléchargement. Sélectionnez « Sans perte » si vous rencontrez des problèmes.</string>
-	<string name="info_app_icon">Android requiert de fermer Navic afin de changer l\'icône de l\'application . Certaines icônes peuvent sembler identique sur votre écran d\'accueil si votre lanceur d\'application modifie dynamiquement la couleur des icônes.</string>
+	<string name="info_app_icon">Android requiert de fermer MeloKeep afin de changer l\'icône de l\'application . Certaines icônes peuvent sembler identique sur votre écran d\'accueil si votre lanceur d\'application modifie dynamiquement la couleur des icônes.</string>
 	<string name="option_cover_art_action">Appui sur l\'illustration de couverture</string>
 	<string name="option_cover_art_action_disabled">Désactivé</string>
 	<string name="option_cover_art_action_show_lyrics">Montrer les paroles</string>
@@ -381,7 +381,7 @@
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
 	<string name="subtitle_configure_lyric_providers">Choisir d\'où les paroles sont récupérées</string>
-	<string name="title_link_confirmation">Sortir de Navic</string>
+	<string name="title_link_confirmation">Sortir de MeloKeep</string>
 	<plurals name="count_minutes_ago">
 		<item quantity="one">Il y\'a %1$d minute</item>
 		<item quantity="many">Il y\'a %1$d minutes</item>
@@ -414,7 +414,7 @@
 	<string name="title_top_artists">Top artistes</string>
 	<string name="title_top_albums">Top albums</string>
 	<string name="title_chat">Messagerie</string>
-	<string name="subtitle_notifications_denied">Vous devez accorder à Navic les autorisations nécessaires pour recevoir les notifications de téléchargement et de synchronisation.</string>
+	<string name="subtitle_notifications_denied">Vous devez accorder à MeloKeep les autorisations nécessaires pour recevoir les notifications de téléchargement et de synchronisation.</string>
 	<string name="subtitle_enable_ratings">Activer les notes 5 étoiles pour les titres</string>
 	<string name="subtitle_custom_headers">Informations complémentaires jointes à chaque demande</string>
 	<string name="subtitle_ignore_ssl_certificates">N\'activez cette option que si vous savez ce que vous faites. Utile si vous utilisez un proxy pour analyser les requêtes.</string>

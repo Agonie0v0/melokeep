@@ -66,6 +66,8 @@ import paige.navic.ui.screen.album.component.AlbumListScreenSortButton
 import paige.navic.ui.screen.album.viewmodel.AlbumListViewModel
 import paige.navic.ui.util.withoutTop
 import paige.navic.ui.viewmodel.RootViewModel
+import paige.navic.util.getOrNull
+import paige.navic.util.peekOrNull
 
 @Composable
 fun AlbumListScreen(
@@ -205,7 +207,7 @@ fun AlbumListScreen(
 								items(lc.count) { i ->
 									val albumIndex = startAlbumIndex + i
 									if (albumIndex >= lazyPagingItems.itemCount) return@items
-									val album = lazyPagingItems[albumIndex] ?: return@items
+									val album = lazyPagingItems.getOrNull(albumIndex) ?: return@items
 
 									if (selectedViewMode == ListViewMode.Grid) {
 										AlbumListScreenGridItem(
@@ -281,8 +283,9 @@ fun AlbumListScreen(
 						} else {
 							items(
 								lazyPagingItems.itemCount,
-								key = { index -> lazyPagingItems.peek(index)?.id ?: index }) { index ->
-								val album = lazyPagingItems[index] ?: return@items
+								key = { index -> lazyPagingItems.peekOrNull(index)?.id ?: "album-idx-$index" }
+							) { index ->
+								val album = lazyPagingItems.getOrNull(index) ?: return@items
 
 								if (selectedViewMode == ListViewMode.Grid) {
 									AlbumListScreenGridItem(

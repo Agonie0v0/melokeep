@@ -7,19 +7,20 @@
 package paige.navic.ui.component.dialog
 
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import paige.navic.R
 import paige.navic.domain.manager.session.DownloadManager
 import paige.navic.domain.manager.ui.SnackBarManager
-import paige.navic.ui.component.common.SegmentedListButton
-import paige.navic.ui.component.common.SegmentedListButtonDefaults
+import paige.navic.melokeep.MeloGroupedCard
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Download
 
@@ -58,42 +59,46 @@ fun BulkDownloadDialog(
 			}
 		}
 
-		FormDialog(
+		MeloDialogBottomSheet(
 			onDismissRequest = onDismissRequest,
-			icon = { Icon(Icons.Outlined.Download, null) },
-			title = { Text(title) },
-			content = { Text(message) },
-			buttons = {
-				SegmentedListButton(
-					modifier = Modifier.fillMaxWidth(),
-					onClick = {
-						scope.launch {
-							when (target) {
-								is BulkDownloadTarget.Artist -> {
-									downloadManager.downloadCollection(target.songIds)
-								}
+			sheetTitle = title
+		) {
+			MeloSheetHeader(
+				icon = Icons.Outlined.Download,
+				title = title
+			)
 
-								is BulkDownloadTarget.Library -> {
-									downloadManager.downloadEntireLibrary()
-								}
-							}
-							snackBarManager.notify(R.string.notice_download_started)
-						}
-						onDismissRequest()
-					},
-					shapes = SegmentedListButtonDefaults.shapes(index = 0, count = 2),
-					colors = SegmentedListButtonDefaults.primaryColors()
-				) {
-					Text(stringResource(R.string.action_download))
-				}
-				SegmentedListButton(
-					modifier = Modifier.fillMaxWidth(),
-					onClick = onDismissRequest,
-					shapes = SegmentedListButtonDefaults.shapes(index = 1, count = 2)
-				) {
-					Text(stringResource(R.string.action_cancel))
-				}
+			MeloGroupedCard {
+				Text(
+					text = message,
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp)
+				)
 			}
-		)
+
+			MeloSheetActionButtons(
+				cancelLabel = stringResource(R.string.action_cancel),
+				confirmLabel = stringResource(R.string.action_download),
+				onCancel = onDismissRequest,
+				onConfirm = {
+					scope.launch {
+						when (target) {
+							is BulkDownloadTarget.Artist -> {
+								downloadManager.downloadCollection(target.songIds)
+							}
+
+							is BulkDownloadTarget.Library -> {
+								downloadManager.downloadEntireLibrary()
+							}
+						}
+						snackBarManager.notify(R.string.notice_download_started)
+					}
+					onDismissRequest()
+				}
+			)
+		}
 	}
 }

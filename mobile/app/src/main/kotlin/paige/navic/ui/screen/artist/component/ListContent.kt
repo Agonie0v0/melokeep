@@ -40,6 +40,8 @@ import paige.navic.ui.component.layout.ArtGrid
 import paige.navic.ui.component.layout.artGridPlaceholder
 import paige.navic.ui.screen.artist.ArtistListScreenGridItem
 import paige.navic.ui.util.withoutTop
+import paige.navic.util.getOrNull
+import paige.navic.util.peekOrNull
 
 @Composable
 fun ArtistListScreenContent(
@@ -133,7 +135,7 @@ fun ArtistListScreenContent(
 						items(lc.count) { i ->
 							val artistIndex = startArtistIndex + i
 							if (artistIndex >= artists.itemCount) return@items
-							val artist = artists[artistIndex] ?: return@items
+							val artist = artists.getOrNull(artistIndex) ?: return@items
 
 							if (selectedViewMode == ListViewMode.Grid) {
 								ArtistListScreenGridItem(
@@ -167,8 +169,11 @@ fun ArtistListScreenContent(
 						artistOffset += lc.count
 					}
 				} else {
-					items(artists.itemCount, key = { index -> artists.peek(index)?.id ?: index }) { index ->
-						val artist = artists[index] ?: return@items
+					items(
+						artists.itemCount,
+						key = { index -> artists.peekOrNull(index)?.id ?: "artist-idx-$index" }
+					) { index ->
+						val artist = artists.getOrNull(index) ?: return@items
 
 						if (selectedViewMode == ListViewMode.Grid) {
 							ArtistListScreenGridItem(

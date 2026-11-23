@@ -88,7 +88,7 @@
 	<string name="notice_copied">Скопировано в буфер обмена.</string>
 	<string name="notice_expiry">Истекает через %1$s</string>
 	<string name="notice_loading_lyrics">Загружаем текст...\nЭто займет время.</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Это не может быть отменено</string>
 	<string name="info_error">Что-то пошло не так.</string>
 	<string name="info_error_show">Показать детали</string>
@@ -343,7 +343,7 @@
 	<string name="subtitle_download_quality">Настроить качество скачиваемой музыки</string>
 	<string name="subtitle_dynamic_theming">Динамическое оформление страниц альбомов и исполнителей на основе обложек</string>
 	<string name="subtitle_app_icon_designer">Дизайнер: %1$s</string>
-	<string name="subtitle_local_network_denied">Вам необходимо предоставить Navic доступ к вашей локальной сети, чтобы ваш сервер был доступен.</string>
+	<string name="subtitle_local_network_denied">Вам необходимо предоставить MeloKeep доступ к вашей локальной сети, чтобы ваш сервер был доступен.</string>
 	<string name="option_artist_image_shape">Форма изображения исполнителя</string>
 	<string name="option_choose_app_icon">Иконка приложения</string>
 	<string name="option_stream_custom_quality">Пользовательское качество</string>
@@ -365,7 +365,7 @@
 	<string name="info_repeat_off">Повтор отключен</string>
 	<string name="info_repeat_one">Повторить один</string>
 	<string name="info_repeat_all">Повторить все</string>
-	<string name="info_app_icon">При смене иконки Navic закроется, так как этого требует Android. Некоторые иконки на главном экране могут выглядеть одинаково, если лаунчер динамически меняет их в соответствии с темой.</string>
+	<string name="info_app_icon">При смене иконки MeloKeep закроется, так как этого требует Android. Некоторые иконки на главном экране могут выглядеть одинаково, если лаунчер динамически меняет их в соответствии с темой.</string>
 	<string name="option_palette_specification">Спецификация палитры</string>
 	<string name="option_palette_style">Стиль палитры</string>
 	<string name="notice_local_network_denied">В разрешении отказано</string>
@@ -416,7 +416,7 @@
 	<string name="info_lyric_provider_disclaimer">Включении LRCLIB и/или LyricsPlus приведёт к отправке запросов на внешние и не связанные с приложением веб-сервисы.</string>
 	<string name="title_discord_server">Сервер Discord</string>
 	<string name="title_lyric_providers">Источники текстов песен</string>
-	<string name="title_link_confirmation">Покидаете Navic</string>
+	<string name="title_link_confirmation">Покидаете MeloKeep</string>
 	<string name="action_scroll_down">Прокрутить вниз</string>
 	<string name="title_audio_effects">Аудиоэффекты</string>
 	<string name="subtitle_audio_effects">Настроить звучание музыки</string>
@@ -440,7 +440,7 @@
 	<string name="title_top_songs">Популярные треки</string>
 	<string name="title_top_artists">Популярные исполнители</string>
 	<string name="title_top_albums">Популярные альбомы</string>
-	<string name="subtitle_notifications_denied">Чтобы получать уведомления о скачивании и синхронизации, необходимо предоставить Navic разрешения на уведомления.</string>
+	<string name="subtitle_notifications_denied">Чтобы получать уведомления о скачивании и синхронизации, необходимо предоставить MeloKeep разрешения на уведомления.</string>
 	<string name="option_enable_ratings">Включить оценки</string>
 	<string name="subtitle_enable_ratings">Включить 5-звездочные оценки для музыки</string>
 	<string name="option_account_instance">URL-адрес экземпляра</string>

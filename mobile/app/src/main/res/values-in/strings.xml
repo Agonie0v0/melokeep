@@ -187,7 +187,7 @@
 	<string name="option_mini_player_progress_style">Gaya kemajuan pemain mini</string>
 	<string name="title_albums">Album</string>
 	<string name="option_live_status">Status langsung</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="title_fonts_inbuilt">Terpasang</string>
 	<string name="title_sort_by">Urutkan berdasarkan</string>
 	<string name="title_create_share">Buat bagikan</string>
@@ -323,14 +323,14 @@
 	<string name="title_lyric_providers">Penyedia lirik</string>
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Meninggalkan Navic</string>
+	<string name="title_link_confirmation">Meninggalkan MeloKeep</string>
 	<string name="title_audio_effects">Efek audio</string>
 	<string name="title_chat">Obrolan</string>
 	<string name="subtitle_download_quality">Sesuaikan kualitas musik yang diunduh</string>
 	<string name="subtitle_dynamic_theming">Sesuaikan tema tampilan album dan artis secara dinamis berdasarkan gambar sampul</string>
 	<string name="subtitle_app_icon_designer">Dirancang oleh: %1$s</string>
-	<string name="subtitle_local_network_denied">Anda perlu memberikan izin kepada Navic untuk mengakses jaringan lokal agar server Anda dapat dijangkau.</string>
-	<string name="subtitle_notifications_denied">Anda perlu memberikan izin notifikasi kepada Navic untuk menerima notifikasi unduhan dan sinkronisasi.</string>
+	<string name="subtitle_local_network_denied">Anda perlu memberikan izin kepada MeloKeep untuk mengakses jaringan lokal agar server Anda dapat dijangkau.</string>
+	<string name="subtitle_notifications_denied">Anda perlu memberikan izin notifikasi kepada MeloKeep untuk menerima notifikasi unduhan dan sinkronisasi.</string>
 	<string name="subtitle_equalizer">Sesuaikan dan tingkatkan audio</string>
 	<string name="subtitle_equalizer_disabled">Tidak tersedia saat audio offload diaktifkan</string>
 	<string name="subtitle_configure_lyric_providers">Pilih sumber lirik</string>
@@ -444,7 +444,7 @@
 	<string name="info_repeat_off">Pengulangan nonaktif</string>
 	<string name="info_repeat_one">Ulangi satu lagu</string>
 	<string name="info_repeat_all">Ulangi semua</string>
-	<string name="info_app_icon">Mengubah ikon aplikasi akan menutup Navic karena Android mengharuskannya. Beberapa ikon mungkin terlihat sama di layar utama jika peluncur Anda menerapkan tema ikon secara dinamis.</string>
+	<string name="info_app_icon">Mengubah ikon aplikasi akan menutup MeloKeep karena Android mengharuskannya. Beberapa ikon mungkin terlihat sama di layar utama jika peluncur Anda menerapkan tema ikon secara dinamis.</string>
 	<string name="info_equalizer_unsupported">Perangkat Anda tidak mendukung fitur ini.</string>
 	<string name="info_equalizer_mode_not_builtin">Sesuaikan equalizer eksternal melalui aplikasi khususnya.</string>
 	<string name="info_lyric_provider_disclaimer">Mengaktifkan LRCLIB dan/atau LyricsPlus akan mengirimkan permintaan ke layanan web eksternal yang tidak berafiliasi.</string>

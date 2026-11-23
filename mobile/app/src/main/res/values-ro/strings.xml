@@ -59,7 +59,7 @@
 	<string name="title_lyric_providers">Furnizori de versuri</string>
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Părăsirea Navic</string>
+	<string name="title_link_confirmation">Părăsirea MeloKeep</string>
 	<string name="subtitle_appearance">Teme, culori, layout, iconița aplicației</string>
 	<string name="subtitle_now_playing">Personalizați vederile pentru redare și versuri</string>
 	<string name="subtitle_bottom_app_bar">Personalizați bara de jos și miniplayerul</string>
@@ -80,7 +80,7 @@
 	<string name="subtitle_download_quality">Ajustați calitatea muzicii descărcate</string>
 	<string name="subtitle_dynamic_theming">Tematizați dinamic vederile albumului și ale artistului pe baza copertii</string>
 	<string name="subtitle_app_icon_designer">Conceput de: %1$s</string>
-	<string name="subtitle_local_network_denied">Trebuie să acordați Navic acces la rețeaua locală pentru ca serverul dumneavoastră să fie accesibil.</string>
+	<string name="subtitle_local_network_denied">Trebuie să acordați MeloKeep acces la rețeaua locală pentru ca serverul dumneavoastră să fie accesibil.</string>
 	<string name="subtitle_configure_lyric_providers">Schimbați de unde sunt preluate versurile</string>
 	<string name="option_off">Dezactivat</string>
 	<string name="option_now_playing_background_style">Stil fundal</string>
@@ -342,7 +342,7 @@
 	<string name="notice_queue_duplicate">Această melodie este deja în coadă. Chiar doriți să o adăugați din nou?</string>
 	<string name="notice_local_network_denied">Permisiune refuzată</string>
 	<string name="notice_link_confirmation">Acest link vă duce la următorul site:</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Această acțiune nu poate fi anulată</string>
 	<string name="info_error">A aparut o eroare.</string>
 	<string name="info_error_show">Afișați detalii</string>
@@ -404,7 +404,7 @@
 	<string name="info_repeat_off">Repetare oprită</string>
 	<string name="info_repeat_one">Repetați una</string>
 	<string name="info_repeat_all">Repetați toate</string>
-	<string name="info_app_icon">Schimbarea pictogramei aplicației va închide Navic, deoarece Android necesită acest lucru. Unele iconițe pot arăta identic pe ecranul principal dacă lansatorul aplică dinamic teme de culoare al iconiței.</string>
-	<string name="info_lyric_provider_disclaimer">Activarea LRCLIB și/sau LyricsPlus va trimite cereri către servicii web externe și neafiliate cu Navic.</string>
+	<string name="info_app_icon">Schimbarea pictogramei aplicației va închide MeloKeep, deoarece Android necesită acest lucru. Unele iconițe pot arăta identic pe ecranul principal dacă lansatorul aplică dinamic teme de culoare al iconiței.</string>
+	<string name="info_lyric_provider_disclaimer">Activarea LRCLIB și/sau LyricsPlus va trimite cereri către servicii web externe și neafiliate cu MeloKeep.</string>
 	<string name="info_dynamic_replay_gain">ReplayGain Dinamic</string>
 </resources>

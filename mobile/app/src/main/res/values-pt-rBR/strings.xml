@@ -84,7 +84,7 @@
 	<string name="notice_copied">Copiado para a área de transferência.</string>
 	<string name="notice_expiry">Expira em %1$s</string>
 	<string name="notice_loading_lyrics">Carregando letra...\nIsso pode levar algum tempo.</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Essa ação não pode ser desfeita!</string>
 	<string name="info_error">Algo deu errado.</string>
 	<string name="info_error_show">Mostrar detalhes</string>
@@ -294,7 +294,7 @@
 	<string name="info_repeat_off">Repetir desativado</string>
 	<string name="info_repeat_one">Repetir atual</string>
 	<string name="info_repeat_all">Repetir todas</string>
-	<string name="info_app_icon">Alterar o ícone do aplicativo irá fechar o Navic, pois isso é uma exigência do Android. Talvez alguns ícones pareçam idênticos na sua tela inicial se o seu launcher aplica temas dinâmicos no ícone.</string>
+	<string name="info_app_icon">Alterar o ícone do aplicativo irá fechar o MeloKeep, pois isso é uma exigência do Android. Talvez alguns ícones pareçam idênticos na sua tela inicial se o seu launcher aplica temas dinâmicos no ícone.</string>
 	<string name="info_lyric_provider_disclaimer">Ativar o LRCLIB e/ou o LyricsPlus irá fazer requisições a serviços externos e não afiliados.</string>
 	<string name="option_cover_art_quality">Qualidade da capa</string>
 	<string name="option_stream_custom_quality">Usar qualidade alternativa para streaming</string>
@@ -349,11 +349,11 @@
 	<string name="title_account">Conta</string>
 	<string name="title_track_info">Informações da faixa</string>
 	<string name="title_lyric_providers">Provedores de letras</string>
-	<string name="title_link_confirmation">Saindo do Navic</string>
+	<string name="title_link_confirmation">Saindo do MeloKeep</string>
 	<string name="subtitle_download_quality">Ajustar a qualidade da música baixada</string>
 	<string name="subtitle_dynamic_theming">Alterar dinamicamente o tema das páginas de artista e álbum baseado na capa</string>
 	<string name="notice_local_network_denied">Permissão negada</string>
-	<string name="subtitle_local_network_denied">Você precisa permitir o acesso à rede local ao Navic para que seja possível acessar o seu servidor.</string>
+	<string name="subtitle_local_network_denied">Você precisa permitir o acesso à rede local ao MeloKeep para que seja possível acessar o seu servidor.</string>
 	<string name="info_download_quality">Predefinições de qualidade mais altas utilizam mais espaço e dados. A transcodificação pode aumentar o tempo de download. Selecione "Lossless" se encontrar algum problema.</string>
 	<string name="notice_added_to_queue">Adicionado à fila.</string>
 	<string name="option_choose_app_icon">Ícone do aplicativo</string>

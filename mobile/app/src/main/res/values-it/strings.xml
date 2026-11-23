@@ -30,7 +30,7 @@
     <string name="action_view_on_musicbrainz">Vedi su MusicBrainz</string>
     <string name="action_view_shares">Condivisioni</string>
     <string name="info_action_is_permanent">Questa azione non può essere annullata</string>
-    <string name="info_app_version">Navic %1$s</string>
+    <string name="info_app_version">MeloKeep %1$s</string>
     <string name="info_error">Qualcosa è andato storto.</string>
     <string name="info_error_show">Mostra dettagli</string>
     <string name="info_no_other_playlists">Non hai nessun\'altra playlist.</string>
@@ -356,11 +356,11 @@
     <string name="subtitle_app_icon_designer">Disegnato da: %1$s</string>
     <string name="option_choose_app_icon">Icona dell\'app</string>
     <string name="option_dynamic_theming">Tema dinamico</string>
-    <string name="info_app_icon">Cambiare icona, chiuderà Navic come richiesto da Android. Alcune icone potrebbero sembrare identiche nella home se il launcher applica un tema dinamico ai colori dell\'icona.</string>
+    <string name="info_app_icon">Cambiare icona, chiuderà MeloKeep come richiesto da Android. Alcune icone potrebbero sembrare identiche nella home se il launcher applica un tema dinamico ai colori dell\'icona.</string>
     <string name="title_download_quality">Qualità download</string>
     <string name="title_track_info">Info traccia</string>
     <string name="subtitle_download_quality">Regola la qualità delle tracce scaricate</string>
-    <string name="subtitle_local_network_denied">Devi permettere a Navic di accedere alla rete locale per rendere il server raggiungibile.</string>
+    <string name="subtitle_local_network_denied">Devi permettere a MeloKeep di accedere alla rete locale per rendere il server raggiungibile.</string>
     <string name="option_auto_fill_queue">Riempi automaticamente la coda</string>
     <string name="subtitle_auto_fill_queue">Aggiunge automaticamente una canzone casuale quando una sola è rimanente nella coda</string>
     <string name="option_download_custom_quality">Qualità di download custom</string>
@@ -380,7 +380,7 @@
     <string name="title_lyric_providers">Provider dei testi</string>
     <string name="title_github">GitHub</string>
     <string name="title_codeberg">Codeberg</string>
-    <string name="title_link_confirmation">Uscita da Navic</string>
+    <string name="title_link_confirmation">Uscita da MeloKeep</string>
     <string name="subtitle_configure_lyric_providers">Scegli dove prendere i testi</string>
     <plurals name="count_minutes_ago">
         <item quantity="one">%1$d minuto fa</item>
@@ -422,7 +422,7 @@
     <string name="title_top_songs">Top canzoni</string>
     <string name="title_top_artists">Top artisti</string>
     <string name="title_top_albums">Top album</string>
-    <string name="subtitle_notifications_denied">Devi concedere a Navic l\'autorizzazione alle notifiche per ricevere le notifiche di download e sincronizzazione.</string>
+    <string name="subtitle_notifications_denied">Devi concedere a MeloKeep l\'autorizzazione alle notifiche per ricevere le notifiche di download e sincronizzazione.</string>
     <string name="subtitle_enable_ratings">Abilita valutazioni 5-stelle per la musica</string>
     <string name="option_account_instance">Url istanza</string>
     <string name="option_lyrics_fake_beat_by_beat">Effetto beat-by-beat finto</string>

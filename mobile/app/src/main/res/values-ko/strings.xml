@@ -61,7 +61,7 @@
     <string name="title_lyric_providers">가사 제공자</string>
     <string name="title_github">GitHub</string>
     <string name="title_codeberg">Codeberg</string>
-    <string name="title_link_confirmation">Navic을 떠나고 있어요</string>
+    <string name="title_link_confirmation">MeloKeep을 떠나고 있어요</string>
     <string name="title_audio_effects">오디오 이펙트</string>
     <string name="subtitle_appearance">테마, 색상, 레이아웃, 앱 아이콘</string>
     <string name="subtitle_now_playing">재생 중 &amp; 가사 보기 설정</string>

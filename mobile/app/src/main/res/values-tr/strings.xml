@@ -121,7 +121,7 @@
 	<string name="notice_copied">Panoya kopyalandı.</string>
 	<string name="notice_expiry">%1$s içinde süresi dolacak.</string>
 	<string name="notice_loading_lyrics">Şarkı sözleri yükleniyor...\nBu biraz zaman alabilir.</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Bu işlem geri alınamaz</string>
 	<string name="info_error">Bir şeyler ters gitti.</string>
 	<string name="info_error_show">Ayrıntıları göster</string>
@@ -377,7 +377,7 @@
 	<string name="notice_link_confirmation">Bu bağlantı sizi aşağıdaki siteye götürecek:</string>
 	<string name="info_repeat_off">Tekrarlama kapalı</string>
 	<string name="subtitle_offline_mode">Uygulamanın ne zaman çevrimdışı moda geçmesi gerektiğini belirler. Uygulamanın yeniden başlatılmasını gerektirir</string>
-	<string name="subtitle_local_network_denied">Sunucunuza erişilebilir olması için Navic\'e yerel ağınıza erişim izni vermeniz gerekir.</string>
+	<string name="subtitle_local_network_denied">Sunucunuza erişilebilir olması için MeloKeep\'e yerel ağınıza erişim izni vermeniz gerekir.</string>
 	<string name="option_cover_art_quality">Kapak tasarımı kalitesi</string>
 	<string name="option_explicit_playback">Müstehcen içerikli oynatma</string>
 	<string name="info_library_download_warning">Kütüphanenizin tamamını indirmek istediğinizden emin misiniz?\nBu işlem, daha önce indirdiğiniz öğeleri atlayacaktır, ancak yine de önemli miktarda depolama alanı ve veri tüketebilir.</string>
@@ -391,9 +391,9 @@
 	<string name="action_trigger_sync">Manuel senkronizasyonu başlat</string>
 	<string name="info_streaming_quality">Daha yüksek kaliteli ön ayarlar daha fazla veri kullanır. Kod dönüştürme işlemi, yükleme sürelerini ciddi şekilde etkileyebilir ve şarkı sözlerinin senkronizasyonunun bozulmasına neden olabilir. Herhangi bir sorunla karşılaşırsanız “Kayıpsız” seçeneğini seçin.</string>
 	<string name="info_download_quality">Daha yüksek kaliteli ön ayarlar daha fazla depolama alanı ve veri tüketir. Kod dönüştürme işlemi indirme sürelerini uzatabilir. Herhangi bir sorunla karşılaşırsanız “Kayıpsız” seçeneğini seçin.</string>
-	<string name="info_app_icon">Uygulama simgesini değiştirmek Navic\'i kapatacaktır çünkü Android bunu gerektirir. Başlatıcınız (launcher) simge renklerini dinamik olarak temalıyorsa, bazı simgeler ana ekranınızda aynı görünebilir.</string>
+	<string name="info_app_icon">Uygulama simgesini değiştirmek MeloKeep\'i kapatacaktır çünkü Android bunu gerektirir. Başlatıcınız (launcher) simge renklerini dinamik olarak temalıyorsa, bazı simgeler ana ekranınızda aynı görünebilir.</string>
 	<string name="info_lyric_provider_disclaimer">LRCLIB ve/veya LyricsPlus’ı etkinleştirdiğinizde, harici ve bağlantılı olmayan web hizmetlerine istekler gönderilecektir.</string>
-	<string name="title_link_confirmation">Navicden ayrıl</string>
+	<string name="title_link_confirmation">MeloKeep\'ten ayrıl</string>
 	<string name="subtitle_dynamic_theming">Albüm ve sanatçı sayfalarını kapak resmine göre dinamik olarak temalandır</string>
 	<string name="option_cover_art_action">Kapak görseline dokunulduğunda yapılacak işlem</string>
 </resources>

@@ -75,7 +75,7 @@
 	<string name="subtitle_download_quality">Ajusteu la qualitat de la música descarregada</string>
 	<string name="subtitle_dynamic_theming">Ajusteu dinàmicament el tema de l\'àlbum i l\'artista en funció de la portada</string>
 	<string name="subtitle_app_icon_designer">Dissenyat per: %1$s</string>
-	<string name="subtitle_local_network_denied">Heu de donar accés a Navic a la vostra xarxa local per tal que el vostre servidor sigui accessible.</string>
+	<string name="subtitle_local_network_denied">Heu de donar accés a MeloKeep a la vostra xarxa local per tal que el vostre servidor sigui accessible.</string>
 	<string name="option_off">Desactivat</string>
 	<string name="option_now_playing_background_style">Estil de fons</string>
 	<string name="option_now_playing_background_style_static">Estàtic</string>
@@ -305,7 +305,7 @@
 	<string name="notice_login_suggestion">Potser volíeu dir...</string>
 	<string name="notice_queue_duplicate">Aquesta cançó ja està a la cua. La voleu afegir de nou igualment?</string>
 	<string name="notice_local_network_denied">Permís de xarxa denegat</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Aquesta acció no es pot desfer</string>
 	<string name="info_error">Alguna cosa no ha sortit bé.</string>
 	<string name="info_error_show">Mostrar detalls</string>
@@ -367,7 +367,7 @@
 	<string name="info_repeat_off">Repetició apagada</string>
 	<string name="info_repeat_one">Repetir una</string>
 	<string name="info_repeat_all">Repetir totes</string>
-	<string name="info_app_icon">Canviar l\'icona de l\'app tancarà Navic; així ho requereix Android. Algunes icones poden veure\'s idèntiques en la vostra pantalla d\'inici si el llançador del sistema aplica temes o colors dinàmics a les icones.</string>
+	<string name="info_app_icon">Canviar l\'icona de l\'app tancarà MeloKeep; així ho requereix Android. Algunes icones poden veure\'s idèntiques en la vostra pantalla d\'inici si el llançador del sistema aplica temes o colors dinàmics a les icones.</string>
 	<string name="option_auto_fill_queue">Emplenament automàtic de la cua</string>
 	<string name="subtitle_auto_fill_queue">Afegeix una cançó aleatòria a la cua quan només en queda una</string>
 	<string name="option_list_view_mode">Mode de visualització</string>
@@ -380,7 +380,7 @@
 	<string name="title_lyric_providers">Proveïdors de lletres</string>
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Esteu sortint de Navic</string>
+	<string name="title_link_confirmation">Esteu sortint de MeloKeep</string>
 	<string name="subtitle_configure_lyric_providers">Canvieu la font des d\'on s\'obtenen les lletres</string>
 	<plurals name="count_minutes_ago">
 		<item quantity="one">Fa %1$d minut</item>

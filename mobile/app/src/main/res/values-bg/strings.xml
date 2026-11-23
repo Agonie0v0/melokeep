@@ -58,7 +58,7 @@
 	<string name="subtitle_appearance">Теми, цветове, подредба, икона на приложението</string>
 	<string name="subtitle_trigger_sync">Веднага кара пълно дърпане на библиотеката</string>
 	<string name="subtitle_pending_actions">%1$d елементи чакат за мрежа</string>
-	<string name="title_link_confirmation">Напускате Navic</string>
+	<string name="title_link_confirmation">Напускате MeloKeep</string>
 	<string name="title_miscellaneous">Смесени</string>
 	<string name="title_mini_player">Мини възпроизводител</string>
 	<string name="title_network">Мрежа</string>
@@ -71,7 +71,7 @@
 	<string name="subtitle_audio_offload">Експериментално. Нужно е рестартиране на приложението. Може да има конфликт с безмеждинно възпроизвеждане</string>
 	<string name="subtitle_developer">Отсраняване на грешки, тестване и сигнали</string>
 	<string name="subtitle_check_for_updates">Провери GitHub за актуализации, когато приложението се отвори</string>
-	<string name="subtitle_local_network_denied">Трябва да позволиш на Navic да има достъп до локалната ви мрежа за да може вашия сървър да е достъпен.</string>
+	<string name="subtitle_local_network_denied">Трябва да позволиш на MeloKeep да има достъп до локалната ви мрежа за да може вашия сървър да е достъпен.</string>
 	<string name="subtitle_configure_lyric_providers">Променете от къде са взети текстовете</string>
 	<string name="option_off">Изключено</string>
 	<string name="title_logs">Логове</string>

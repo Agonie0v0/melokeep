@@ -26,7 +26,7 @@
     <string name="action_view_on_lastfm">Auf last.fm anzeigen</string>
     <string name="action_view_on_musicbrainz">Auf MusicBrainz anzeigen</string>
     <string name="info_action_is_permanent">Diese Aktion ist unwiderruflich</string>
-    <string name="info_app_version">Navic %1$s</string>
+    <string name="info_app_version">MeloKeep %1$s</string>
     <string name="info_error">Etwas ist schiefgelaufen.</string>
     <string name="info_error_show">Details anzeigen</string>
     <string name="info_no_other_playlists">Du hast außer dieser keine weiteren Playlists.</string>
@@ -333,13 +333,13 @@
     <string name="info_repeat_off">Wiederholung aus</string>
     <string name="info_repeat_one">Wiederhole Titel</string>
     <string name="info_repeat_all">Wiederhole alle</string>
-    <string name="info_app_icon">Das Ändern des App-Symbols schließt Navic, da dies von Android erforderlich ist. Einige Symbole können auf dem Startbildschirm identisch aussehen, wenn der Launcher die Symbole dynamisch anpasst.</string>
+    <string name="info_app_icon">Das Ändern des App-Symbols schließt MeloKeep, da dies von Android erforderlich ist. Einige Symbole können auf dem Startbildschirm identisch aussehen, wenn der Launcher die Symbole dynamisch anpasst.</string>
     <string name="title_theme_mode">Themen Modus</string>
     <string name="title_track_info">Lied Informationen</string>
     <string name="subtitle_download_quality">Download Qualität</string>
     <string name="subtitle_dynamic_theming">Album- und Künstleransicht werden dynamisch an das Cover angepasst</string>
     <string name="subtitle_app_icon_designer">Entworfen von: %1$s</string>
-    <string name="subtitle_local_network_denied">Navic benötigt Netzwerkberechtigungen um deinen Server zu erreichen.</string>
+    <string name="subtitle_local_network_denied">MeloKeep benötigt Netzwerkberechtigungen um deinen Server zu erreichen.</string>
     <string name="option_artist_image_shape">Form des Künstlerbilds</string>
     <string name="option_sort_year">Jahr</string>
     <string name="option_choose_app_icon">App-Symbol</string>
@@ -362,7 +362,7 @@
     <string name="title_discord_server">Discord Server</string>
     <string name="title_lyric_providers">Lyrics Quelle</string>
     <string name="title_github">GitHub</string>
-    <string name="title_link_confirmation">Navic verlassen</string>
+    <string name="title_link_confirmation">MeloKeep verlassen</string>
     <string name="subtitle_configure_lyric_providers">Wähle die Liedtext-Quelle</string>
     <string name="option_auto_fill_queue">Wiedergabeliste automatisch füllen</string>
     <string name="subtitle_auto_fill_queue">zufälliges Lied hinzufügen falls nur noch eins in der Wiedergabeliste ist</string>
@@ -435,7 +435,7 @@
     <string name="title_chat">Chat</string>
     <string name="option_account_instance">Instanz-URL</string>
     <string name="action_send_message">Nachricht senden</string>
-    <string name="subtitle_notifications_denied">Navic benötigt Berechtigungen für Download- und Sync-Benachrichtigungen.</string>
+    <string name="subtitle_notifications_denied">MeloKeep benötigt Berechtigungen für Download- und Sync-Benachrichtigungen.</string>
     <string name="subtitle_ignore_ssl_certificates">Nur aktivieren, wenn du weißt, was du tust. Nützlich, wenn du einen Proxy nutzt um Anragen zu untersuchen.</string>
     <string name="option_preamp_tip">Wenn eine der Vorverstärker-Optionen auf einen sehr hohen Wert eingestellt wird, kann dies zu Audioverzerrungen führen.</string>
     <string name="option_dynamic_replaygain_tip">Wenn ReplayGain auf „Dynamisch“ eingestellt ist, wird die Albumverstärkung verwendet, falls ein Album abgespielt wird. Andernfalls wird die Titelverstärkung verwendet.</string>

@@ -1169,7 +1169,7 @@ fun segmentedShapeFor(index: Int, total: Int): Shape {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun NavicSegmentedRow(
+fun MeloSegmentedRow(
 	title: String,
 	subtitle: String? = null,
 	shape: Shape = RoundedCornerShape(14.dp),

@@ -69,7 +69,7 @@
 	<string name="subtitle_download_quality">ダウンロード楽曲の音質を調整</string>
 	<string name="subtitle_dynamic_theming">カバーアートに基づいてアルバムとアーティストのテーマを自動で設定する</string>
 	<string name="subtitle_app_icon_designer">デザイン：%1$s</string>
-	<string name="subtitle_local_network_denied">サーバーにアクセスできるようにするには、Navicにローカルネットワークへのアクセス権限を付与する必要があります。</string>
+	<string name="subtitle_local_network_denied">サーバーにアクセスできるようにするには、MeloKeepにローカルネットワークへのアクセス権限を付与する必要があります。</string>
 	<string name="option_off">オフ</string>
 	<string name="option_now_playing_background_style">背景のスタイル</string>
 	<string name="option_now_playing_background_style_static">固定</string>
@@ -137,8 +137,8 @@
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
 	<string name="title_audio_effects">オーディオ設定</string>
-	<string name="title_link_confirmation">Navicを離れる</string>
-	<string name="subtitle_notifications_denied">ダウンロードと同期の通知を受け取るために、Navicの通知をオンにしてください。</string>
+	<string name="title_link_confirmation">MeloKeepを離れる</string>
+	<string name="subtitle_notifications_denied">ダウンロードと同期の通知を受け取るために、MeloKeepの通知をオンにしてください。</string>
 	<string name="subtitle_configure_lyric_providers">歌詞の取得元を選択</string>
 	<string name="subtitle_audio_effects">音声の調整</string>
 	<string name="subtitle_enable_ratings">曲の五つ星評価を有効化</string>
@@ -358,7 +358,7 @@
 	<string name="notice_local_network_denied">アクセスが拒否されました</string>
 	<string name="notice_notifications_denied">アクセスが拒否されました</string>
 	<string name="notice_link_confirmation">このリンクは次のサイトに移動します:</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">この操作は取り消せません</string>
 	<string name="info_error">なんらかの問題が発生しました。</string>
 	<string name="info_error_show">詳細を表示</string>
@@ -425,7 +425,7 @@
 	<string name="info_repeat_off">リピートオフ</string>
 	<string name="info_repeat_one">一曲をリピート</string>
 	<string name="info_repeat_all">全曲をリピート</string>
-	<string name="info_app_icon">アプリアイコンを変更すると、Android の仕様により Navic が終了します。ランチャーがアイコンのテーマを動的に適用している場合、一部のアイコンはホーム画面上で同じように見えることがあります。</string>
+	<string name="info_app_icon">アプリアイコンを変更すると、Android の仕様により MeloKeep が終了します。ランチャーがアイコンのテーマを動的に適用している場合、一部のアイコンはホーム画面上で同じように見えることがあります。</string>
 	<string name="info_lyric_provider_disclaimer">LRCLIBやLyricsPlusを有効にすると、外部の無関係なウェブサービスへのリクエストが行われます。</string>
 	<string name="info_starred_songs">お気に入り</string>
 	<string name="info_duration_left">残り%1$s</string>

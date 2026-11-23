@@ -69,7 +69,6 @@ import paige.navic.melokeep.MeloGroupedCard
 import paige.navic.melokeep.MeloHairlineDivider
 import paige.navic.melokeep.MeloQuietEmptyState
 import paige.navic.melokeep.MeloSectionLabel
-import paige.navic.melokeep.MeloTrackMapper
 import paige.navic.ui.component.common.CoverArt
 import paige.navic.ui.core.UiState
 import paige.navic.ui.icons.Icons
@@ -220,12 +219,11 @@ private fun SongDetailQuietBody(
 	val fileEntries = remember(info, song) {
 		buildList {
 			if (song != null) {
-				val isMeloLocal = song.isExternal || MeloTrackMapper.isMeloSongId(song.id)
 				add(
 					SongInfoEntry(
 						id = -1001,
 						label = "来源",
-						value = if (isMeloLocal) "本地库" else "Navidrome"
+						value = resolveSongSourceLabel(song, defaultNavidromeLabel = "Navidrome")
 					)
 				)
 			}
@@ -479,7 +477,7 @@ private fun normalizeSongInfoValue(keyRes: Int, rawValue: String?): String? {
 	val clean = rawValue?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 		?: return null
 	if (clean.equals("External", ignoreCase = true)) {
-		return "本地库"
+		return "在线音源"
 	}
 	return when {
 		keyRes == R.string.info_track_bit_depth && !clean.contains("bit", ignoreCase = true) ->

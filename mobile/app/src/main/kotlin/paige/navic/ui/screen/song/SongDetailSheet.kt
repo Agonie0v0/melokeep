@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import io.github.agonie0v0.melokeep.shared.MeloSourceLabelRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -74,7 +75,9 @@ import org.koin.core.parameter.parametersOf
 import paige.navic.R
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.model.DomainSong
+import paige.navic.melokeep.MeloHairlineWidth
 import paige.navic.melokeep.MeloTrackMapper
+import paige.navic.melokeep.translateMeloSourceName
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.common.CoverArt
 import paige.navic.ui.core.UiState
@@ -306,12 +309,11 @@ internal fun SongDetailStudioContent(
 	val sourceRows = remember(info, song) {
 		buildList {
 			if (song != null) {
-				val isMeloLocal = song.isExternal || MeloTrackMapper.isMeloSongId(song.id)
 				add(
 					DetailRowItem(
 						id = -1001,
 						label = "曲目来源",
-						rawValue = if (isMeloLocal) "MeloKeep 本地库" else "Navidrome 曲库",
+						rawValue = resolveSongSourceLabel(song, defaultNavidromeLabel = "Navidrome 曲库"),
 						icon = Icons.Outlined.History
 					)
 				)
@@ -491,7 +493,15 @@ private fun SongOverviewStudioCard(
 	song: DomainSong?,
 	activeCoverArtId: String?
 ) {
-	val isMeloLocal = song != null && (song.isExternal || MeloTrackMapper.isMeloSongId(song.id))
+	val sourceBadge = remember(song?.id, song?.genre, song?.isExternal) {
+		song?.takeIf {
+			it.id.startsWith("device:") ||
+				it.id.startsWith("radio_") ||
+				MeloTrackMapper.isMeloSongId(it.id) ||
+				it.isExternal
+		}?.let { resolveSongSourceLabel(it, defaultNavidromeLabel = "Navidrome 曲库") }
+	}
+	val isMeloLocalBadge = sourceBadge == "MeloKeep 本地库"
 	val formatValue = remember(song?.fileExtension, song?.mimeType) {
 		song?.fileExtension?.takeIf { it.isNotBlank() }?.uppercase()
 			?: song?.mimeType?.substringAfterLast('/')?.takeIf { it.isNotBlank() }?.uppercase()
@@ -586,19 +596,34 @@ private fun SongOverviewStudioCard(
 						)
 					}
 
-					if (isMeloLocal) {
+					if (sourceBadge != null) {
 						Surface(
 							shape = RoundedCornerShape(6.dp),
-							color = MaterialTheme.colorScheme.meloGoldContainer,
-							border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.meloGoldBorder)
+							color = if (isMeloLocalBadge) {
+								MaterialTheme.colorScheme.meloGoldContainer
+							} else {
+								MaterialTheme.colorScheme.surfaceContainer
+							},
+							border = BorderStroke(
+								width = MeloHairlineWidth,
+								color = if (isMeloLocalBadge) {
+									MaterialTheme.colorScheme.meloGoldBorder
+								} else {
+									MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+								}
+							)
 						) {
 							Text(
-								text = "MeloKeep 本地库",
+								text = sourceBadge,
 								style = MaterialTheme.typography.labelSmall.copy(
 									fontSize = 10.sp,
 									fontWeight = FontWeight.SemiBold
 								),
-								color = MaterialTheme.colorScheme.meloGoldText,
+								color = if (isMeloLocalBadge) {
+									MaterialTheme.colorScheme.meloGoldText
+								} else {
+									MaterialTheme.colorScheme.onSurfaceVariant
+								},
 								modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
 							)
 						}
@@ -846,11 +871,40 @@ private fun SongDetailGroupSection(
 	}
 }
 
+internal fun resolveSongSourceLabel(
+	song: DomainSong,
+	defaultNavidromeLabel: String = "Navidrome 曲库"
+): String {
+	return when {
+		song.id.startsWith("device:") -> "手机本地"
+		song.id.startsWith("radio_") -> "网络电台"
+		MeloTrackMapper.isMeloSongId(song.id) -> {
+			val rawId = MeloTrackMapper.toRawTrackId(song.id)
+			if (
+				rawId.startsWith("asset:") ||
+				rawId.startsWith("file:") ||
+				song.genre.equals("local", ignoreCase = true)
+			) {
+				"MeloKeep 本地库"
+			} else {
+				val rawSource = song.genre?.trim().orEmpty()
+				MeloSourceLabelRegistry.resolve(rawSource)
+					?: translateMeloSourceName(rawSource).takeIf {
+						it.isNotBlank() && it != "未知音源"
+					}
+					?: rawSource.ifBlank { "在线音源" }
+			}
+		}
+		song.isExternal -> "在线音源"
+		else -> defaultNavidromeLabel
+	}
+}
+
 private fun normalizeFieldValue(keyRes: Int, rawValue: String?): String? {
 	val clean = rawValue?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 		?: return null
 	if (clean.equals("External", ignoreCase = true)) {
-		return "MeloKeep 本地库"
+		return "在线音源"
 	}
 	return when {
 		keyRes == R.string.info_track_bit_depth && !clean.contains("bit", ignoreCase = true) ->

@@ -178,7 +178,7 @@ class ExoDiscordIntegration(
 			?.let { coverArtUploadManager.getPublicUrl(it) }
 
 		return Activity(
-			name = "Navic",
+			name = "MeloKeep",
 			activityType = ActivityType.LISTENING,
 			state = song.artistName?.padEnd(2, INVISIBLE_CHARACTER),
 			details = song.title.padEnd(2, INVISIBLE_CHARACTER),

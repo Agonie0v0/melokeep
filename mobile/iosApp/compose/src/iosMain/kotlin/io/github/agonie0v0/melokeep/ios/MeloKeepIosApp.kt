@@ -1999,7 +1999,7 @@ private fun QueueManagerSheet(
 							contentType = { _, _ -> "queue-item" },
 						) { rowPos, (origIdx, item) ->
 							val isCurrent = origIdx == currentIndex
-							NavicSegmentedRow(
+							MeloSegmentedRow(
 								title = item.title,
 								subtitle = "${item.artist} · ${item.album}",
 								shape = segmentedShapeFor(rowPos, indexedMatches.size),

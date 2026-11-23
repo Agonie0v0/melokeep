@@ -58,7 +58,7 @@
 	<string name="title_lyric_providers">Text leverantör</string>
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Lämna Navic</string>
+	<string name="title_link_confirmation">Lämna MeloKeep</string>
 	<string name="subtitle_appearance">Teman, färger, layout, app ikon</string>
 	<string name="subtitle_now_playing">Anpassa nu spelas och sångtext vyerna</string>
 	<string name="subtitle_bottom_app_bar">Anpassa nedre barren &amp; mini spelaren</string>

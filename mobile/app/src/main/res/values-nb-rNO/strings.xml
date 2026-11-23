@@ -47,7 +47,7 @@
     <string name="subtitle_streaming_quality">Juster kvaliteten på musikk ved strømming</string>
     <string name="subtitle_download_quality">Justerer kvaliteten på nedlastet musikk</string>
     <string name="subtitle_app_icon_designer">Designet av: %1$s</string>
-    <string name="subtitle_local_network_denied">Navic trenger tilgang til ditt lokalenettverk for å nå tjeneren.</string>
+    <string name="subtitle_local_network_denied">MeloKeep trenger tilgang til ditt lokalenettverk for å nå tjeneren.</string>
     <string name="option_off">Av</string>
     <string name="option_now_playing_background_style">Bakgrunnsstil</string>
     <string name="option_now_playing_background_style_static">Statisk</string>
@@ -199,7 +199,7 @@
     <string name="notice_loading_lyrics">Laster ned sangtekst …\nDette kan ta en stund.</string>
     <string name="notice_login_suggestion">Mente du …</string>
     <string name="notice_queue_duplicate">Denne sangen er allerede i avspillingskøen. Vil du legge den til igjen?</string>
-    <string name="info_app_version">Navic %1$s</string>
+    <string name="info_app_version">MeloKeep %1$s</string>
     <string name="info_action_is_permanent">Dette kan ikke angres</string>
     <string name="info_error">Det oppstod en feil.</string>
     <string name="info_error_show">Vis detaljer</string>
@@ -338,7 +338,7 @@
     <string name="title_codeberg">Codeberg</string>
     <string name="title_github">Github</string>
     <string name="subtitle_auto_fill_queue">Legg til en tilfeldig sang når det kun er en sang igjen i avspillingskøen</string>
-    <string name="title_link_confirmation">Du forlater nå Navic</string>
+    <string name="title_link_confirmation">Du forlater nå MeloKeep</string>
     <string name="option_auto_fill_queue">Fyll avspillingskøen automatisk</string>
     <string name="subtitle_configure_lyric_providers">Endrer hvor sangtekster hentes fra</string>
     <string name="option_list_view_mode">Visningsmodus</string>
@@ -440,7 +440,7 @@
     <string name="subtitle_custom_headers">Ekstra informasjon som sendes med hver forespørsel</string>
     <string name="subtitle_enable_ratings">Slå på 5-stjernevurdering av musikk</string>
     <string name="subtitle_equalizer">Justering og forbedring av lyd</string>
-    <string name="subtitle_notifications_denied">Navic trenger tillatelse til å sende varsler for å slå på varsler om nedlasting og synkronisering.</string>
+    <string name="subtitle_notifications_denied">MeloKeep trenger tillatelse til å sende varsler for å slå på varsler om nedlasting og synkronisering.</string>
     <string name="option_lyrics_fake_beat_by_beat">Simuler ord-for-ord-synkronisering av sangtekster</string>
     <string name="subtitle_lyrics_fake_beat_by_beat">Simuler tidsstyring på ordnivå hvis det mangler</string>
     <string name="option_enable_discord_integration">Slå på Discord integrering</string>

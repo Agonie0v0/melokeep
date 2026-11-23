@@ -57,7 +57,7 @@
 	<string name="title_lyric_providers">Nhà cung cấp lời</string>
 	<string name="title_github">Github</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Thoát Navic</string>
+	<string name="title_link_confirmation">Thoát MeloKeep</string>
 	<string name="subtitle_appearance">Chủ đề, màu, bố cục, biểu tượng ứng dụng</string>
 	<string name="subtitle_now_playing">Tuỳ chỉnh phần đang phát &amp; lời bài hát</string>
 	<string name="subtitle_bottom_app_bar">Tuỳ chỉnh thanh dưới &amp; máy phát nhỏ</string>
@@ -80,7 +80,7 @@
 	<string name="subtitle_download_quality">Điều chỉnh chất lượng nhạc tải về</string>
 	<string name="subtitle_dynamic_theming">Tự động thay đổi giao diện trang album và nghệ sĩ dựa trên ảnh bìa</string>
 	<string name="subtitle_app_icon_designer">Thiết kế bởi: %1$s</string>
-	<string name="subtitle_local_network_denied">Bạn cần cấp cho Navic quyền truy cập mạng cục bộ để có thể kết nối đến máy chủ của bạn.</string>
+	<string name="subtitle_local_network_denied">Bạn cần cấp cho MeloKeep quyền truy cập mạng cục bộ để có thể kết nối đến máy chủ của bạn.</string>
 	<string name="subtitle_configure_lyric_providers">Chọn nơi cung cấp lời bài hát</string>
 	<string name="option_off">Tắt</string>
 	<string name="option_now_playing_background_style">Kiểu hình nền</string>

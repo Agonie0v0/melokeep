@@ -141,6 +141,8 @@ import paige.navic.ui.theme.meloGoldText
 import paige.navic.ui.theme.positive
 import paige.navic.ui.theme.tabularNums
 import paige.navic.ui.util.label
+import paige.navic.util.getOrNull
+import paige.navic.util.peekOrNull
 import paige.navic.util.toHoursMinutesSeconds
 
 private val VINYL_DISC_COLORS = listOf(Color(0xFF1D1E24), Color(0xFF0A0B0F))
@@ -717,7 +719,7 @@ internal fun LibraryNavidromeStreamingSection(
 	DeletionDialog(
 		target = playlistDeletionId?.let { DeletionTarget.Playlist(it) },
 		onDismissRequest = { playlistDeletionId = null },
-		onRefresh = { playlistsVm.refreshPlaylists(true) }
+		onRefresh = { playlistsVm.refreshPlaylists(false) }
 	)
 
 	if (createPlaylistOpen) {
@@ -773,8 +775,6 @@ private fun NavidromeOverviewContent(
 	val playlistCount = playlists?.itemCount ?: 0
 	val artistCount = artists?.itemCount ?: 0
 	val songCount = songs?.itemCount ?: 0
-	val playlistDisplayCount = minOf(playlistCount, 8)
-	val playlistRows = (playlistDisplayCount + 1) / 2
 	val songsSnapshot = remember(songs?.itemSnapshotList) {
 		songs?.itemSnapshotList?.items.orEmpty()
 	}
@@ -834,12 +834,15 @@ private fun NavidromeOverviewContent(
 					contentPadding = PaddingValues(horizontal = 16.dp),
 					horizontalArrangement = Arrangement.spacedBy(14.dp)
 				) {
+					val liveCount = recentAlbums.itemCount
 					items(
-						count = minOf(albumCount, 12),
-						key = { idx -> recentAlbums.peek(idx)?.id ?: "recent-$idx" },
+						count = minOf(liveCount, 12),
+						key = { idx ->
+							recentAlbums.peekOrNull(idx)?.id?.let { "recent-$it" } ?: "recent-idx-$idx"
+						},
 						contentType = { "vinyl-album" }
 					) { index ->
-						val album = recentAlbums[index] ?: return@items
+						val album = recentAlbums.getOrNull(index) ?: return@items
 						VinylGalleryAlbumCard(
 							album = album,
 							onClick = { onAlbumClick(album) },
@@ -870,17 +873,21 @@ private fun NavidromeOverviewContent(
 				)
 			}
 		} else if (playlistCount > 0) {
+			val liveDisplayCount = minOf(playlists.itemCount, 8)
+			val liveRowCount = (liveDisplayCount + 1) / 2
 			items(
-				count = playlistRows,
+				count = liveRowCount,
 				key = { rowIdx ->
-					playlists.peek(rowIdx * 2)?.id?.let { "playlist-row-$it" } ?: "playlist-row-$rowIdx"
+					playlists.peekOrNull(rowIdx * 2)?.id?.let { "playlist-row-$it" }
+						?: "playlist-row-idx-$rowIdx"
 				},
 				contentType = { "playlist-grid-row" }
 			) { rowIndex ->
+				val displayLimit = minOf(playlists.itemCount, 8)
 				val leftIdx = rowIndex * 2
 				val rightIdx = leftIdx + 1
-				val leftPlaylist = playlists[leftIdx]
-				val rightPlaylist = if (rightIdx < playlistDisplayCount) playlists[rightIdx] else null
+				val leftPlaylist = if (leftIdx < displayLimit) playlists.getOrNull(leftIdx) else null
+				val rightPlaylist = if (rightIdx < displayLimit) playlists.getOrNull(rightIdx) else null
 
 				Row(
 					modifier = Modifier
@@ -930,12 +937,15 @@ private fun NavidromeOverviewContent(
 					contentPadding = PaddingValues(horizontal = 16.dp),
 					horizontalArrangement = Arrangement.spacedBy(14.dp)
 				) {
+					val liveCount = artists.itemCount
 					items(
-						count = minOf(artistCount, 12),
-						key = { idx -> artists.peek(idx)?.id ?: "artist-$idx" },
+						count = minOf(liveCount, 12),
+						key = { idx ->
+							artists.peekOrNull(idx)?.id?.let { "artist-$it" } ?: "artist-idx-$idx"
+						},
 						contentType = { "artist-avatar" }
 					) { idx ->
-						val artist = artists[idx] ?: return@items
+						val artist = artists.getOrNull(idx) ?: return@items
 						Column(
 							modifier = Modifier
 								.width(80.dp)
@@ -978,16 +988,22 @@ private fun NavidromeOverviewContent(
 					modifier = Modifier.padding(top = 6.dp)
 				)
 			}
-			val previewCount = minOf(songCount, 6)
 			item(key = "overview-songs-group", contentType = "track-group") {
+				val livePreviewCount = minOf(songs.itemCount, 6)
 				MeloGroupedCard(modifier = Modifier.padding(horizontal = 16.dp)) {
-					for (idx in 0 until previewCount) {
-						val song = songs[idx] ?: continue
+					for (idx in 0 until livePreviewCount) {
+						val song = songs.getOrNull(idx) ?: continue
 						NavidromeSongRowContent(
 							song = song,
 							download = downloadsMap[song.id],
 							isPlaying = currentPlayingSongId == song.id,
-							onClick = { onSongClick(song, songsSnapshot, idx) },
+							onClick = {
+								onSongClick(
+									song,
+									songsSnapshot,
+									songsSnapshot.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+								)
+							},
 							onLongClick = { onSongMoreClick(song) },
 							onDownload = { scope.launch { queueSongsOffline(downloadManager, listOf(song)) } },
 							onCancelDownload = { downloadManager.cancelDownload(song.id) },
@@ -996,7 +1012,7 @@ private fun NavidromeOverviewContent(
 							},
 							onMoreClick = { onSongMoreClick(song) }
 						)
-						if (idx < previewCount - 1) {
+						if (idx < livePreviewCount - 1) {
 							MeloHairlineDivider(startIndent = 68.dp)
 						}
 					}
@@ -1354,18 +1370,20 @@ private fun NavidromeAlbumsSubContent(
 				)
 			}
 		} else if (cardsMode) {
-			val rowCount = (itemCount + 1) / 2
+			val liveCount = albums.itemCount
+			val rowCount = (liveCount + 1) / 2
 			items(
 				count = rowCount,
 				key = { rowIdx ->
-					albums.peek(rowIdx * 2)?.id?.let { "album-grid-row-$it" } ?: "album-grid-row-$rowIdx"
+					albums.peekOrNull(rowIdx * 2)?.id?.let { "album-grid-row-$it" }
+						?: "album-grid-row-idx-$rowIdx"
 				},
 				contentType = { "album-grid-row" }
 			) { rowIdx ->
 				val leftIdx = rowIdx * 2
 				val rightIdx = leftIdx + 1
-				val left = albums[leftIdx]
-				val right = if (rightIdx < itemCount) albums[rightIdx] else null
+				val left = albums.getOrNull(leftIdx)
+				val right = if (rightIdx < albums.itemCount) albums.getOrNull(rightIdx) else null
 				Row(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -1395,14 +1413,17 @@ private fun NavidromeAlbumsSubContent(
 				}
 			}
 		} else {
+			val liveCount = albums.itemCount
 			items(
-				count = itemCount,
-				key = { idx -> albums.peek(idx)?.id ?: "album-list-$idx" },
+				count = liveCount,
+				key = { idx ->
+					albums.peekOrNull(idx)?.id?.let { "album-list-$it" } ?: "album-list-idx-$idx"
+				},
 				contentType = { "album-row" }
 			) { idx ->
-				val album = albums[idx] ?: return@items
+				val album = albums.getOrNull(idx) ?: return@items
 				val isFirst = idx == 0
-				val isLast = idx == itemCount - 1
+				val isLast = idx == albums.itemCount - 1
 				val meta = remember(album.id, album.artistName, album.year, album.songCount) {
 					listOfNotNull(
 						album.artistName?.takeIf { it.isNotBlank() },
@@ -1602,18 +1623,20 @@ private fun NavidromePlaylistsSubContent(
 				)
 			}
 		} else {
-			val rowCount = (itemCount + 1) / 2
+			val liveCount = playlists.itemCount
+			val rowCount = (liveCount + 1) / 2
 			items(
 				count = rowCount,
 				key = { rowIdx ->
-					playlists.peek(rowIdx * 2)?.id?.let { "all-playlist-row-$it" } ?: "all-playlist-row-$rowIdx"
+					playlists.peekOrNull(rowIdx * 2)?.id?.let { "all-playlist-row-$it" }
+						?: "all-playlist-row-idx-$rowIdx"
 				},
 				contentType = { "playlist-grid-row" }
 			) { rowIdx ->
 				val leftIdx = rowIdx * 2
 				val rightIdx = leftIdx + 1
-				val left = playlists[leftIdx]
-				val right = if (rightIdx < itemCount) playlists[rightIdx] else null
+				val left = playlists.getOrNull(leftIdx)
+				val right = if (rightIdx < playlists.itemCount) playlists.getOrNull(rightIdx) else null
 				Row(
 					modifier = Modifier.fillMaxWidth(),
 					horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1692,14 +1715,17 @@ private fun NavidromeArtistsSubContent(
 				)
 			}
 		} else {
+			val liveCount = artists.itemCount
 			items(
-				count = itemCount,
-				key = { idx -> artists.peek(idx)?.id ?: "artist-$idx" },
+				count = liveCount,
+				key = { idx ->
+					artists.peekOrNull(idx)?.id?.let { "artist-$it" } ?: "artist-idx-$idx"
+				},
 				contentType = { "artist" }
 			) { idx ->
-				val artist = artists[idx] ?: return@items
+				val artist = artists.getOrNull(idx) ?: return@items
 				val isFirst = idx == 0
-				val isLast = idx == itemCount - 1
+				val isLast = idx == artists.itemCount - 1
 				Surface(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -1943,18 +1969,20 @@ private fun NavidromeSongsSubContent(
 					)
 				}
 			} else if (cardsMode) {
-				val rowCount = (itemCount + 1) / 2
+				val liveCount = songs.itemCount
+				val rowCount = (liveCount + 1) / 2
 				items(
 					count = rowCount,
 					key = { rowIdx ->
-						songs.peek(rowIdx * 2)?.id?.let { "song-grid-row-$it" } ?: "song-grid-row-$rowIdx"
+						songs.peekOrNull(rowIdx * 2)?.id?.let { "song-grid-row-$it" }
+							?: "song-grid-row-idx-$rowIdx"
 					},
 					contentType = { "track-grid-row" }
 				) { rowIdx ->
 					val leftIdx = rowIdx * 2
 					val rightIdx = leftIdx + 1
-					val left = songs[leftIdx]
-					val right = if (rightIdx < itemCount) songs[rightIdx] else null
+					val left = songs.getOrNull(leftIdx)
+					val right = if (rightIdx < songs.itemCount) songs.getOrNull(rightIdx) else null
 					Row(
 						modifier = Modifier
 							.fillMaxWidth()
@@ -1974,7 +2002,7 @@ private fun NavidromeSongsSubContent(
 									if (isMultiSelecting) {
 										selectedSongIds[left.id] = !isLeftSelected
 									} else {
-										onSongClick(left, snapshot, snapshot.indexOfFirst { it.id == left.id })
+										onSongClick(left, snapshot, snapshot.indexOfFirst { it.id == left.id }.coerceAtLeast(0))
 									}
 								},
 								onLongClick = {
@@ -1999,7 +2027,7 @@ private fun NavidromeSongsSubContent(
 									if (isMultiSelecting) {
 										selectedSongIds[right.id] = !isRightSelected
 									} else {
-										onSongClick(right, snapshot, snapshot.indexOfFirst { it.id == right.id })
+										onSongClick(right, snapshot, snapshot.indexOfFirst { it.id == right.id }.coerceAtLeast(0))
 									}
 								},
 								onLongClick = {
@@ -2014,15 +2042,18 @@ private fun NavidromeSongsSubContent(
 					}
 				}
 			} else {
+				val liveCount = songs.itemCount
 				items(
-					count = itemCount,
-					key = { idx -> songs.peek(idx)?.id ?: "song-$idx" },
+					count = liveCount,
+					key = { idx ->
+						songs.peekOrNull(idx)?.id?.let { "song-$it" } ?: "song-idx-$idx"
+					},
 					contentType = { "track" }
 				) { idx ->
-					val song = songs[idx] ?: return@items
+					val song = songs.getOrNull(idx) ?: return@items
 					val isSongSelected = selectedSongIds[song.id] == true
 					val isFirst = idx == 0
-					val isLast = idx == itemCount - 1
+					val isLast = idx == songs.itemCount - 1
 					Surface(
 						modifier = Modifier.fillMaxWidth(),
 						shape = libraryGroupedItemShape(isFirst, isLast),
@@ -2044,7 +2075,7 @@ private fun NavidromeSongsSubContent(
 									if (isMultiSelecting) {
 										selectedSongIds[song.id] = !isSongSelected
 									} else {
-										onSongClick(song, snapshot, snapshot.indexOfFirst { it.id == song.id })
+										onSongClick(song, snapshot, snapshot.indexOfFirst { it.id == song.id }.coerceAtLeast(0))
 									}
 								},
 								onLongClick = {

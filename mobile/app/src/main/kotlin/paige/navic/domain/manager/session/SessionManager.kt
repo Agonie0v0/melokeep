@@ -60,7 +60,7 @@ class SessionManager(
 
 	private companion object {
 		const val TAG = "SessionManager"
-		const val USER_AGENT = "Navic"
+		const val USER_AGENT = "MeloKeep"
 	}
 
 	private val hasStoredCredentials: Boolean

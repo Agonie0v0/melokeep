@@ -16,7 +16,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,9 +23,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.plus
@@ -36,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.insert
 import androidx.compose.material3.AlertDialog
@@ -47,8 +47,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,7 +58,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,8 +71,6 @@ import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 import paige.navic.R
 import paige.navic.database.entity.DownloadStatus
-import paige.navic.di.LocalBottomBarScrollManager
-import paige.navic.di.LocalSizeClass
 import paige.navic.di.LocalSnackBarState
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.manager.session.DownloadManager
@@ -85,28 +80,31 @@ import paige.navic.domain.model.DomainArtist
 import paige.navic.domain.model.DomainArtistListType
 import paige.navic.domain.model.DomainSong
 import paige.navic.domain.model.DomainSongCollection
-import paige.navic.domain.model.settings.BottomBarVisibilityMode
 import paige.navic.domain.model.settings.ListViewMode
+import paige.navic.melokeep.MeloHairlineDivider
+import paige.navic.melokeep.MeloHairlineWidth
+import paige.navic.melokeep.MeloQuietEmptyState
+import paige.navic.melokeep.MeloSectionLabel
 import paige.navic.melokeep.StudioBatchSelectionDock
 import paige.navic.melokeep.queueSongsOffline
 import paige.navic.melokeep.rememberBatchDockBottomClearance
 import paige.navic.melokeep.removeSongsOffline
 import paige.navic.playback.MediaPlayer
-import paige.navic.ui.component.common.ContentUnavailable
 import paige.navic.ui.component.common.ErrorBox
 import paige.navic.ui.component.dialog.DeleteDownloadTarget
 import paige.navic.ui.component.dialog.QueueDuplicateDialog
 import paige.navic.ui.component.dialog.ShareDialog
 import paige.navic.ui.component.dialog.rememberDownloadDeletionHandler
 import paige.navic.ui.component.layout.ArtGrid
-import paige.navic.ui.component.layout.RootBottomBar
 import paige.navic.ui.component.layout.artGridPlaceholder
 import paige.navic.ui.component.layout.horizontalSection
 import paige.navic.ui.core.UiState
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.outlined.Checklist
 import paige.navic.ui.icons.outlined.Close
+import paige.navic.ui.icons.outlined.Delete
 import paige.navic.ui.icons.outlined.History
+import paige.navic.ui.icons.outlined.Search
 import paige.navic.ui.navigation.PersistentViewModelStoreOwner
 import paige.navic.ui.navigation.Screen
 import paige.navic.ui.screen.album.component.AlbumListScreenGridItem
@@ -118,6 +116,7 @@ import paige.navic.ui.screen.search.component.SearchScreenChips
 import paige.navic.ui.screen.search.component.SearchScreenTopBar
 import paige.navic.ui.screen.search.viewmodel.SearchViewModel
 import paige.navic.ui.screen.song.component.SongListScreenItem
+import paige.navic.ui.theme.MeloBottomChromeClearance
 import paige.navic.ui.viewmodel.RootViewModel
 
 enum class SearchCategory(@StringRes val res: Int) {
@@ -127,7 +126,6 @@ enum class SearchCategory(@StringRes val res: Int) {
 	ARTISTS(R.string.title_artists)
 }
 
-// TODO: clean this up, holy shit
 @Composable
 fun SearchScreen(
 	nested: Boolean
@@ -204,13 +202,12 @@ fun SearchScreen(
 	}
 
 	Scaffold(
+		containerColor = MaterialTheme.colorScheme.background,
 		topBar = {
 			Column(
 				modifier = Modifier
-					.background(MaterialTheme.colorScheme.surface)
-					.padding(
-						TopAppBarDefaults.windowInsets.asPaddingValues()
-					)
+					.fillMaxWidth()
+					.background(MaterialTheme.colorScheme.background)
 			) {
 				SearchScreenTopBar(
 					query = query,
@@ -223,33 +220,29 @@ fun SearchScreen(
 					selectedCategory = selectedCategory,
 					onCategorySelect = { selectedCategory = it }
 				)
-			}
-		},
-		bottomBar = {
-			val sizeClass = LocalSizeClass.current
-			val scrollManager = LocalBottomBarScrollManager.current
-			val preferVisible =
-				preferenceManager.bottomBarVisibilityMode == BottomBarVisibilityMode.AllScreens
-			if (!nested
-				|| (sizeClass.widthSizeClass < WindowWidthSizeClass.Medium && preferVisible)
-			) {
-				RootBottomBar(scrolled = scrollManager.isTriggered)
+				Spacer(Modifier.height(6.dp))
+				MeloHairlineDivider()
 			}
 		}
 	) { contentPadding ->
 		AnimatedContent(
-			state,
+			targetState = state,
 			modifier = Modifier.fillMaxSize()
 		) { uiState ->
 			when (uiState) {
 				is UiState.Loading -> ArtGrid(
-					contentPadding = contentPadding,
+					contentPadding = contentPadding + PaddingValues(bottom = MeloBottomChromeClearance),
 					selectedViewMode = ListViewMode.List
 				) {
 					artGridPlaceholder(viewMode = ListViewMode.List)
 				}
 
-				is UiState.Error -> ErrorBox(uiState, padding = contentPadding)
+				is UiState.Error -> ErrorBox(
+					error = uiState,
+					padding = contentPadding,
+					bottomPadding = MeloBottomChromeClearance
+				)
+
 				is UiState.Success -> {
 					val results = uiState.data
 					val showAll = selectedCategory == SearchCategory.ALL
@@ -273,301 +266,386 @@ fun SearchScreen(
 						}
 					}
 
+					val batchDockClearance = rememberBatchDockBottomClearance()
+					val isNoResults = query.text.isNotBlank() && albums.isEmpty() && artists.isEmpty() && songs.isEmpty()
+					val isEmptyIdle = query.text.isBlank() && searchHistory.isEmpty()
+
 					Box(modifier = Modifier.fillMaxSize()) {
-						if (query.text.isNotBlank() && albums.isEmpty() && artists.isEmpty() && songs.isEmpty()) {
-							ContentUnavailable(
-								label = stringResource(R.string.info_no_search_results)
-							)
-						}
-
-						LazyVerticalGrid(
-							modifier = Modifier.fillMaxSize(),
-							columns = GridCells.Fixed(2),
-							contentPadding = contentPadding + PaddingValues(
-								bottom = if (isMultiSelecting && displaySongs.isNotEmpty()) 148.dp else 0.dp
-							),
-							state = viewModel.gridState,
-							verticalArrangement = Arrangement.spacedBy(8.dp)
-						) {
-							if (query.text.isNotBlank()) {
-								if (displaySongs.isNotEmpty()) {
-									item(span = { GridItemSpan(maxLineSpan) }) {
-										Row(
-											modifier = Modifier
-												.fillMaxWidth()
-												.padding(horizontal = 16.dp, vertical = 8.dp),
-											horizontalArrangement = Arrangement.SpaceBetween,
-											verticalAlignment = Alignment.CenterVertically
-										) {
-											Text(
-												text = stringResource(R.string.title_songs),
-												style = MaterialTheme.typography.headlineSmall
-											)
-											TextButton(
-												onClick = {
-													if (isMultiSelecting) {
-														isMultiSelecting = false
-														selectedSongIds.clear()
-													} else {
-														isMultiSelecting = true
-													}
-												},
-												contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-											) {
-												Icon(
-													imageVector = Icons.Outlined.Checklist,
-													contentDescription = null,
-													modifier = Modifier.size(16.dp)
-												)
-												Spacer(Modifier.width(4.dp))
-												Text(if (isMultiSelecting) "完成" else "多选")
-											}
-										}
-									}
-									items(
-										displaySongs.size,
-										span = { GridItemSpan(maxLineSpan) }
-									) { index ->
-										val song = displaySongs[index]
-										val download = downloadsMap[song.id]
-										val isChecked = selectedSongIds[song.id] == true
-
-										SongListScreenItem(
-											modifier = Modifier.animateItem(),
-											song = song,
-											selected = !isMultiSelecting && selectedSong == song,
-											selectionMode = isMultiSelecting,
-											checked = isChecked,
-											starred = if (selectedSong == song) selectedSongIsStarred else song.starredAt != null,
-											rating = if (selectedSong == song) selectedSongRating else (song.userRating
-												?: 0),
-											onSelect = {
-												recordCurrentQuery()
-												if (isMultiSelecting) {
-													if (isChecked) {
-														selectedSongIds.remove(song.id)
-													} else {
-														selectedSongIds[song.id] = true
-													}
-												} else {
-													isMultiSelecting = true
-													selectedSongIds[song.id] = true
-												}
-											},
-											onDeselect = { viewModel.clearSelectedSong() },
-											onSetStarred = { viewModel.starSelectedSong(it) },
-											onSetShareId = { shareId = it },
-											onPlayNext = {
-												recordCurrentQuery()
-												if (player.checkDuplicate(song.id, preferenceManager)) {
-													songToQueue = song
-												} else {
-													player.playNextSingle(song)
-												}
-											},
-											onAddToQueue = {
-												recordCurrentQuery()
-												if (player.checkDuplicate(song.id, preferenceManager)) {
-													songToQueue = song
-												} else {
-													player.addToQueueSingle(song)
-												}
-											},
-											onClick = {
-												if (isMultiSelecting) {
-													if (isChecked) {
-														selectedSongIds.remove(song.id)
-													} else {
-														selectedSongIds[song.id] = true
-													}
-												} else {
-													recordCurrentQuery()
-													player.playNow(song)
-												}
-											},
-											onSetRating = { viewModel.rateSelectedSong(it) },
-											download = download,
-											onDownload = { downloadManager.downloadSong(song.id) },
-											onCancelDownload = { downloadManager.cancelDownload(song.id) },
-											onDeleteDownload = {
-												downloadDeletionHandler.requestDelete(DeleteDownloadTarget.Single(song.id, song.title))
-											}
-										)
-									}
-								}
-
-							horizontalSection(
-								title = R.string.title_albums,
-								destination = Screen.AlbumList(true),
-								state = albums,
-								seeAll = false
-							) { album ->
-								AlbumListScreenGridItem(
+						when {
+							isNoResults -> {
+								Box(
 									modifier = Modifier
-										.animateItem(fadeInSpec = null)
-										.width(150.dp),
-									tab = "search",
-									album = album,
-									selected = album == albumListSelection.data?.selected,
-									starred = albumListSelection.data?.selected?.starredAt != null,
-									onSelect = {
-										recordCurrentQuery()
-										albumListViewModel.selected = album
-									},
-									onDeselect = {
-										albumListViewModel.selected = null
-									},
-									onSetStarred = { albumListViewModel.starAlbum(it) },
-									onSetShareId = { },
-									onPlayNext = {
-										recordCurrentQuery()
-										player.playNext(album as DomainSongCollection)
-									},
-									onAddToQueue = {
-										recordCurrentQuery()
-										player.addToQueue(album as DomainSongCollection)
-									},
-									rating = albumListSelection.data?.selected?.userRating ?: 0,
-									onSetRating = { albumListViewModel.setRating(it) },
-									onOpen = recordCurrentQuery
-								)
+										.fillMaxSize()
+										.padding(contentPadding)
+										.padding(bottom = MeloBottomChromeClearance),
+									contentAlignment = Alignment.Center
+								) {
+									MeloQuietEmptyState(
+										message = stringResource(R.string.info_no_search_results),
+										icon = Icons.Outlined.Search
+									)
+								}
 							}
 
-							horizontalSection(
-								title = R.string.title_artists,
-								destination = Screen.ArtistList(true),
-								state = artists,
-								seeAll = false
-							) { artist ->
-								ArtistListScreenGridItem(
+							isEmptyIdle -> {
+								Box(
 									modifier = Modifier
-										.animateItem(fadeInSpec = null)
-										.width(150.dp),
-									tab = "search",
-									artist = artist,
-									selected = artist == artistListSelection.data?.selected,
-									selectedArtistAlbums = emptyList(),
-									starred = artistListSelection.data?.selected?.starredAt != null,
-									onSelect = {
-										recordCurrentQuery()
-										artistListViewModel.selectArtist(artist)
-									},
-									onDeselect = { artistListViewModel.clearSelection() },
-									onSetStarred = { artistListViewModel.starArtist(it) },
-									onPlayNext = {
-										recordCurrentQuery()
-										artistListViewModel.playArtistAlbumsNext(player)
-									},
-									onAddToQueue = {
-										recordCurrentQuery()
-										artistListViewModel.addArtistAlbumsToQueue(
-											player
-										)
-									},
-									onOpen = recordCurrentQuery
-								)
-							}
-						} else {
-							if (searchHistory.isNotEmpty()) {
-								item(span = { GridItemSpan(maxLineSpan) }) {
-									Row(
-										modifier = Modifier
-											.fillMaxWidth()
-											.padding(horizontal = 20.dp, vertical = 10.dp),
-										verticalAlignment = Alignment.CenterVertically,
-										horizontalArrangement = Arrangement.SpaceBetween
-									) {
-										Text(
-											text = stringResource(R.string.action_search_history),
-											style = MaterialTheme.typography.titleMedium,
-											color = MaterialTheme.colorScheme.primary
-										)
-										Row(
-											verticalAlignment = Alignment.CenterVertically,
-											horizontalArrangement = Arrangement.spacedBy(8.dp)
-										) {
-											Text(
-												text = if (manageHistory) "完成" else "管理",
-												style = MaterialTheme.typography.labelLarge,
-												color = MaterialTheme.colorScheme.primary,
-												modifier = Modifier
-													.clip(CircleShape)
-													.clickable { manageHistory = !manageHistory }
-													.padding(horizontal = 8.dp, vertical = 4.dp)
-											)
-											Text(
-												text = "清空",
-												style = MaterialTheme.typography.labelLarge,
-												color = MaterialTheme.colorScheme.error,
-												modifier = Modifier
-													.clip(CircleShape)
-													.clickable { clearHistoryConfirmOpen = true }
-													.padding(horizontal = 8.dp, vertical = 4.dp)
-											)
-										}
-									}
+										.fillMaxSize()
+										.padding(contentPadding)
+										.padding(bottom = MeloBottomChromeClearance),
+									contentAlignment = Alignment.Center
+								) {
+									MeloQuietEmptyState(
+										message = "输入关键词搜索曲库歌曲、专辑或艺术家",
+										icon = Icons.Outlined.Search
+									)
 								}
-								item(span = { GridItemSpan(maxLineSpan) }) {
-									FlowRow(
-										modifier = Modifier
-											.fillMaxWidth()
-											.padding(horizontal = 20.dp, vertical = 4.dp),
-										horizontalArrangement = Arrangement.spacedBy(8.dp),
-										verticalArrangement = Arrangement.spacedBy(8.dp)
-									) {
-										searchHistory.forEach { historyItem ->
-											Surface(
-												onClick = {
-													if (manageHistory) {
-														viewModel.removeFromSearchHistory(historyItem)
-													} else {
-														query.clearText()
-														query.edit { insert(0, historyItem) }
-														viewModel.addToSearchHistory(historyItem)
-													}
-												},
-												shape = CircleShape,
-												color = MaterialTheme.colorScheme.surfaceContainer,
-												border = BorderStroke(
-													width = 1.dp,
-													color = if (manageHistory) {
-														MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-													} else {
-														MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+							}
+
+							else -> {
+								LazyVerticalGrid(
+									modifier = Modifier.fillMaxSize(),
+									columns = GridCells.Fixed(2),
+									contentPadding = contentPadding + PaddingValues(
+										top = 8.dp,
+										bottom = MeloBottomChromeClearance + if (isMultiSelecting && displaySongs.isNotEmpty()) {
+											batchDockClearance
+										} else {
+											0.dp
+										}
+									),
+									state = viewModel.gridState,
+									verticalArrangement = Arrangement.spacedBy(8.dp)
+								) {
+									if (query.text.isNotBlank()) {
+										if (displaySongs.isNotEmpty()) {
+											item(span = { GridItemSpan(maxLineSpan) }) {
+												MeloSectionLabel(
+													title = stringResource(R.string.title_songs),
+													modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+													trailing = {
+														Surface(
+															onClick = {
+																if (isMultiSelecting) {
+																	isMultiSelecting = false
+																	selectedSongIds.clear()
+																} else {
+																	isMultiSelecting = true
+																}
+															},
+															shape = CircleShape,
+															color = if (isMultiSelecting) {
+																MaterialTheme.colorScheme.primaryContainer
+															} else {
+																MaterialTheme.colorScheme.surfaceContainer
+															},
+															border = BorderStroke(
+																width = MeloHairlineWidth,
+																color = if (isMultiSelecting) {
+																	MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+																} else {
+																	MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+																}
+															)
+														) {
+															Row(
+																modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+																verticalAlignment = Alignment.CenterVertically,
+																horizontalArrangement = Arrangement.spacedBy(4.dp)
+															) {
+																Icon(
+																	imageVector = if (isMultiSelecting) Icons.Outlined.Close else Icons.Outlined.Checklist,
+																	contentDescription = null,
+																	tint = if (isMultiSelecting) {
+																		MaterialTheme.colorScheme.onPrimaryContainer
+																	} else {
+																		MaterialTheme.colorScheme.primary
+																	},
+																	modifier = Modifier.size(14.dp)
+																)
+																Text(
+																	text = if (isMultiSelecting) "完成" else "多选",
+																	style = MaterialTheme.typography.labelSmall.copy(
+																		fontWeight = FontWeight.Medium
+																	),
+																	color = if (isMultiSelecting) {
+																		MaterialTheme.colorScheme.onPrimaryContainer
+																	} else {
+																		MaterialTheme.colorScheme.primary
+																	}
+																)
+															}
+														}
 													}
 												)
-											) {
-												Row(
-													modifier = Modifier.padding(
-														start = 12.dp,
-														end = if (manageHistory) 8.dp else 12.dp,
-														top = 7.dp,
-														bottom = 7.dp
-													),
-													verticalAlignment = Alignment.CenterVertically,
-													horizontalArrangement = Arrangement.spacedBy(6.dp)
-												) {
-													Icon(
-														imageVector = Icons.Outlined.History,
-														contentDescription = null,
-														tint = MaterialTheme.colorScheme.onSurfaceVariant,
-														modifier = Modifier.size(14.dp)
-													)
-													Text(
-														text = historyItem,
-														style = MaterialTheme.typography.bodySmall,
-														color = MaterialTheme.colorScheme.onSurface,
-														maxLines = 1,
-														overflow = TextOverflow.Ellipsis
-													)
-													if (manageHistory) {
-														Icon(
-															imageVector = Icons.Outlined.Close,
-															contentDescription = stringResource(R.string.action_remove_from_history),
-															tint = MaterialTheme.colorScheme.onSurfaceVariant,
-															modifier = Modifier.size(14.dp)
+											}
+
+											items(
+												displaySongs.size,
+												span = { GridItemSpan(maxLineSpan) }
+											) { index ->
+												val song = displaySongs[index]
+												val download = downloadsMap[song.id]
+												val isChecked = selectedSongIds[song.id] == true
+
+												SongListScreenItem(
+													modifier = Modifier.animateItem(),
+													song = song,
+													selected = !isMultiSelecting && selectedSong == song,
+													selectionMode = isMultiSelecting,
+													checked = isChecked,
+													starred = if (selectedSong == song) selectedSongIsStarred else song.starredAt != null,
+													rating = if (selectedSong == song) selectedSongRating else (song.userRating
+														?: 0),
+													onSelect = {
+														recordCurrentQuery()
+														if (isMultiSelecting) {
+															if (isChecked) {
+																selectedSongIds.remove(song.id)
+															} else {
+																selectedSongIds[song.id] = true
+															}
+														} else {
+															isMultiSelecting = true
+															selectedSongIds[song.id] = true
+														}
+													},
+													onDeselect = { viewModel.clearSelectedSong() },
+													onSetStarred = { viewModel.starSelectedSong(it) },
+													onSetShareId = { shareId = it },
+													onPlayNext = {
+														recordCurrentQuery()
+														if (player.checkDuplicate(song.id, preferenceManager)) {
+															songToQueue = song
+														} else {
+															player.playNextSingle(song)
+														}
+													},
+													onAddToQueue = {
+														recordCurrentQuery()
+														if (player.checkDuplicate(song.id, preferenceManager)) {
+															songToQueue = song
+														} else {
+															player.addToQueueSingle(song)
+														}
+													},
+													onClick = {
+														if (isMultiSelecting) {
+															if (isChecked) {
+																selectedSongIds.remove(song.id)
+															} else {
+																selectedSongIds[song.id] = true
+															}
+														} else {
+															recordCurrentQuery()
+															player.playNow(song)
+														}
+													},
+													onSetRating = { viewModel.rateSelectedSong(it) },
+													download = download,
+													onDownload = { downloadManager.downloadSong(song.id) },
+													onCancelDownload = { downloadManager.cancelDownload(song.id) },
+													onDeleteDownload = {
+														downloadDeletionHandler.requestDelete(
+															DeleteDownloadTarget.Single(song.id, song.title)
 														)
 													}
+												)
+											}
+										}
+
+										horizontalSection(
+											title = R.string.title_albums,
+											destination = Screen.AlbumList(true),
+											state = albums,
+											seeAll = false
+										) { album ->
+											AlbumListScreenGridItem(
+												modifier = Modifier
+													.animateItem(fadeInSpec = null)
+													.width(150.dp),
+												tab = "search",
+												album = album,
+												selected = album == albumListSelection.data?.selected,
+												starred = albumListSelection.data?.selected?.starredAt != null,
+												onSelect = {
+													recordCurrentQuery()
+													albumListViewModel.selected = album
+												},
+												onDeselect = {
+													albumListViewModel.selected = null
+												},
+												onSetStarred = { albumListViewModel.starAlbum(it) },
+												onSetShareId = { shareId = it },
+												onPlayNext = {
+													recordCurrentQuery()
+													player.playNext(album as DomainSongCollection)
+												},
+												onAddToQueue = {
+													recordCurrentQuery()
+													player.addToQueue(album as DomainSongCollection)
+												},
+												rating = albumListSelection.data?.selected?.userRating ?: 0,
+												onSetRating = { albumListViewModel.setRating(it) },
+												onOpen = recordCurrentQuery
+											)
+										}
+
+										horizontalSection(
+											title = R.string.title_artists,
+											destination = Screen.ArtistList(true),
+											state = artists,
+											seeAll = false
+										) { artist ->
+											ArtistListScreenGridItem(
+												modifier = Modifier
+													.animateItem(fadeInSpec = null)
+													.width(150.dp),
+												tab = "search",
+												artist = artist,
+												selected = artist == artistListSelection.data?.selected,
+												selectedArtistAlbums = emptyList(),
+												starred = artistListSelection.data?.selected?.starredAt != null,
+												onSelect = {
+													recordCurrentQuery()
+													artistListViewModel.selectArtist(artist)
+												},
+												onDeselect = { artistListViewModel.clearSelection() },
+												onSetStarred = { artistListViewModel.starArtist(it) },
+												onPlayNext = {
+													recordCurrentQuery()
+													artistListViewModel.playArtistAlbumsNext(player)
+												},
+												onAddToQueue = {
+													recordCurrentQuery()
+													artistListViewModel.addArtistAlbumsToQueue(player)
+												},
+												onOpen = recordCurrentQuery
+											)
+										}
+									} else if (searchHistory.isNotEmpty()) {
+										item(span = { GridItemSpan(maxLineSpan) }) {
+											MeloSectionLabel(
+												title = stringResource(R.string.action_search_history),
+												modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+												trailing = {
+													Row(
+														verticalAlignment = Alignment.CenterVertically,
+														horizontalArrangement = Arrangement.spacedBy(6.dp)
+													) {
+														Surface(
+															onClick = { manageHistory = !manageHistory },
+															shape = CircleShape,
+															color = if (manageHistory) {
+																MaterialTheme.colorScheme.primaryContainer
+															} else {
+																MaterialTheme.colorScheme.surfaceContainer
+															},
+															border = BorderStroke(
+																width = MeloHairlineWidth,
+																color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+															)
+														) {
+															Text(
+																text = if (manageHistory) "完成" else "管理",
+																style = MaterialTheme.typography.labelSmall.copy(
+																	fontWeight = FontWeight.Medium
+																),
+																color = if (manageHistory) {
+																	MaterialTheme.colorScheme.onPrimaryContainer
+																} else {
+																	MaterialTheme.colorScheme.primary
+																},
+																modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+															)
+														}
+
+														Surface(
+															onClick = { clearHistoryConfirmOpen = true },
+															shape = CircleShape,
+															color = MaterialTheme.colorScheme.surfaceContainer,
+															border = BorderStroke(
+																width = MeloHairlineWidth,
+																color = MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+															)
+														) {
+															Text(
+																text = "清空",
+																style = MaterialTheme.typography.labelSmall.copy(
+																	fontWeight = FontWeight.Medium
+																),
+																color = MaterialTheme.colorScheme.error,
+																modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+															)
+														}
+													}
+												}
+											)
+										}
+
+										item(span = { GridItemSpan(maxLineSpan) }) {
+											FlowRow(
+												modifier = Modifier
+													.fillMaxWidth()
+													.padding(horizontal = 16.dp, vertical = 4.dp),
+												horizontalArrangement = Arrangement.spacedBy(8.dp),
+												verticalArrangement = Arrangement.spacedBy(8.dp)
+											) {
+												searchHistory.forEach { historyItem ->
+													Surface(
+														onClick = {
+															if (manageHistory) {
+																viewModel.removeFromSearchHistory(historyItem)
+															} else {
+																query.clearText()
+																query.edit { insert(0, historyItem) }
+																viewModel.addToSearchHistory(historyItem)
+															}
+														},
+														shape = CircleShape,
+														color = MaterialTheme.colorScheme.surfaceContainer,
+														border = BorderStroke(
+															width = MeloHairlineWidth,
+															color = if (manageHistory) {
+																MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+															} else {
+																MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+															}
+														)
+													) {
+														Row(
+															modifier = Modifier.padding(
+																start = 12.dp,
+																end = if (manageHistory) 8.dp else 12.dp,
+																top = 7.dp,
+																bottom = 7.dp
+															),
+															verticalAlignment = Alignment.CenterVertically,
+															horizontalArrangement = Arrangement.spacedBy(6.dp)
+														) {
+															Icon(
+																imageVector = Icons.Outlined.History,
+																contentDescription = null,
+																tint = MaterialTheme.colorScheme.onSurfaceVariant,
+																modifier = Modifier.size(14.dp)
+															)
+															Text(
+																text = historyItem,
+																style = MaterialTheme.typography.bodySmall,
+																color = MaterialTheme.colorScheme.onSurface,
+																maxLines = 1,
+																overflow = TextOverflow.Ellipsis
+															)
+															if (manageHistory) {
+																Icon(
+																	imageVector = Icons.Outlined.Close,
+																	contentDescription = stringResource(R.string.action_remove_from_history),
+																	tint = MaterialTheme.colorScheme.onSurfaceVariant,
+																	modifier = Modifier.size(14.dp)
+																)
+															}
+														}
+													}
 												}
 											}
 										}
@@ -575,12 +653,7 @@ fun SearchScreen(
 								}
 							}
 						}
-					}
 
-						val dockClearance = maxOf(
-							contentPadding.calculateBottomPadding() + 12.dp,
-							rememberBatchDockBottomClearance()
-						)
 						AnimatedVisibility(
 							visible = query.text.isNotBlank() && isMultiSelecting && displaySongs.isNotEmpty(),
 							enter = slideInVertically { it } + fadeIn(),
@@ -588,7 +661,7 @@ fun SearchScreen(
 							modifier = Modifier
 								.align(Alignment.BottomCenter)
 								.navigationBarsPadding()
-								.padding(bottom = dockClearance, start = 16.dp, end = 16.dp)
+								.padding(bottom = batchDockClearance, start = 16.dp, end = 16.dp)
 						) {
 							val pickedSongs = displaySongs.filter { selectedSongIds[it.id] == true }
 							val hasRemovableOffline = pickedSongs.any {
@@ -668,6 +741,15 @@ fun SearchScreen(
 	if (clearHistoryConfirmOpen) {
 		AlertDialog(
 			onDismissRequest = { clearHistoryConfirmOpen = false },
+			shape = RoundedCornerShape(22.dp),
+			containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error
+				)
+			},
 			title = { Text("清空搜索历史") },
 			text = { Text("确认清空所有曲库搜索历史记录吗？") },
 			confirmButton = {
@@ -677,6 +759,7 @@ fun SearchScreen(
 						manageHistory = false
 						viewModel.clearSearchHistory()
 					},
+					shape = CircleShape,
 					colors = ButtonDefaults.buttonColors(
 						containerColor = MaterialTheme.colorScheme.error,
 						contentColor = MaterialTheme.colorScheme.onError

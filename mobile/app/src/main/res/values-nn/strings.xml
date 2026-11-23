@@ -65,7 +65,7 @@
     <string name="title_lyric_providers">Songtekstleverandørar</string>
     <string name="title_github">GitHub</string>
     <string name="title_codeberg">Codeberg</string>
-    <string name="title_link_confirmation">Forlet Navic</string>
+    <string name="title_link_confirmation">Forlet MeloKeep</string>
     <string name="title_audio_effects">Ljodeffektar</string>
     <string name="title_chat">Chat</string>
     <string name="subtitle_appearance">Tema, fargar, oppsett, appikon</string>
@@ -88,8 +88,8 @@
     <string name="subtitle_download_quality">Juster kvaliteten av nedlasta musikk</string>
     <string name="subtitle_dynamic_theming">Tilpass utsjånaden for album- og artistvisinga dynamisk basert på omslagsbildet</string>
     <string name="subtitle_app_icon_designer">Designa av: %1$s</string>
-    <string name="subtitle_local_network_denied">Du må gje Navic tilgang til det lokale nettverket ditt for at sørvaren skal vere mogleg å nå.</string>
-    <string name="subtitle_notifications_denied">Du treng å gje Navic tilgang til varslingsløyve for å få nedlasting- og synkroniseringsvarslingar.</string>
+    <string name="subtitle_local_network_denied">Du må gje MeloKeep tilgang til det lokale nettverket ditt for at sørvaren skal vere mogleg å nå.</string>
+    <string name="subtitle_notifications_denied">Du treng å gje MeloKeep tilgang til varslingsløyve for å få nedlasting- og synkroniseringsvarslingar.</string>
     <string name="subtitle_equalizer">Juster og forbetr ljod</string>
     <string name="subtitle_equalizer_disabled">Ikkje tilgjengeleg når ljodavlasting er på</string>
     <string name="subtitle_configure_lyric_providers">Vel kvar songtekstar skal hentast frå</string>

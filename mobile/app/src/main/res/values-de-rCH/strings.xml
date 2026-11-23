@@ -102,7 +102,7 @@
 	<string name="notice_copied">In die Zwischenablage kopiert.</string>
 	<string name="notice_expiry">Läuft in %1$s ab.</string>
 	<string name="notice_loading_lyrics">Songtext wird geladen...\nDies kann eine Weile dauern.</string>
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">Dies kann nicht rückgängig gemacht werden!</string>
 	<string name="info_error">Etwas ist schiefgelaufen.</string>
 	<string name="info_error_show">Details anzeigen</string>

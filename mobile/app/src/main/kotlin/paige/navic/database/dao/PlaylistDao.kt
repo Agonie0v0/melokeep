@@ -63,6 +63,12 @@ interface PlaylistDao {
 	suspend fun deletePlaylistSongCrossRefs(playlistId: String)
 
 	@Transaction
+	suspend fun deletePlaylistWithSongs(playlistId: String) {
+		deletePlaylistSongCrossRefs(playlistId)
+		deletePlaylist(playlistId)
+	}
+
+	@Transaction
 	suspend fun replacePlaylistSongs(playlistId: String, crossRefs: List<PlaylistSongCrossRef>) {
 		deletePlaylistSongCrossRefs(playlistId)
 		insertPlaylistSongCrossRefs(crossRefs)

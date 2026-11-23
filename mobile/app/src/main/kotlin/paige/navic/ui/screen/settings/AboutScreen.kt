@@ -143,7 +143,7 @@ fun SettingsAboutScreen() {
 					content = { Text(stringResource(R.string.title_github)) }
 				)
 				SettingsNavItem(
-					onClick = { linkToOpen = "https://codeberg.org/paige/Navic" },
+					onClick = { linkToOpen = "https://github.com/Agonie0v0/melokeep" },
 					shapes = SegmentedListItemDefaults.segmentedShapes(index = 1, count = 4),
 					content = { Text(stringResource(R.string.title_codeberg)) }
 				)

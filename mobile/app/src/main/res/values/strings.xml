@@ -79,7 +79,7 @@
 	<string name="title_lyric_providers">Lyric providers</string>
 	<string name="title_github">GitHub</string>
 	<string name="title_codeberg">Codeberg</string>
-	<string name="title_link_confirmation">Leaving Navic</string>
+	<string name="title_link_confirmation">Leaving MeloKeep</string>
 	<string name="title_audio_effects">Audio effects</string>
 	<string name="title_chat">Chat</string>
 	<string name="title_change_download_location">Move downloads?</string>
@@ -104,8 +104,8 @@
 	<string name="subtitle_download_quality">Adjust the quality of downloaded music</string>
 	<string name="subtitle_dynamic_theming">Dynamically theme the album and artist view based on the cover art</string>
 	<string name="subtitle_app_icon_designer">Designed by: %1$s</string>
-	<string name="subtitle_local_network_denied">You need to grant Navic access to your local network in order for your server to be reachable.</string>
-	<string name="subtitle_notifications_denied">You need to grant Navic notification permissions to receive download and sync notifications.</string>
+	<string name="subtitle_local_network_denied">You need to grant MeloKeep access to your local network in order for your server to be reachable.</string>
+	<string name="subtitle_notifications_denied">You need to grant MeloKeep notification permissions to receive download and sync notifications.</string>
 	<string name="subtitle_equalizer">Tune &amp; enhance audio</string>
 	<string name="subtitle_equalizer_disabled">Not available when audio offload is enabled</string>
 	<string name="subtitle_configure_lyric_providers">Choose where to fetch lyrics from</string>
@@ -461,7 +461,7 @@
 	<string name="notice_notifications_denied">Permission denied</string>
 	<string name="notice_link_confirmation">This link is taking you to the following website:</string>
 
-	<string name="info_app_version">Navic %1$s</string>
+	<string name="info_app_version">MeloKeep %1$s</string>
 	<string name="info_action_is_permanent">This action cannot be undone</string>
 	<string name="info_error">Something went wrong.</string>
 	<string name="info_error_show">Show details</string>
@@ -532,7 +532,7 @@
 	<string name="info_repeat_off">Repeat off</string>
 	<string name="info_repeat_one">Repeat one</string>
 	<string name="info_repeat_all">Repeat all</string>
-	<string name="info_app_icon">Changing the app icon will close Navic as Android requires this. Some icons may look identical on your home screen if your launcher dynamically theme the icons.</string>
+	<string name="info_app_icon">Changing the app icon will close MeloKeep as Android requires this. Some icons may look identical on your home screen if your launcher dynamically theme the icons.</string>
 	<string name="info_equalizer_unsupported">Your device does not support this feature.</string>
 	<string name="info_equalizer_mode_not_builtin">Please adjust the external equalizer using its dedicated app.</string>
 	<string name="info_lyric_provider_disclaimer">Enabling LRCLIB and/or LyricsPlus will make requests to external and unaffiliated web services.</string>
