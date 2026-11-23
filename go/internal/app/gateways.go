@@ -505,7 +505,7 @@ func (g *botGatewayAdapter) WriteConfig(ctx context.Context, actor auth.Actor, b
 	if err != nil {
 		return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效的机器人配置格式", err)
 	}
-	var cfg bot.Config
+	cfg := bot.DefaultConfig()
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "机器人配置解析失败", err)
 	}
@@ -530,7 +530,7 @@ func (g *botGatewayAdapter) TestConnection(ctx context.Context, body map[string]
 		if err != nil {
 			return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "无效的机器人配置格式", err)
 		}
-		var cfg bot.Config
+		cfg := bot.DefaultConfig()
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return nil, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "机器人配置解析失败", err)
 		}

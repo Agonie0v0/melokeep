@@ -232,21 +232,23 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		a.Logs.Push("warn", "加载已安装插件失败（已跳过）: "+err.Error(), "plugin", "")
 	}
 
-	// 7. Load initial RuntimeConfig from DB if present, overlay runtime paths.
+	// 7. Files coordinator must be initialized before runtime config resolution so WorkDir can be validated against managed roots.
+	a.AssetLocks = files.NewAssetLockManager(5 * time.Second)
+	a.Files = files.NewCoordinator(a.Store, a.AssetLocks, managedRoots)
+	a.Files.SetHistoryDir(filepath.Join(absDataDir, "go", "history"))
+
+	// 8. Load initial RuntimeConfig from DB if present, overlay runtime paths.
 	rtCfg, rtRev := a.loadInitialRuntimeConfig(ctx)
 	a.snapRev = rtRev
 	a.snap = config.NewSnapshot(rtCfg, cfg.Budgets)
 
-	// 8. Files coordinator, media runner, tag service, library indexer, search.
-	a.AssetLocks = files.NewAssetLockManager(5 * time.Second)
-	a.Files = files.NewCoordinator(a.Store, a.AssetLocks, managedRoots)
-	a.Files.SetHistoryDir(filepath.Join(absDataDir, "go", "history"))
+	// 9. Media runner, tag service, library indexer, search.
 	a.Media = media.NewRunner(cfg.Budgets, cfg.FFmpegPath, cfg.FFprobePath, cfg.FpcalcPath)
 	a.Tags = media.NewTagService(a.Tagger, a.Media)
 	a.Indexer = index.NewIndexer(a.Store, a.AssetLocks, a.Tags)
 	a.Search = search.NewService(a.Store, a.Providers, cfg.Budgets, search.WithLogger(a.Logs.Push))
 
-	// 9. Navidrome client (prefer durable_records, fallback to migrated settings namespace).
+	// 10. Navidrome client (prefer durable_records; fallback to migrated settings only if durable record does not exist).
 	var navCfg navidrome.Settings
 	navClient, err := navidrome.NewClient(a.Transport, a.Store, navCfg, func(rctx context.Context, tr model.TrackDTO) {
 		if a.Store == nil || tr.ID == "" {
@@ -259,13 +261,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	if loaded, lErr := navClient.LoadSettings(ctx); lErr == nil && loaded.URL != "" {
+	_, hasDurableNav, durableNavErr := a.Store.GetDurableRecord(ctx, navidrome.SettingsNamespace, navidrome.SettingsRecordID)
+	if loaded, lErr := navClient.LoadSettings(ctx); lErr == nil && (hasDurableNav || loaded.URL != "") {
 		navClient.SetSettings(loaded)
-	} else if rec, ok, sErr := a.Store.GetSetting(ctx, store.NamespaceNavidrome); sErr == nil && ok {
-		var ns navidrome.Settings
-		if json.Unmarshal([]byte(rec.BodyJSON), &ns) == nil {
-			if v, vErr := navidrome.ValidateSettings(ns); vErr == nil {
-				navClient.SetSettings(v)
+	} else if !hasDurableNav && durableNavErr == nil {
+		if rec, ok, sErr := a.Store.GetSetting(ctx, store.NamespaceNavidrome); sErr == nil && ok {
+			var ns navidrome.Settings
+			if json.Unmarshal([]byte(rec.BodyJSON), &ns) == nil {
+				if v, vErr := navidrome.ValidateSettings(ns); vErr == nil {
+					navClient.SetSettings(v)
+				}
 			}
 		}
 	}
@@ -359,9 +364,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// 13. Bot & notification service.
 	botCfg := bot.DefaultConfig()
 	if rec, ok, err := a.Store.GetDurableRecord(ctx, "bot_setting", "config"); err == nil && ok {
-		var stored bot.Config
-		if json.Unmarshal([]byte(rec.BodyJSON), &stored) == nil {
-			botCfg = bot.SanitizeSecrets(stored)
+		if json.Unmarshal([]byte(rec.BodyJSON), &botCfg) == nil {
+			botCfg = bot.SanitizeSecrets(botCfg)
+		} else {
+			botCfg = bot.DefaultConfig()
 		}
 	}
 	botCfg.AllowTestLoopback = cfg.AllowTestLoopback
@@ -515,13 +521,7 @@ func (a *App) Snapshot() config.Snapshot {
 	if err != nil || !ok || rec.Revision == cachedRev {
 		return cached
 	}
-	var rt config.RuntimeConfig
-	if json.Unmarshal([]byte(rec.BodyJSON), &rt) != nil {
-		return cached
-	}
-	rt.Sources = a.sanitizeSources(rt.Sources)
-	rt.DataDir = a.AbsDataDir
-	rt.WorkDir = a.AbsWorkDir
+	rt := a.decodeRuntimeConfig(rec.BodyJSON, false)
 	next := config.NewSnapshot(rt, a.Cfg.Budgets)
 
 	a.snapMu.Lock()
@@ -816,14 +816,41 @@ func (a *App) reconcileRoots(ctx context.Context, absRoots []string) ([]files.Ro
 	return out, nil
 }
 
-func (a *App) loadInitialRuntimeConfig(ctx context.Context) (config.RuntimeConfig, int64) {
+func (a *App) managedRootsOrDefault() []files.Root {
+	if a.Files != nil {
+		if roots := a.Files.Roots(); len(roots) > 0 {
+			return roots
+		}
+	}
+	if strings.TrimSpace(a.AbsWorkDir) != "" {
+		return []files.Root{{ID: "work", CanonicalPath: filepath.Clean(a.AbsWorkDir)}}
+	}
+	return nil
+}
+
+func (a *App) resolveEffectiveWorkDir(raw string, warnOnFallback bool) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == config.DefaultRuntimeConfig().WorkDir {
+		return a.AbsWorkDir
+	}
+	_, resolvedDir, err := files.ResolveManagedDir(a.managedRootsOrDefault(), trimmed, a.AbsWorkDir)
+	if err != nil {
+		if warnOnFallback && a.Logs != nil {
+			a.Logs.Push("warn", fmt.Sprintf("已保存的下载目录 %q 无效（%v），已回退为默认目录 %s", trimmed, err, a.AbsWorkDir), "system", "")
+		}
+		return a.AbsWorkDir
+	}
+	return resolvedDir
+}
+
+func (a *App) decodeRuntimeConfig(bodyJSON string, warnOnFallback bool) config.RuntimeConfig {
 	rt := config.DefaultRuntimeConfig()
-	var rev int64
-	if rec, ok, err := a.Store.GetSetting(ctx, store.NamespaceRuntimeConfig); err == nil && ok {
-		var stored config.RuntimeConfig
-		if json.Unmarshal([]byte(rec.BodyJSON), &stored) == nil {
-			rt = stored
-			rev = rec.Revision
+	if strings.TrimSpace(bodyJSON) != "" {
+		if err := json.Unmarshal([]byte(bodyJSON), &rt); err != nil {
+			if warnOnFallback && a.Logs != nil {
+				a.Logs.Push("warn", "已保存的运行配置解析失败，已回退默认配置: "+err.Error(), "system", "")
+			}
+			rt = config.DefaultRuntimeConfig()
 		}
 	}
 	rt.Sources = a.sanitizeSources(rt.Sources)
@@ -839,9 +866,28 @@ func (a *App) loadInitialRuntimeConfig(ctx context.Context) (config.RuntimeConfi
 	if rt.LyricsMode == "" {
 		rt.LyricsMode = "both"
 	}
+	if rt.ProxyScope == "" {
+		rt.ProxyScope = "all"
+	}
+	if rt.SourceSettings == nil {
+		rt.SourceSettings = map[string]model.SourceSettingDTO{}
+	}
+	if rt.ProxySources == nil {
+		rt.ProxySources = []string{}
+	}
 	rt.DataDir = a.AbsDataDir
-	rt.WorkDir = a.AbsWorkDir
-	return rt, rev
+	rt.WorkDir = a.resolveEffectiveWorkDir(rt.WorkDir, warnOnFallback)
+	return rt
+}
+
+func (a *App) loadInitialRuntimeConfig(ctx context.Context) (config.RuntimeConfig, int64) {
+	var bodyJSON string
+	var rev int64
+	if rec, ok, err := a.Store.GetSetting(ctx, store.NamespaceRuntimeConfig); err == nil && ok {
+		bodyJSON = rec.BodyJSON
+		rev = rec.Revision
+	}
+	return a.decodeRuntimeConfig(bodyJSON, true), rev
 }
 
 // sanitizeSources keeps only sources that are currently registered (built-in or enabled plugin),

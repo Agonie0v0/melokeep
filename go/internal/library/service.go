@@ -508,6 +508,12 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return def, err
 	}
+	if !ok {
+		rec, ok, err = s.store.GetSetting(ctx, store.NamespaceLibraryConfig)
+		if err != nil {
+			return def, err
+		}
+	}
 	if !ok || strings.TrimSpace(rec.BodyJSON) == "" || rec.BodyJSON == "{}" {
 		return def, nil
 	}
@@ -517,6 +523,33 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 		return def, nil
 	}
 	out.Sources = filterValidScrapeSources(out.Sources, def.Sources, s.scraper)
+	if strings.TrimSpace(out.LibraryDir) == "" {
+		out.LibraryDir = def.LibraryDir
+	}
+	if strings.TrimSpace(out.FolderTemplate) == "" {
+		out.FolderTemplate = def.FolderTemplate
+	}
+	if strings.TrimSpace(out.FilenameTemplate) == "" {
+		out.FilenameTemplate = def.FilenameTemplate
+	}
+	if strings.TrimSpace(out.LyricsMode) == "" {
+		out.LyricsMode = def.LyricsMode
+	}
+	if strings.TrimSpace(out.CoverMode) == "" {
+		out.CoverMode = def.CoverMode
+	}
+	if strings.TrimSpace(out.Chinese) == "" {
+		out.Chinese = def.Chinese
+	}
+	if strings.TrimSpace(out.WatchAction) == "" {
+		out.WatchAction = def.WatchAction
+	}
+	if out.WatchInterval <= 0 {
+		out.WatchInterval = def.WatchInterval
+	}
+	if out.WatchStableSeconds <= 0 {
+		out.WatchStableSeconds = def.WatchStableSeconds
+	}
 	if out.MinMatchScore < 50 || out.MinMatchScore > 100 {
 		out.MinMatchScore = DefaultMinMatchScore
 	}

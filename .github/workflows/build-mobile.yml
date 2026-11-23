@@ -126,6 +126,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           ASSET_NAME: ${{ steps.ver.outputs.android_asset_name }}
+          EXPECTED_VERSION_NAME: ${{ steps.ver.outputs.clean_ver }}
+          EXPECTED_VERSION_CODE: ${{ steps.ver.outputs.ver_code }}
         run: |
           set -euo pipefail
           UNSIGNED_APK="$(find mobile/app/build/outputs/apk/release -maxdepth 2 -name '*.apk' -type f | head -n 1)"
@@ -177,6 +179,16 @@ jobs:
           fi
 
           "$APKSIGNER" verify --verbose "melokeep_outputs/$ASSET_NAME"
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
+          test -n "$AAPT2"
+          BADGING="$("$AAPT2" dump badging "melokeep_outputs/$ASSET_NAME")"
+          ACTUAL_VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/^package: .* versionName='\([^']*\)'.*/\1/p" | head -n 1)"
+          ACTUAL_VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/^package: .* versionCode='\([^']*\)'.*/\1/p" | head -n 1)"
+          echo "Verified APK badging: versionName='$ACTUAL_VERSION_NAME', versionCode='$ACTUAL_VERSION_CODE'"
+          if [ "$ACTUAL_VERSION_NAME" != "$EXPECTED_VERSION_NAME" ] || [ "$ACTUAL_VERSION_CODE" != "$EXPECTED_VERSION_CODE" ]; then
+            echo "APK 版本号校验失败：期望 versionName='$EXPECTED_VERSION_NAME' versionCode='$EXPECTED_VERSION_CODE'，实际 versionName='$ACTUAL_VERSION_NAME' versionCode='$ACTUAL_VERSION_CODE'" >&2
+            exit 1
+          fi
           ls -lh "melokeep_outputs/$ASSET_NAME"
 
       - name: 清理临时签名文件

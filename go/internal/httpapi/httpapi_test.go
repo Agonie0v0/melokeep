@@ -3348,3 +3348,101 @@ func TestDownloadEnqueueAudiobookSkipAutoOrganizeAndListLimit(t *testing.T) {
 		t.Fatalf("expected GET /api/downloads?limit=500 to return 250 items, got %d", len(limList))
 	}
 }
+
+func TestEngineConfigWorkDirValidationAndOpenDir(t *testing.T) {
+	openCalled := 0
+	srv, _, canonRoot := newTestServer(t, func(deps *Dependencies, _ string) {
+		deps.OpenDirCallback = func() error {
+			openCalled++
+			return nil
+		}
+	})
+
+	putEngine := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/engine/config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-MeloKeep-Request", "1")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. Blank work_dir rejected with 400.
+	for _, payload := range []string{
+		`{"global_client_cfg":{"work_dir":"   "}}`,
+		`{"work_dir":""}`,
+	} {
+		rec := putEngine(payload)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "下载目录不能为空") {
+			t.Fatalf("expected 400 blank work_dir for %s, got %d %s", payload, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 2. Outside-root and traversal work_dir rejected with 400.
+	outsideDir := filepath.Join(t.TempDir(), "outside")
+	outsideBytes, _ := json.Marshal(map[string]any{"work_dir": outsideDir})
+	for _, payload := range []string{
+		string(outsideBytes),
+		`{"global_client_cfg":{"work_dir":"../outside"}}`,
+	} {
+		rec := putEngine(payload)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "MELOKEEP_FILE_ROOT") {
+			t.Fatalf("expected 400 outside work_dir for %s, got %d %s", payload, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 3. Relative subdir via global_client_cfg.work_dir succeeds and creates subdir on disk.
+	recSub := putEngine(`{"global_client_cfg":{"work_dir":"待刮削"}}`)
+	if recSub.Code != http.StatusOK {
+		t.Fatalf("expected 200 for relative subdir, got %d %s", recSub.Code, recSub.Body.String())
+	}
+	wantSub := filepath.Join(canonRoot, "待刮削")
+	if got := srv.currentSnapshot().Runtime.WorkDir; got != wantSub {
+		t.Fatalf("Runtime.WorkDir = %q, want %q", got, wantSub)
+	}
+	if st, err := os.Stat(wantSub); err != nil || !st.IsDir() {
+		t.Fatalf("expected %s created on disk: err=%v", wantSub, err)
+	}
+
+	// 4. Top-level work_dir works when global_client_cfg.work_dir is blank/omitted.
+	recTop := putEngine(`{"global_client_cfg":{"work_dir":""},"work_dir":"incoming/sub"}`)
+	if recTop.Code != http.StatusOK {
+		t.Fatalf("expected 200 for top-level work_dir fallback, got %d %s", recTop.Code, recTop.Body.String())
+	}
+	wantTop := filepath.Join(canonRoot, "incoming", "sub")
+	if got := srv.currentSnapshot().Runtime.WorkDir; got != wantTop {
+		t.Fatalf("Runtime.WorkDir = %q, want %q", got, wantTop)
+	}
+
+	// 5. handleOpenDir uses dynamic Runtime.WorkDir.
+	openReq := httptest.NewRequest(http.MethodPost, "/api/open-dir", nil)
+	openReq.Header.Set("X-MeloKeep-Request", "1")
+	openRec := httptest.NewRecorder()
+	srv.ServeHTTP(openRec, openReq)
+	if openRec.Code != http.StatusOK || openCalled != 1 {
+		t.Fatalf("POST /api/open-dir failed: code=%d called=%d body=%s", openRec.Code, openCalled, openRec.Body.String())
+	}
+	var openResp map[string]any
+	if err := json.Unmarshal(openRec.Body.Bytes(), &openResp); err != nil {
+		t.Fatal(err)
+	}
+	if openResp["dir"] != wantTop {
+		t.Fatalf("expected open-dir dir=%q, got %v", wantTop, openResp["dir"])
+	}
+
+	// Non-desktop mode also surfaces dynamic Runtime.WorkDir in error message.
+	srv.deps.IsWindows = false
+	openReq2 := httptest.NewRequest(http.MethodPost, "/api/open-dir", nil)
+	openReq2.Header.Set("X-MeloKeep-Request", "1")
+	openRec2 := httptest.NewRecorder()
+	srv.ServeHTTP(openRec2, openReq2)
+	var errResp struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(openRec2.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal open-dir error response: %v body=%s", err, openRec2.Body.String())
+	}
+	if openRec2.Code != http.StatusBadRequest || !strings.Contains(errResp.Detail, wantTop) {
+		t.Fatalf("expected non-desktop open-dir error to mention %q, got %d %s", wantTop, openRec2.Code, openRec2.Body.String())
+	}
+}

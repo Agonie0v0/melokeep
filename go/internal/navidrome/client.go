@@ -27,8 +27,10 @@ import (
 )
 
 const (
-	settingsNamespace = "navidrome"
-	settingsRecordID  = "config"
+	SettingsNamespace = "navidrome"
+	SettingsRecordID  = "config"
+	settingsNamespace = SettingsNamespace
+	settingsRecordID  = SettingsRecordID
 	maxJSONBytes      = 16 << 20
 )
 

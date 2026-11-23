@@ -3553,3 +3553,36 @@ func TestScrapeAndCleanChineseConversionTagsAndLyrics(t *testing.T) {
 		t.Fatalf("expected clean(already simplified) LyricsText nil when unchanged, got %q", *jmCleanNoop.Items[0].LyricsText)
 	}
 }
+
+func TestLibrarySettingsLegacyFallbackAndPartialJSONDefaults(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+	st, _, svc, _ := setupLibraryTestEnv(t, newMemTagger(), ScraperOptions{}, nil, nil)
+
+	// Seed legacy-imported library_setting record with partial JSON (omitting watch_apply, templates, intervals).
+	if _, err := st.PutSetting(ctx, store.NamespaceLibraryConfig, `{"library_dir":"legacy_lib"}`, 0); err != nil {
+		t.Fatalf("PutSetting legacy library_setting: %v", err)
+	}
+	loaded, err := svc.Settings(ctx)
+	if err != nil {
+		t.Fatalf("Settings() failed on legacy fallback: %v", err)
+	}
+	if loaded.LibraryDir != "legacy_lib" || !loaded.WatchApply || loaded.FolderTemplate == "" || loaded.WatchInterval != 180 {
+		t.Fatalf("expected legacy library_dir + DefaultSettings defaults preserved, got %+v", loaded)
+	}
+
+	// Once saved to library_settings, newer settings take precedence and never revert to legacy row.
+	next := DefaultSettings()
+	next.LibraryDir = "modern_lib"
+	next.WatchApply = false
+	if _, err := svc.SaveSettings(ctx, admin, next); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	loaded2, err := svc.Settings(ctx)
+	if err != nil {
+		t.Fatalf("Settings() after save: %v", err)
+	}
+	if loaded2.LibraryDir != "modern_lib" || loaded2.WatchApply {
+		t.Fatalf("expected modern library_settings to take precedence, got %+v", loaded2)
+	}
+}

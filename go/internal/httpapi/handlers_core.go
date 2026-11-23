@@ -16,6 +16,7 @@ import (
 
 	"github.com/agonie0v0/melokeep/internal/auth"
 	"github.com/agonie0v0/melokeep/internal/config"
+	"github.com/agonie0v0/melokeep/internal/files"
 	"github.com/agonie0v0/melokeep/internal/model"
 	"github.com/agonie0v0/melokeep/internal/store"
 )
@@ -743,6 +744,10 @@ func (s *Server) handleWriteEngineConfig(w http.ResponseWriter, r *http.Request)
 		}
 		nextRT.DownloadConcurrency = v
 	}
+	var (
+		hasWorkDir bool
+		rawWorkDir string
+	)
 	if rawGlobal, ok := body["global_client_cfg"].(map[string]any); ok {
 		if rawCnt, ok := rawGlobal["search_size_per_source"].(float64); ok {
 			v := int(rawCnt)
@@ -752,8 +757,59 @@ func (s *Server) handleWriteEngineConfig(w http.ResponseWriter, r *http.Request)
 			}
 			nextRT.ResultsPerSource = v
 		}
-		if wd, ok := rawGlobal["work_dir"].(string); ok && strings.TrimSpace(wd) != "" {
-			nextRT.WorkDir = strings.TrimSpace(wd)
+		if rawVal, exists := rawGlobal["work_dir"]; exists {
+			hasWorkDir = true
+			if wd, ok := rawVal.(string); ok {
+				rawWorkDir = wd
+			}
+		}
+	}
+	if strings.TrimSpace(rawWorkDir) == "" {
+		if rawVal, exists := body["work_dir"]; exists {
+			hasWorkDir = true
+			if wd, ok := rawVal.(string); ok {
+				rawWorkDir = wd
+			}
+		}
+	}
+	if hasWorkDir {
+		trimmed := strings.TrimSpace(rawWorkDir)
+		if trimmed == "" {
+			writeError(w, http.StatusBadRequest, "下载目录不能为空")
+			return
+		}
+		var roots []files.Root
+		if s.deps.Files != nil {
+			roots = s.deps.Files.Roots()
+		}
+		if len(roots) == 0 && strings.TrimSpace(s.deps.WorkDir) != "" {
+			base := strings.TrimSpace(s.deps.WorkDir)
+			if absBase, err := filepath.Abs(base); err == nil {
+				base = filepath.Clean(absBase)
+			} else {
+				base = filepath.Clean(base)
+			}
+			roots = []files.Root{{ID: "work", CanonicalPath: base}}
+		}
+		if len(roots) > 0 {
+			defaultRoot := roots[0].CanonicalPath
+			if wd := strings.TrimSpace(s.deps.WorkDir); wd != "" && filepath.IsAbs(wd) {
+				defaultRoot = filepath.Clean(wd)
+			}
+			_, resolvedDir, err := files.ResolveManagedDir(roots, trimmed, defaultRoot)
+			if err != nil {
+				writeDomainError(w, err)
+				return
+			}
+			if !s.deps.ReadOnly {
+				if err := os.MkdirAll(resolvedDir, 0o750); err != nil {
+					writeDomainError(w, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "创建下载目录失败: "+err.Error(), err))
+					return
+				}
+			}
+			nextRT.WorkDir = resolvedDir
+		} else {
+			nextRT.WorkDir = trimmed
 		}
 	}
 	if rawProxySources, ok := body["proxy_sources"].([]any); ok {
@@ -948,9 +1004,9 @@ func (s *Server) handlePlaybackEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpenDir(w http.ResponseWriter, r *http.Request) {
-	dir := s.deps.WorkDir
-	if dir == "" {
-		dir = s.currentSnapshot().Runtime.WorkDir
+	dir := strings.TrimSpace(s.currentSnapshot().Runtime.WorkDir)
+	if dir == "" || (dir == config.DefaultRuntimeConfig().WorkDir && strings.TrimSpace(s.deps.WorkDir) != "") {
+		dir = strings.TrimSpace(s.deps.WorkDir)
 	}
 	if dir == "" {
 		dir = "melokeep_outputs"

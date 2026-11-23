@@ -1297,3 +1297,195 @@ func TestStartupHotLoadsPluginsAndSanitizesLegacySources(t *testing.T) {
 		t.Fatal("expected a runtime log entry about falling back to default sources")
 	}
 }
+
+func TestRuntimeWorkDirPersistsAcrossRestartAndSnapshotRefresh(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	dataDir := filepath.Join(tmp, "data")
+	musicRoot := filepath.Join(tmp, "music")
+	outsideDir := filepath.Join(tmp, "outside_dir")
+	if err := os.MkdirAll(musicRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canonRoot, err := files.CanonicalizeRoot(musicRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorkDir := filepath.Join(canonRoot, "待刮削")
+
+	cfg := app.LoadConfig(nil, app.ConfigOverrides{
+		DataDir:   dataDir,
+		MusicRoot: musicRoot,
+	})
+	a1, err := app.New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("app.New #1: %v", err)
+	}
+
+	// 1. Update WorkDir and all runtime preferences via PUT /api/engine/config.
+	putBody := `{
+		"music_sources":["AudiusMusicClient","FMAMusicClient"],
+		"global_client_cfg":{"work_dir":"待刮削","search_size_per_source":12},
+		"download_layout":"artist_album",
+		"lyrics_mode":"lrc",
+		"default_threads":3,
+		"proxy_scope":"none",
+		"embed_metadata":false
+	}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/engine/config", strings.NewReader(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	putRec := httptest.NewRecorder()
+	a1.Handler.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		_ = a1.Close()
+		t.Fatalf("PUT /api/engine/config failed: %d %s", putRec.Code, putRec.Body.String())
+	}
+	if st, err := os.Stat(wantWorkDir); err != nil || !st.IsDir() {
+		_ = a1.Close()
+		t.Fatalf("expected subdirectory %s created on save: stat=%v err=%v", wantWorkDir, st, err)
+	}
+
+	assertRuntime := func(stage string, rt config.RuntimeConfig) {
+		t.Helper()
+		if rt.WorkDir != wantWorkDir ||
+			rt.DownloadLayout != "artist_album" ||
+			rt.LyricsMode != "lrc" ||
+			rt.ResultsPerSource != 12 ||
+			rt.DownloadConcurrency != 3 ||
+			rt.ProxyScope != "none" ||
+			rt.EmbedMetadata {
+			t.Fatalf("%s runtime mismatch: %+v (want WorkDir=%q)", stage, rt, wantWorkDir)
+		}
+	}
+	assertRuntime("after PUT", a1.Snapshot().Runtime)
+
+	// 2. Force Snapshot() DB revision refresh by re-writing runtime_config directly in store.
+	rec, ok, err := a1.Store.GetSetting(ctx, store.NamespaceRuntimeConfig)
+	if err != nil || !ok {
+		_ = a1.Close()
+		t.Fatalf("GetSetting runtime_config: ok=%v err=%v", ok, err)
+	}
+	if _, err := a1.Store.PutSetting(ctx, store.NamespaceRuntimeConfig, rec.BodyJSON, rec.Revision); err != nil {
+		_ = a1.Close()
+		t.Fatalf("PutSetting bump revision: %v", err)
+	}
+	assertRuntime("after Snapshot() DB refresh", a1.Snapshot().Runtime)
+
+	// Seed legacy Navidrome setting in `settings`, then save empty URL to durable_records via API.
+	if _, err := a1.Store.PutSetting(ctx, store.NamespaceNavidrome, `{"enabled":true,"url":"http://legacy-nav.example.com:4533"}`, 0); err != nil {
+		_ = a1.Close()
+		t.Fatalf("seed legacy navidrome setting: %v", err)
+	}
+	navReq := httptest.NewRequest(http.MethodPut, "/api/library/navidrome", strings.NewReader(`{"enabled":false,"url":"","username":"","auto_scan":false}`))
+	navReq.Header.Set("Content-Type", "application/json")
+	navReq.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
+	navRec := httptest.NewRecorder()
+	a1.Handler.ServeHTTP(navRec, navReq)
+	if navRec.Code != http.StatusOK {
+		_ = a1.Close()
+		t.Fatalf("PUT /api/library/navidrome failed: %d %s", navRec.Code, navRec.Body.String())
+	}
+
+	// Seed partial bot_setting JSON missing newer default-true / non-zero fields.
+	if _, err := a1.Store.PutDurableRecord(ctx, "bot_setting", "config", `{"public_url":"https://music.example.com","tg_enabled":false}`, 0); err != nil {
+		_ = a1.Close()
+		t.Fatalf("PutDurableRecord partial bot_setting: %v", err)
+	}
+	_ = a1.Close()
+
+	// 3. Restart app on same DataDir & MusicRoot and verify full persistence.
+	a2, err := app.New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("app.New #2: %v", err)
+	}
+	assertRuntime("after restart", a2.Snapshot().Runtime)
+
+	getRec := httptest.NewRecorder()
+	a2.Handler.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/api/engine/config", nil))
+	if getRec.Code != http.StatusOK {
+		_ = a2.Close()
+		t.Fatalf("GET /api/engine/config failed: %d %s", getRec.Code, getRec.Body.String())
+	}
+	var engMap map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &engMap); err != nil {
+		_ = a2.Close()
+		t.Fatal(err)
+	}
+	globalCfg, _ := engMap["global_client_cfg"].(map[string]any)
+	if engMap["work_dir"] != wantWorkDir || globalCfg["work_dir"] != wantWorkDir {
+		_ = a2.Close()
+		t.Fatalf("expected GET /api/engine/config work_dir=%q, got top=%v global=%v", wantWorkDir, engMap["work_dir"], globalCfg["work_dir"])
+	}
+
+	// Verify Navidrome did NOT resurrect legacy settings row when durable record exists with empty URL.
+	if ns := a2.Navidrome.Settings(); ns.Enabled || ns.URL != "" {
+		_ = a2.Close()
+		t.Fatalf("expected cleared Navidrome durable config preserved across restart, got %+v", ns)
+	}
+	// Verify partial bot_setting preserved DefaultConfig() defaults (e.g. BotAIAllowActions=true, LinkTTLSeconds=86400).
+	if bc := a2.Bot.Config(); !bc.BotAIAllowActions || bc.LinkTTLSeconds != 86400 || bc.FeishuRegion != "feishu" || bc.PublicURL != "https://music.example.com" {
+		_ = a2.Close()
+		t.Fatalf("expected partial bot_setting to retain DefaultConfig defaults, got %+v", bc)
+	}
+	_ = a2.Close()
+
+	// 4. Historical runtime_config JSON missing newer fields (e.g. embed_metadata, proxy_scope) keeps defaults + relative WorkDir.
+	st, err := store.Open(ctx, store.Options{Path: store.DefaultDBPath(dataDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutSetting(ctx, store.NamespaceRuntimeConfig, `{"sources":["AudiusMusicClient"],"work_dir":"待刮削"}`, 0); err != nil {
+		_ = st.Close()
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	a3, err := app.New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("app.New #3: %v", err)
+	}
+	rt3 := a3.Snapshot().Runtime
+	if rt3.WorkDir != wantWorkDir || !rt3.EmbedMetadata || rt3.ProxyScope != "all" || rt3.ResultsPerSource != 5 || rt3.DownloadConcurrency != 2 || rt3.DownloadLayout != "source" || rt3.LyricsMode != "both" {
+		_ = a3.Close()
+		t.Fatalf("expected historical JSON missing fields to retain defaults + WorkDir, got %+v", rt3)
+	}
+	_ = a3.Close()
+
+	// 5. Invalid old WorkDir outside managed roots safely falls back to AbsWorkDir with warning log.
+	st2, err := store.Open(ctx, store.Options{Path: store.DefaultDBPath(dataDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badJSON, _ := json.Marshal(map[string]any{
+		"sources":  []string{"AudiusMusicClient"},
+		"work_dir": outsideDir,
+	})
+	if _, err := st2.PutSetting(ctx, store.NamespaceRuntimeConfig, string(badJSON), 0); err != nil {
+		_ = st2.Close()
+		t.Fatal(err)
+	}
+	_ = st2.Close()
+
+	a4, err := app.New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("app.New #4: %v", err)
+	}
+	defer a4.Close()
+	if a4.Snapshot().Runtime.WorkDir != a4.AbsWorkDir {
+		t.Fatalf("expected invalid old WorkDir to fall back to %q, got %q", a4.AbsWorkDir, a4.Snapshot().Runtime.WorkDir)
+	}
+	foundFallbackWarn := false
+	for _, entry := range a4.Logs.List() {
+		if entry.Level == "warning" && strings.Contains(entry.Message, "下载目录") {
+			foundFallbackWarn = true
+			break
+		}
+	}
+	if !foundFallbackWarn {
+		t.Fatalf("expected startup warning log when falling back invalid WorkDir, got %+v", a4.Logs.List())
+	}
+}

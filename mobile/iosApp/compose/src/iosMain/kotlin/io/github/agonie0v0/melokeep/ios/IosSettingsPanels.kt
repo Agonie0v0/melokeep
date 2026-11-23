@@ -99,11 +99,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
-import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
 import io.github.agonie0v0.melokeep.shared.findIosIpaAsset
+import io.github.agonie0v0.melokeep.shared.hasIosUpdateFor
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -2923,7 +2923,7 @@ internal fun iosOpenExternalUrl(rawUrl: String): Boolean {
 internal fun IosAppUpdateDialog(
 	currentVersion: String,
 	initialRelease: MeloGitHubRelease? = null,
-	onReleaseLoaded: (MeloGitHubRelease) -> Unit = {},
+	onReleaseLoaded: (MeloGitHubRelease?) -> Unit = {},
 	onShowNotice: (String) -> Unit = {},
 	onDismiss: () -> Unit,
 ) {
@@ -2931,6 +2931,7 @@ internal fun IosAppUpdateDialog(
 	val clipboard = LocalClipboardManager.current
 
 	var release by remember(initialRelease) { mutableStateOf(initialRelease) }
+	var checkedOnce by remember { mutableStateOf(initialRelease != null) }
 	var loading by remember { mutableStateOf(initialRelease == null) }
 	var errorMessage by remember { mutableStateOf<String?>(null) }
 	var launchFeedback by remember { mutableStateOf<String?>(null) }
@@ -2942,13 +2943,15 @@ internal fun IosAppUpdateDialog(
 			launchFeedback = null
 			scope.launch {
 				try {
-					val fetched = MeloAppUpdateChecker.fetchLatestIosRelease()
+					val fetched = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
 					release = fetched
+					checkedOnce = true
 					onReleaseLoaded(fetched)
 				} catch (e: CancellationException) {
 					throw e
 				} catch (e: Throwable) {
 					errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
+					checkedOnce = true
 				} finally {
 					loading = false
 				}
@@ -2957,15 +2960,18 @@ internal fun IosAppUpdateDialog(
 	}
 
 	LaunchedEffect(Unit) {
-		if (release == null) {
+		if (!checkedOnce) {
+			loading = true
 			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestIosRelease()
+				val fetched = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
 				release = fetched
+				checkedOnce = true
 				onReleaseLoaded(fetched)
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: Throwable) {
 				errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
+				checkedOnce = true
 			} finally {
 				loading = false
 			}
@@ -2973,10 +2979,12 @@ internal fun IosAppUpdateDialog(
 	}
 
 	val activeRelease = release
-	val hasUpdate = activeRelease != null && MeloSemVer.isNewer(activeRelease.tagName, currentVersion)
+	val hasUpdate = activeRelease?.hasIosUpdateFor(currentVersion) == true
 	val ipaAsset = remember(activeRelease) { activeRelease?.findIosIpaAsset() }
 	val displayCurrentVersion = normalizeIosVersionLabel(currentVersion, fallback = "1.0.0")
 	val displayReleaseTag = activeRelease?.tagName?.let { normalizeIosVersionLabel(it) }.orEmpty()
+	val releasePageUrl = activeRelease?.htmlUrl?.takeIf { it.isNotBlank() }
+		?: "https://github.com/Agonie0v0/melokeep/releases"
 
 	AlertDialog(
 		onDismissRequest = onDismiss,
@@ -2985,8 +2993,10 @@ internal fun IosAppUpdateDialog(
 			Text(
 				text = when {
 					loading && activeRelease == null -> "正在检查更新"
+					errorMessage != null -> "检查更新失败"
 					hasUpdate -> "发现新版本 $displayReleaseTag"
-					activeRelease != null -> "版本检查"
+					activeRelease != null -> "已是最新版本"
+					checkedOnce -> "尚无带 IPA 的已发布版本"
 					else -> "应用更新"
 				},
 				style = MaterialTheme.typography.titleMedium,
@@ -3010,7 +3020,12 @@ internal fun IosAppUpdateDialog(
 						style = MaterialTheme.typography.bodySmall.tabularNums(),
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
-					if (activeRelease != null) {
+					if (!loading && errorMessage == null && (activeRelease != null || checkedOnce)) {
+						val badgeText = when {
+							hasUpdate -> "最新 $displayReleaseTag"
+							activeRelease != null -> "已是最新 $displayReleaseTag"
+							else -> "尚无 IPA 版本"
+						}
 						Surface(
 							shape = CircleShape,
 							color = if (hasUpdate) {
@@ -3020,7 +3035,7 @@ internal fun IosAppUpdateDialog(
 							},
 						) {
 							Text(
-								text = if (hasUpdate) "最新 $displayReleaseTag" else "已是最新 $displayReleaseTag",
+								text = badgeText,
 								style = MaterialTheme.typography.labelSmall.tabularNums(),
 								fontWeight = FontWeight.SemiBold,
 								color = if (hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3092,7 +3107,7 @@ internal fun IosAppUpdateDialog(
 							}
 						}
 
-						if (ipaAsset != null) {
+						if (hasUpdate && ipaAsset != null) {
 							val encodedIpa = ipaAsset.downloadUrl.encodeURLParameter()
 							val sidestoreUrl = "sidestore://install?url=$encodedIpa"
 							val altstoreUrl = "altstore://install?url=$encodedIpa"
@@ -3154,7 +3169,7 @@ internal fun IosAppUpdateDialog(
 							}
 						} else {
 							Text(
-								text = "该版本暂未附带 .ipa 安装包，可前往 GitHub Release 页面查看。",
+								text = "当前已是最新 iOS 客户端版本，无需重新下载安装",
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
@@ -3162,7 +3177,7 @@ internal fun IosAppUpdateDialog(
 
 						OutlinedButton(
 							onClick = {
-								if (!iosOpenExternalUrl(activeRelease.htmlUrl)) {
+								if (!iosOpenExternalUrl(releasePageUrl)) {
 									launchFeedback = "无法打开 GitHub Release 页面"
 								}
 							},
@@ -3180,11 +3195,41 @@ internal fun IosAppUpdateDialog(
 							)
 						}
 
+						if (hasUpdate && ipaAsset != null) {
+							Text(
+								text = "说明：受 iOS 沙盒限制无法静默覆盖安装，请通过 SideStore / AltStore 安装，或下载 IPA 手动重签安装。",
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+							)
+						}
+					}
+
+					checkedOnce -> {
 						Text(
-							text = "说明：受 iOS 沙盒限制无法静默覆盖安装，请通过 SideStore / AltStore 安装，或下载 IPA 手动重签安装。",
-							style = MaterialTheme.typography.labelSmall,
-							color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+							text = "尚无带 IPA 的已发布版本，当前已是最新 iOS 客户端版本，无需重新下载安装。",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
 						)
+
+						OutlinedButton(
+							onClick = {
+								if (!iosOpenExternalUrl(releasePageUrl)) {
+									launchFeedback = "无法打开 GitHub Release 页面"
+								}
+							},
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Text("前往 GitHub Release 页面")
+						}
+
+						launchFeedback?.let { fb ->
+							Text(
+								text = fb,
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.primary,
+							)
+						}
 					}
 				}
 			}

@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -62,6 +61,7 @@ import io.github.agonie0v0.melokeep.shared.MeloGitHubAsset
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
 import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
+import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
@@ -143,6 +143,9 @@ class ChangelogViewModel(
 			?.takeIf { it.isNotEmpty() }
 	}.getOrNull() ?: "0.0.0"
 
+	internal val currentVersionName: String
+		get() = appVersionName
+
 	val release: StateFlow<MeloGitHubRelease?>
 		field = MutableStateFlow<MeloGitHubRelease?>(null)
 
@@ -200,18 +203,22 @@ class ChangelogViewModel(
 				checkFeedback.value = UpdateCheckFeedback.Checking
 			}
 			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestAndroidRelease(updateClient)
+				val fetched = MeloAppUpdateChecker.fetchLatestAndroidReleaseOrNull(updateClient)
 				preferenceManager.lastUpdateCheckTimeMs = System.currentTimeMillis()
 				latestRelease.value = fetched
-				updateInstallStateForRelease(fetched)
 
-				val isNewer = MeloSemVer.isNewer(fetched.tagName, currentVersion)
+				val isNewer = fetched != null && fetched.hasAndroidUpdateFor(currentVersion)
 				if (isNewer) {
+					updateInstallStateForRelease(fetched)
 					checkFeedback.value = UpdateCheckFeedback.UpdateAvailable(fetched.tagName)
 					if (showSheet && (manual || fetched.tagName != preferenceManager.ignoredUpdateTag)) {
 						release.value = fetched
 					}
 				} else {
+					cleanupInstalledOrOlderCachedApks(currentVersion)
+					if (installState.value !is ApkUpdateInstallState.Downloading) {
+						installState.value = ApkUpdateInstallState.Idle
+					}
 					release.value = null
 					if (manual) {
 						checkFeedback.value = UpdateCheckFeedback.UpToDate
@@ -262,6 +269,29 @@ class ChangelogViewModel(
 		}
 	}
 
+	private suspend fun cleanupInstalledOrOlderCachedApks(currentVersion: String) {
+		withContext(Dispatchers.IO) {
+			runCatching {
+				val updatesDir = File(appContext.cacheDir, "apk_updates")
+				if (!updatesDir.isDirectory) return@withContext
+				updatesDir.listFiles()?.forEach { file ->
+					if (!file.isFile) return@forEach
+					val name = file.name
+					val tag = when {
+						name.startsWith("MeloKeep-") && name.endsWith(".apk.part") ->
+							name.removePrefix("MeloKeep-").removeSuffix(".apk.part")
+						name.startsWith("MeloKeep-") && name.endsWith(".apk") ->
+							name.removePrefix("MeloKeep-").removeSuffix(".apk")
+						else -> null
+					} ?: return@forEach
+					if (tag.isNotBlank() && MeloSemVer.compare(tag, currentVersion) <= 0) {
+						file.delete()
+					}
+				}
+			}
+		}
+	}
+
 	private fun sanitizeTag(tag: String): String =
 		tag.trim().replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "latest" }
 
@@ -275,6 +305,10 @@ class ChangelogViewModel(
 	}
 
 	fun startDownloadAndInstall(targetRelease: MeloGitHubRelease) {
+		if (!targetRelease.hasAndroidUpdateFor(appVersionName)) {
+			installState.value = ApkUpdateInstallState.Idle
+			return
+		}
 		if (downloadJob?.isActive == true) {
 			return
 		}
@@ -493,29 +527,36 @@ internal fun MeloApkUpdateActionSection(
 		modifier = modifier.fillMaxWidth(),
 		verticalArrangement = Arrangement.spacedBy(8.dp)
 	) {
+		if (!isNewerVersion) {
+			Text(
+				text = "当前已是最新 Android 客户端版本，无需更新",
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				modifier = Modifier.padding(horizontal = 4.dp)
+			)
+			TextButton(
+				onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+				modifier = Modifier.fillMaxWidth(),
+				shape = buttonShape
+			) {
+				Text(
+					text = "前往 GitHub 页面",
+					fontFamily = defaultFont(100)
+				)
+			}
+			return@Column
+		}
+
 		if (!allowDirectInstall) {
-			if (isNewerVersion) {
-				Button(
-					onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
-					modifier = Modifier.fillMaxWidth(),
-					shape = buttonShape
-				) {
-					Text(
-						text = "前往 GitHub 页面",
-						fontFamily = defaultFont(100)
-					)
-				}
-			} else {
-				OutlinedButton(
-					onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
-					modifier = Modifier.fillMaxWidth(),
-					shape = buttonShape
-				) {
-					Text(
-						text = "前往 GitHub 页面",
-						fontFamily = defaultFont(100)
-					)
-				}
+			Button(
+				onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+				modifier = Modifier.fillMaxWidth(),
+				shape = buttonShape
+			) {
+				Text(
+					text = "前往 GitHub 页面",
+					fontFamily = defaultFont(100)
+				)
 			}
 			return@Column
 		}
@@ -661,43 +702,19 @@ internal fun MeloApkUpdateActionSection(
 
 				if (apkAsset != null) {
 					val sizeLabel = apkAsset.size.takeIf { it > 0L }?.let { " (${it.toFileSize()})" }.orEmpty()
-					when {
-						state is ApkUpdateInstallState.Error -> {
-							Button(
-								onClick = onStartDownload,
-								modifier = Modifier.fillMaxWidth(),
-								shape = buttonShape
-							) {
-								Text(
-									text = "重试下载并更新$sizeLabel",
-									fontFamily = defaultFont(100)
-								)
-							}
-						}
-						isNewerVersion -> {
-							Button(
-								onClick = onStartDownload,
-								modifier = Modifier.fillMaxWidth(),
-								shape = buttonShape
-							) {
-								Text(
-									text = "$primaryDownloadLabel$sizeLabel",
-									fontFamily = defaultFont(100)
-								)
-							}
-						}
-						else -> {
-							FilledTonalButton(
-								onClick = onStartDownload,
-								modifier = Modifier.fillMaxWidth(),
-								shape = buttonShape
-							) {
-								Text(
-									text = "重新下载安装包$sizeLabel",
-									fontFamily = defaultFont(100)
-								)
-							}
-						}
+					Button(
+						onClick = onStartDownload,
+						modifier = Modifier.fillMaxWidth(),
+						shape = buttonShape
+					) {
+						Text(
+							text = if (state is ApkUpdateInstallState.Error) {
+								"重试下载并更新$sizeLabel"
+							} else {
+								"$primaryDownloadLabel$sizeLabel"
+							},
+							fontFamily = defaultFont(100)
+						)
 					}
 
 					TextButton(
@@ -717,28 +734,15 @@ internal fun MeloApkUpdateActionSection(
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 						modifier = Modifier.padding(horizontal = 4.dp)
 					)
-					if (isNewerVersion) {
-						Button(
-							onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
-							modifier = Modifier.fillMaxWidth(),
-							shape = buttonShape
-						) {
-							Text(
-								text = "前往 GitHub 页面",
-								fontFamily = defaultFont(100)
-							)
-						}
-					} else {
-						OutlinedButton(
-							onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
-							modifier = Modifier.fillMaxWidth(),
-							shape = buttonShape
-						) {
-							Text(
-								text = "前往 GitHub 页面",
-								fontFamily = defaultFont(100)
-							)
-						}
+					Button(
+						onClick = { onOpenGitHubUrl(releaseHtmlUrl) },
+						modifier = Modifier.fillMaxWidth(),
+						shape = buttonShape
+					) {
+						Text(
+							text = "前往 GitHub 页面",
+							fontFamily = defaultFont(100)
+						)
 					}
 				}
 			}
@@ -759,7 +763,7 @@ fun ChangelogSheet() {
 	val installState by viewModel.installState.collectAsStateWithLifecycle()
 	var linkToOpen by rememberSaveable { mutableStateOf<String?>(null) }
 
-	release?.let { activeRelease ->
+	release?.takeIf { it.hasAndroidUpdateFor(viewModel.currentVersionName) }?.let { activeRelease ->
 		val apkAsset = remember(activeRelease) { activeRelease.findAndroidApkAsset() }
 		val isDownloading = installState is ApkUpdateInstallState.Downloading
 

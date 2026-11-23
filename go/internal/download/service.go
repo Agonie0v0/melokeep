@@ -1203,15 +1203,28 @@ func (s *Service) executeJob(dlID string) {
 			return
 		}
 		targetRoot := roots[0]
+		downloadBaseDir := targetRoot.CanonicalPath
+		wd := strings.TrimSpace(spec.snap.Runtime.WorkDir)
 		if spec.rootID != "" {
 			for _, r := range roots {
 				if r.ID == spec.rootID {
 					targetRoot = r
+					downloadBaseDir = targetRoot.CanonicalPath
 					break
 				}
 			}
+			if wd != "" && wd != config.DefaultRuntimeConfig().WorkDir {
+				if matchedRoot, resolvedDir, rErr := files.ResolveManagedDir(roots, wd, roots[0].CanonicalPath); rErr == nil && matchedRoot.ID == targetRoot.ID {
+					downloadBaseDir = resolvedDir
+				}
+			}
+		} else if wd != "" && wd != config.DefaultRuntimeConfig().WorkDir {
+			if matchedRoot, resolvedDir, rErr := files.ResolveManagedDir(roots, wd, roots[0].CanonicalPath); rErr == nil {
+				targetRoot = matchedRoot
+				downloadBaseDir = resolvedDir
+			}
 		}
-		targetPath := TargetAudioPathWithOptions(targetRoot.CanonicalPath, effectiveLayout, pTrack, ext, dlID, PathOptions{
+		targetPath := TargetAudioPathWithOptions(downloadBaseDir, effectiveLayout, pTrack, ext, dlID, PathOptions{
 			BookTitle:    spec.bookTitle,
 			ChapterIndex: spec.chapterIndex,
 			ChapterTotal: spec.chapterTotal,

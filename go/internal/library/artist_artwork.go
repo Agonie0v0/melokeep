@@ -1814,9 +1814,13 @@ func (f *ArtistArtworkFetcher) collectLocalSearchBaseDirs(ctx context.Context) [
 	// Prefer configured library_dir first (e.g., <root>/library), then registered roots themselves.
 	libDirSetting := DefaultSettings().LibraryDir
 	if f.store != nil {
-		if rec, ok, err := f.store.GetSetting(ctx, settingsNamespace); err == nil && ok && strings.TrimSpace(rec.BodyJSON) != "" {
-			var settings Settings
-			if json.Unmarshal([]byte(rec.BodyJSON), &settings) == nil {
+		rec, ok, err := f.store.GetSetting(ctx, settingsNamespace)
+		if err == nil && !ok {
+			rec, ok, err = f.store.GetSetting(ctx, store.NamespaceLibraryConfig)
+		}
+		if err == nil && ok && strings.TrimSpace(rec.BodyJSON) != "" {
+			settings := DefaultSettings()
+			if json.Unmarshal([]byte(rec.BodyJSON), &settings) == nil && strings.TrimSpace(settings.LibraryDir) != "" {
 				libDirSetting = settings.LibraryDir
 			}
 		}

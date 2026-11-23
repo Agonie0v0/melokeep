@@ -600,3 +600,121 @@ func TestCoordinatorHistoryDirDisableBackupAndPurge(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveManagedDir(t *testing.T) {
+	base := t.TempDir()
+	rootDir := filepath.Join(base, "music")
+	nestedRootDir := filepath.Join(rootDir, "vip")
+	outsideDir := filepath.Join(base, "music_outside")
+	if err := os.MkdirAll(nestedRootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canonRoot, err := CanonicalizeRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonNested, err := CanonicalizeRoot(nestedRootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := []Root{
+		{ID: "r-main", CanonicalPath: canonRoot, CaseMode: "sensitive"},
+		{ID: "r-vip", CanonicalPath: canonNested, CaseMode: "sensitive"},
+	}
+
+	// 1. Empty roots -> ErrUnavailable.
+	if _, _, err := ResolveManagedDir(nil, "incoming", ""); err == nil {
+		t.Fatal("expected error for empty roots")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrUnavailable {
+		t.Fatalf("expected ErrUnavailable, got %v", err)
+	}
+
+	// 2. Empty / blank raw -> ErrInvalidInput.
+	if _, _, err := ResolveManagedDir(roots, "   ", canonRoot); err == nil {
+		t.Fatal("expected error for blank path")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+
+	// 3. Root directory itself (absolute and ".").
+	for _, raw := range []string{canonRoot, "."} {
+		matched, resolved, err := ResolveManagedDir(roots, raw, canonRoot)
+		if err != nil {
+			t.Fatalf("ResolveManagedDir(%q) failed: %v", raw, err)
+		}
+		if matched.ID != "r-main" || resolved != canonRoot {
+			t.Fatalf("ResolveManagedDir(%q) = (%s, %q), want (r-main, %q)", raw, matched.ID, resolved, canonRoot)
+		}
+	}
+
+	// 4. Relative subdirectory & nested relative path (empty defaultRoot falls back to roots[0]).
+	for _, tc := range []struct {
+		raw      string
+		wantRoot string
+		wantDir  string
+	}{
+		{"待刮削", "r-main", filepath.Join(canonRoot, "待刮削")},
+		{"incoming/new", "r-main", filepath.Join(canonRoot, "incoming", "new")},
+		{filepath.Join(canonRoot, "待刮削", "batch"), "r-main", filepath.Join(canonRoot, "待刮削", "batch")},
+		{filepath.Join(canonNested, "lossless"), "r-vip", filepath.Join(canonNested, "lossless")},
+		{"vip/lossless", "r-vip", filepath.Join(canonNested, "lossless")},
+	} {
+		matched, resolved, err := ResolveManagedDir(roots, tc.raw, "")
+		if err != nil {
+			t.Fatalf("ResolveManagedDir(%q) unexpected error: %v", tc.raw, err)
+		}
+		if matched.ID != tc.wantRoot || resolved != tc.wantDir {
+			t.Fatalf("ResolveManagedDir(%q) = (%s, %q), want (%s, %q)", tc.raw, matched.ID, resolved, tc.wantRoot, tc.wantDir)
+		}
+	}
+
+	// 5. Existing valid directory succeeds.
+	existingSub := filepath.Join(canonRoot, "existing_sub")
+	if err := os.MkdirAll(existingSub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolved, err := ResolveManagedDir(roots, "existing_sub", canonRoot); err != nil || resolved != existingSub {
+		t.Fatalf("expected existing subdir %q, got %q err=%v", existingSub, resolved, err)
+	}
+
+	// 6. Traversal and outside-root paths must fail with ErrInvalidInput.
+	for _, bad := range []string{
+		"../music_outside",
+		"sub/../../music_outside",
+		filepath.Join(canonRoot, "..", "music_outside"),
+		outsideDir,
+	} {
+		if _, _, err := ResolveManagedDir(roots, bad, canonRoot); err == nil {
+			t.Fatalf("expected traversal/outside path %q to be rejected", bad)
+		} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput {
+			t.Fatalf("expected ErrInvalidInput for %q, got %v", bad, err)
+		}
+	}
+
+	// 7. Internal .melokeep-* directories must fail with ErrForbidden.
+	for _, internal := range []string{
+		".melokeep-history",
+		".melokeep-stage",
+		"sub/.melokeep-tmp",
+	} {
+		if _, _, err := ResolveManagedDir(roots, internal, canonRoot); err == nil {
+			t.Fatalf("expected internal path %q to be rejected", internal)
+		} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrForbidden {
+			t.Fatalf("expected ErrForbidden for %q, got %v", internal, err)
+		}
+	}
+
+	// 8. Existing regular file at target path must fail with ErrInvalidInput.
+	regularFile := filepath.Join(canonRoot, "not_a_dir.txt")
+	if err := os.WriteFile(regularFile, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ResolveManagedDir(roots, "not_a_dir.txt", canonRoot); err == nil {
+		t.Fatal("expected regular file target to be rejected")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput {
+		t.Fatalf("expected ErrInvalidInput for regular file, got %v", err)
+	}
+}

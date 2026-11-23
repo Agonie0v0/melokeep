@@ -493,6 +493,101 @@ func ResolveRoot(roots []Root, rootHint string) (Root, bool) {
 	return Root{}, false
 }
 
+// ResolveManagedDir resolves a user-configured directory path (absolute or relative to defaultRoot)
+// against managed roots (deepest root match wins) and rejects escapes, internal directories,
+// symlinks/reparse points, and non-directory targets.
+func ResolveManagedDir(roots []Root, raw string, defaultRoot string) (Root, string, error) {
+	if len(roots) == 0 {
+		return Root{}, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "未配置受管音乐根目录")
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return Root{}, "", model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不能为空")
+	}
+	base := strings.TrimSpace(defaultRoot)
+	if base == "" {
+		base = roots[0].CanonicalPath
+	}
+
+	var candidate string
+	if filepath.IsAbs(trimmed) {
+		candidate = filepath.Clean(trimmed)
+	} else {
+		candidate = filepath.Join(base, filepath.FromSlash(trimmed))
+	}
+	absTarget, err := filepath.Abs(candidate)
+	if err != nil {
+		return Root{}, "", model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径格式无效", err)
+	}
+	absTarget = filepath.Clean(absTarget)
+
+	sortedRoots := append([]Root(nil), roots...)
+	sort.Slice(sortedRoots, func(i, j int) bool {
+		return len(filepath.Clean(sortedRoots[i].CanonicalPath)) > len(filepath.Clean(sortedRoots[j].CanonicalPath))
+	})
+
+	var matched *Root
+	var rel string
+	for i := range sortedRoots {
+		r := sortedRoots[i]
+		canonRoot := filepath.Clean(r.CanonicalPath)
+		rRel, relErr := filepath.Rel(canonRoot, absTarget)
+		if relErr != nil || rRel == ".." || strings.HasPrefix(rRel, ".."+string(filepath.Separator)) || filepath.IsAbs(rRel) {
+			continue
+		}
+		if rRel == "." {
+			rel = ""
+			absTarget = canonRoot
+		} else {
+			rel = rRel
+			absTarget = filepath.Join(canonRoot, rel)
+		}
+		rCopy := r
+		rCopy.CanonicalPath = canonRoot
+		matched = &rCopy
+		break
+	}
+	if matched == nil {
+		return Root{}, "", model.NewError(
+			model.ErrInvalidInput,
+			http.StatusBadRequest,
+			"下载目录必须位于已挂载的音乐根目录内（例如 /music、/music/待刮削 或相对路径 待刮削）；如需使用其他位置，请先在容器挂载并配置 MELOKEEP_FILE_ROOT",
+		)
+	}
+
+	if rel != "" {
+		slashedRel := filepath.ToSlash(rel)
+		for _, part := range strings.Split(slashedRel, "/") {
+			if part == "" || part == "." || part == ".." {
+				return Root{}, "", model.NewError(model.ErrForbidden, http.StatusForbidden, "目录路径包含非法片段")
+			}
+			if InternalDirs[part] || strings.HasPrefix(part, ".melokeep-") {
+				return Root{}, "", model.NewError(model.ErrForbidden, http.StatusForbidden, "不能使用内部工作目录")
+			}
+		}
+		if err := verifyRelativeChainNoSymlinks(matched.CanonicalPath, rel); err != nil {
+			return Root{}, "", err
+		}
+		if err := verifyDeepestAncestorContained(matched.CanonicalPath, absTarget); err != nil {
+			return Root{}, "", err
+		}
+	}
+
+	if st, err := os.Lstat(absTarget); err == nil {
+		if !st.IsDir() {
+			return Root{}, "", model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目标路径已存在但不是目录")
+		}
+		isLink, lErr := IsReparseOrSymlink(absTarget, st)
+		if lErr != nil || isLink {
+			return Root{}, "", model.NewError(model.ErrForbidden, http.StatusForbidden, "禁止将符号链接或目录联接设为下载目录")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Root{}, "", model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不可访问或父级不是目录", err)
+	}
+
+	return *matched, absTarget, nil
+}
+
 // ValidateFolderPath validates that (rootHint, folder) resolves to a non-root subdirectory inside roots,
 // free of symlinks/reparse points and internal directories.
 func ValidateFolderPath(roots []Root, rootHint, folder string, mustExist bool) (ValidatedPath, error) {

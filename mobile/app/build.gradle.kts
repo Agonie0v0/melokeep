@@ -117,8 +117,13 @@ android {
 		applicationId = "io.github.agonie0v0.melokeep"
 		minSdk = libs.versions.android.minSdk.get().toInt()
 		targetSdk = libs.versions.android.targetSdk.get().toInt()
-		versionCode = System.getenv("MELOKEEP_VERSION_CODE")?.toIntOrNull() ?: 60
-		versionName = (System.getenv("MELOKEEP_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.0-beta01")
+		versionCode = providers.environmentVariable("MELOKEEP_VERSION_CODE").orNull
+			?.trim()
+			?.toIntOrNull()
+			?: 60
+		versionName = (providers.environmentVariable("MELOKEEP_VERSION_NAME").orNull
+			?.takeIf { it.isNotBlank() }
+			?: "1.0.0-beta01")
 			.trim()
 			.removePrefix("v")
 			.removePrefix("V")

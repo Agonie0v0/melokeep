@@ -65,10 +65,10 @@ import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
-import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
+import io.github.agonie0v0.melokeep.shared.hasIosUpdateFor
 import kotlinx.coroutines.CancellationException
 
 // =============================================================================
@@ -124,13 +124,13 @@ fun IosHubProfileRoute(
 		val playerTemp = audioPlayer.estimateTempCacheBytes()
 		(coilDisk + playerTemp).coerceAtLeast(0L)
 	}
-	val hasNewVersion = latestRelease != null && MeloSemVer.isNewer(latestRelease!!.tagName, appVersion)
+	val hasNewVersion = latestRelease?.hasIosUpdateFor(appVersion) == true
 	val displayLatestTag = latestRelease?.tagName?.let { normalizeIosVersionLabel(it) }.orEmpty()
 
 	LaunchedEffect(appVersion) {
 		if (latestRelease == null) {
 			try {
-				latestRelease = MeloAppUpdateChecker.fetchLatestIosRelease()
+				latestRelease = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
 			} catch (e: CancellationException) {
 				throw e
 			} catch (_: Throwable) {

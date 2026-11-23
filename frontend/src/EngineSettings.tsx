@@ -215,6 +215,8 @@ export function EngineSettings({
               <input
                 value={String(config.global_client_cfg.work_dir || "")}
                 onChange={(e) => updateGlobal("work_dir", e.target.value)}
+                placeholder="例如：待刮削 或 /music/待刮削"
+                title="支持相对路径（如 待刮削）或挂载目录内路径（如 /music/待刮削），容器更新重启后会保留"
                 required
               />
             </label>
@@ -318,6 +320,10 @@ export function EngineSettings({
               />
             </label>
           </div>
+          <p className="setting-help">
+            下载目录支持相对路径（如 待刮削）或挂载音乐根目录内路径（如
+            /music/待刮削），容器更新重启后会保留生效。
+          </p>
         </section>
         <section className="settings-section settings-proxy">
           <h2>项目代理</h2>

@@ -60,6 +60,12 @@ fun MeloGitHubRelease.findIosIpaAsset(): MeloGitHubAsset? {
 	} ?: ipaAssets.first()
 }
 
+fun MeloGitHubRelease.hasAndroidUpdateFor(currentVersion: String): Boolean =
+	!draft && !prerelease && findAndroidApkAsset() != null && MeloSemVer.isNewer(tagName, currentVersion)
+
+fun MeloGitHubRelease.hasIosUpdateFor(currentVersion: String): Boolean =
+	!draft && !prerelease && findIosIpaAsset() != null && MeloSemVer.isNewer(tagName, currentVersion)
+
 object MeloSemVer {
 	private data class ParsedVersion(
 		val core: List<Int>,
@@ -251,6 +257,67 @@ object MeloAppUpdateChecker {
 			.maxWithOrNull { a, b -> MeloSemVer.compare(a.tagName, b.tagName) }
 			?: stableReleases.maxWithOrNull { a, b -> MeloSemVer.compare(a.tagName, b.tagName) }
 			?: fetchLatestRelease(httpClient, repo)
+	}
+
+	suspend fun fetchLatestReleaseWithAssetOrNull(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+		maxPages: Int = 3,
+		perPage: Int = 100,
+		assetMatcher: (MeloGitHubRelease) -> MeloGitHubAsset?,
+	): MeloGitHubRelease? {
+		val normalizedRepo = normalizeRepo(repo)
+		val safeMaxPages = maxPages.coerceAtLeast(1)
+		val safePerPage = perPage.coerceIn(1, 100)
+		for (page in 1..safeMaxPages) {
+			val url = "https://api.github.com/repos/$normalizedRepo/releases?per_page=$safePerPage&page=$page"
+			val releases = fetchGitHubJson(httpClient, url) { text ->
+				meloJson.decodeFromString<List<MeloGitHubRelease>>(text)
+			}
+			if (releases.isEmpty()) break
+			val matched = releases
+				.filter { !it.draft && !it.prerelease && assetMatcher(it) != null }
+				.maxWithOrNull { a, b -> MeloSemVer.compare(a.tagName, b.tagName) }
+			if (matched != null) return matched
+			if (releases.size < safePerPage) break
+		}
+		return null
+	}
+
+	suspend fun fetchLatestAndroidReleaseOrNull(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+		maxPages: Int = 3,
+		perPage: Int = 100,
+	): MeloGitHubRelease? = fetchLatestReleaseWithAssetOrNull(
+		httpClient = httpClient,
+		repo = repo,
+		maxPages = maxPages,
+		perPage = perPage,
+	) { it.findAndroidApkAsset() }
+
+	suspend fun fetchLatestAndroidReleaseOrNull(
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease? = withTransientHttpClient { client ->
+		fetchLatestAndroidReleaseOrNull(client, repo)
+	}
+
+	suspend fun fetchLatestIosReleaseOrNull(
+		httpClient: HttpClient,
+		repo: String = DEFAULT_REPO,
+		maxPages: Int = 3,
+		perPage: Int = 100,
+	): MeloGitHubRelease? = fetchLatestReleaseWithAssetOrNull(
+		httpClient = httpClient,
+		repo = repo,
+		maxPages = maxPages,
+		perPage = perPage,
+	) { it.findIosIpaAsset() }
+
+	suspend fun fetchLatestIosReleaseOrNull(
+		repo: String = DEFAULT_REPO,
+	): MeloGitHubRelease? = withTransientHttpClient { client ->
+		fetchLatestIosReleaseOrNull(client, repo)
 	}
 
 	suspend fun fetchLatestAndroidRelease(

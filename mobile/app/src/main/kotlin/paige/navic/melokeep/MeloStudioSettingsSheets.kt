@@ -70,8 +70,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import coil3.ImageLoader
-import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
+import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
@@ -245,10 +245,9 @@ internal fun MeloProfileHubBody(
 	val tempCacheBytes = streamCacheBytes + imageCacheBytes
 	val cacheDisplayText = if (cacheSizeLoaded) tempCacheBytes.toFileSize() else "…"
 	val updateTag = latestRelease
-		?.takeIf { MeloSemVer.isNewer(it.tagName, appVersionName) }
+		?.takeIf { it.hasAndroidUpdateFor(appVersionName) }
 		?.tagName
 		?.takeIf { it.isNotBlank() }
-		?: (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag?.takeIf { it.isNotBlank() }
 	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
 	val normalizedNewTag = updateTag?.let(::formatReleaseTag)
 

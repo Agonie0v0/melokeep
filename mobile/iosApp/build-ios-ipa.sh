@@ -39,6 +39,19 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
+INFO_PLIST="$APP_PATH/Info.plist"
+if [ ! -f "$INFO_PLIST" ]; then
+  echo "ERROR: Info.plist not found at $INFO_PLIST" >&2
+  exit 1
+fi
+ACTUAL_SHORT_VER="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST")"
+ACTUAL_BUNDLE_VER="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST")"
+echo "Verified iOS Info.plist: CFBundleShortVersionString='$ACTUAL_SHORT_VER', CFBundleVersion='$ACTUAL_BUNDLE_VER'"
+if [ "$ACTUAL_SHORT_VER" != "$MARKETING_VER" ] || [ "$ACTUAL_BUNDLE_VER" != "$PROJECT_VER" ]; then
+  echo "ERROR: iOS version mismatch! Expected CFBundleShortVersionString='$MARKETING_VER' CFBundleVersion='$PROJECT_VER', got '$ACTUAL_SHORT_VER' '$ACTUAL_BUNDLE_VER'" >&2
+  exit 1
+fi
+
 echo "==> [3/3] Packaging $IPA_FILENAME..."
 mkdir -p "$OUT_DIR"
 STAGE_DIR="$(mktemp -d)"

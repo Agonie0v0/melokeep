@@ -1553,3 +1553,118 @@ func TestEnqueueRejectsPayRequiredTrack(t *testing.T) {
 		t.Fatalf("expected 2 download rows (free + empty metadata), got %d", count)
 	}
 }
+
+func TestDownloadUsesConfiguredRuntimeWorkDirAndIndexesAsset(t *testing.T) {
+	payload := sampleMP3Bytes(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	prov := &stubProvider{
+		id: "AudiusMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			return []model.ResolvedMedia{{
+				VariantID: "mp3_320",
+				Variant:   track.Variants[0],
+				URL:       srv.URL + "/incoming.mp3",
+				Codec:     "mp3",
+			}}, nil
+		},
+	}
+
+	st, svc, canon, rootID := setupDownloadEnv(t, prov, nil)
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+	pubID := seedTrack(t, st, "AudiusMusicClient", "workdir-track-1", "Incoming Song", "Open Lab")
+
+	rt := config.DefaultRuntimeConfig()
+	rt.EmbedMetadata = false
+	rt.WorkDir = filepath.Join(canon, "incoming")
+	snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+
+	res, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID:  pubID,
+		QualityID: "mp3_320",
+	})
+	if err != nil || !res.Created {
+		t.Fatalf("Enqueue failed: err=%v res=%+v", err, res)
+	}
+	done := waitForStatus(t, svc, res.Download.ID, model.DownloadComplete, 5*time.Second)
+	if done.File == nil || !strings.HasPrefix(*done.File, "asset:") {
+		t.Fatalf("expected asset file token, got %v", done.File)
+	}
+	assetID := strings.TrimPrefix(*done.File, "asset:")
+	asset, ok, err := st.GetAsset(ctx, assetID)
+	if err != nil || !ok {
+		t.Fatalf("GetAsset(%s) failed: ok=%v err=%v", assetID, ok, err)
+	}
+	if asset.RootID != rootID || asset.Status != "active" {
+		t.Fatalf("unexpected asset root/status: %+v (want rootID=%s)", asset, rootID)
+	}
+	wantRelPrefix := "incoming/AudiusMusicClient/"
+	if !strings.HasPrefix(asset.RelPath, wantRelPrefix) || asset.Folder != "incoming/AudiusMusicClient" {
+		t.Fatalf("expected asset indexed under %s, got rel=%q folder=%q", wantRelPrefix, asset.RelPath, asset.Folder)
+	}
+	diskPath := filepath.Join(canon, filepath.FromSlash(asset.RelPath))
+	if _, err := os.Stat(diskPath); err != nil {
+		t.Fatalf("expected downloaded audio on disk at %s: %v", diskPath, err)
+	}
+	lrcPath := strings.TrimSuffix(diskPath, filepath.Ext(diskPath)) + ".lrc"
+	if _, err := os.Stat(lrcPath); err != nil {
+		t.Fatalf("expected downloaded sidecar lrc at %s: %v", lrcPath, err)
+	}
+
+	// Also verify explicit RootID: if WorkDir belongs to another root, download falls back to targetRoot.CanonicalPath;
+	// if WorkDir belongs to the same targetRoot, download honors WorkDir.
+	secondDir := filepath.Join(filepath.Dir(canon), "music2")
+	if err := os.MkdirAll(secondDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secondRoot, rec2, err := files.RegisterRoot(secondDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRoot(ctx, rec2); err != nil {
+		t.Fatal(err)
+	}
+	curRoots := svc.coords.Roots()
+	svc.coords.UpdateRoots(append(curRoots, secondRoot))
+
+	pubID2 := seedTrack(t, st, "AudiusMusicClient", "workdir-track-2", "Second Root Song", "Open Lab")
+	res2, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+		PublicID:  pubID2,
+		QualityID: "mp3_320",
+		RootID:    secondRoot.ID,
+	})
+	if err != nil || !res2.Created {
+		t.Fatalf("Enqueue root2 mismatch failed: err=%v res=%+v", err, res2)
+	}
+	done2 := waitForStatus(t, svc, res2.Download.ID, model.DownloadComplete, 5*time.Second)
+	a2, ok, err := st.GetAsset(ctx, strings.TrimPrefix(*done2.File, "asset:"))
+	if err != nil || !ok || a2.RootID != secondRoot.ID || strings.HasPrefix(a2.RelPath, "incoming/") {
+		t.Fatalf("expected explicit RootID with other-root WorkDir to publish directly under root2, got ok=%v err=%v asset=%+v", ok, err, a2)
+	}
+
+	rt2 := config.DefaultRuntimeConfig()
+	rt2.EmbedMetadata = false
+	rt2.WorkDir = filepath.Join(secondRoot.CanonicalPath, "sub2")
+	snap2 := config.NewSnapshot(rt2, config.DefaultResourceBudgets())
+	pubID3 := seedTrack(t, st, "AudiusMusicClient", "workdir-track-3", "Second Root Sub Song", "Open Lab")
+	res3, err := svc.Enqueue(ctx, actor, snap2, EnqueueRequest{
+		PublicID:  pubID3,
+		QualityID: "mp3_320",
+		RootID:    secondRoot.ID,
+	})
+	if err != nil || !res3.Created {
+		t.Fatalf("Enqueue root2 match failed: err=%v res=%+v", err, res3)
+	}
+	done3 := waitForStatus(t, svc, res3.Download.ID, model.DownloadComplete, 5*time.Second)
+	a3, ok, err := st.GetAsset(ctx, strings.TrimPrefix(*done3.File, "asset:"))
+	if err != nil || !ok || a3.RootID != secondRoot.ID || !strings.HasPrefix(a3.RelPath, "sub2/AudiusMusicClient/") {
+		t.Fatalf("expected explicit RootID with matching-root WorkDir to publish under sub2, got ok=%v err=%v asset=%+v", ok, err, a3)
+	}
+}

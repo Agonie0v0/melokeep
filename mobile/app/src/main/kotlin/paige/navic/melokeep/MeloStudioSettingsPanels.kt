@@ -81,10 +81,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.ImageLoader
-import io.github.agonie0v0.melokeep.shared.MeloSemVer
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
+import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -2672,14 +2672,14 @@ internal fun SettingsVersionUpdatePanel(
 
 	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
 	val hasUpdate = remember(latestRelease, appVersionName) {
-		latestRelease?.let { MeloSemVer.isNewer(it.tagName, appVersionName) } == true
+		latestRelease?.hasAndroidUpdateFor(appVersionName) == true
 	}
 	val apkAsset = remember(latestRelease) { latestRelease?.findAndroidApkAsset() }
-	val updateTag = latestRelease
-		?.takeIf { hasUpdate }
-		?.tagName
-		?.takeIf { it.isNotBlank() }
-		?: (checkFeedback as? UpdateCheckFeedback.UpdateAvailable)?.tag?.takeIf { it.isNotBlank() }
+	val updateTag = if (hasUpdate) {
+		latestRelease?.tagName?.takeIf { it.isNotBlank() }
+	} else {
+		null
+	}
 	val normalizedNewTag = updateTag?.let(::formatReleaseTag)
 
 	LaunchedEffect(Unit) {
@@ -2740,8 +2740,11 @@ internal fun SettingsVersionUpdatePanel(
 									is UpdateCheckFeedback.UpToDate -> "当前已是最新版本 (v$appVersionName)"
 									is UpdateCheckFeedback.Error -> fb.message
 									is UpdateCheckFeedback.UpdateAvailable -> {
-										val tagLabel = normalizedNewTag ?: formatReleaseTag(fb.tag) ?: fb.tag
-										"发现新版本 $tagLabel，$newVersionHint"
+										if (normalizedNewTag != null) {
+											"发现新版本 $normalizedNewTag，$newVersionHint"
+										} else {
+											"当前已是最新版本 (v$appVersionName)"
+										}
 									}
 									UpdateCheckFeedback.Idle -> if (normalizedNewTag != null) {
 										"发现新版本 $normalizedNewTag，$newVersionHint"
@@ -2752,7 +2755,11 @@ internal fun SettingsVersionUpdatePanel(
 								style = MaterialTheme.typography.bodySmall,
 								color = when (checkFeedback) {
 									is UpdateCheckFeedback.Error -> MaterialTheme.colorScheme.error
-									is UpdateCheckFeedback.UpdateAvailable -> MaterialTheme.colorScheme.primary
+									is UpdateCheckFeedback.UpdateAvailable -> if (normalizedNewTag != null) {
+										MaterialTheme.colorScheme.primary
+									} else {
+										positiveColor
+									}
 									is UpdateCheckFeedback.UpToDate -> positiveColor
 									else -> if (normalizedNewTag != null) {
 										MaterialTheme.colorScheme.primary
