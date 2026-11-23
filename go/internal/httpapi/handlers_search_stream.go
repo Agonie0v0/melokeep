@@ -488,6 +488,23 @@ func (s *Server) readSafeSidecarLyrics(absAudioPath string) string {
 	return string(raw)
 }
 
+func (s *Server) readLocalTrackLyrics(ctx context.Context, absPath, assetID string) string {
+	if s.deps.Files != nil && assetID != "" {
+		if release, lErr := s.deps.Files.Locks().AcquireRead(assetID); lErr == nil {
+			defer release()
+		}
+	}
+	if s.deps.Tags != nil {
+		metaCtx, metaCancel := context.WithTimeout(ctx, 10*time.Second)
+		td, tErr := s.deps.Tags.ReadMetadata(metaCtx, absPath)
+		metaCancel()
+		if tErr == nil && td.Lyrics != "" {
+			return td.Lyrics
+		}
+	}
+	return s.readSafeSidecarLyrics(absPath)
+}
+
 func (s *Server) handleTrackLyrics(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
 	if strings.HasPrefix(sid, "navidrome-") && s.deps.Navidrome != nil {
@@ -508,23 +525,8 @@ func (s *Server) handleTrackLyrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if found && asset != nil {
 		if abs, aErr := s.resolveAssetAbsPath(*asset); aErr == nil {
-			var release func()
-			if s.deps.Files != nil {
-				if rel, lErr := s.deps.Files.Locks().AcquireRead(asset.ID); lErr == nil {
-					release = rel
-				}
-			}
-			if release != nil {
-				defer release()
-			}
-			if s.deps.Tags != nil {
-				if td, tErr := s.deps.Tags.ReadMetadata(r.Context(), abs); tErr == nil && td.Lyrics != "" {
-					writeJSON(w, http.StatusOK, map[string]any{"text": td.Lyrics})
-					return
-				}
-			}
-			if lrcTxt := s.readSafeSidecarLyrics(abs); lrcTxt != "" {
-				writeJSON(w, http.StatusOK, map[string]any{"text": lrcTxt})
+			if txt := s.readLocalTrackLyrics(r.Context(), abs, asset.ID); txt != "" {
+				writeJSON(w, http.StatusOK, map[string]any{"text": txt})
 				return
 			}
 		}
@@ -532,23 +534,8 @@ func (s *Server) handleTrackLyrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if localAbs, assetID, ok := s.findDownloadedFileForTrack(r.Context(), sid); ok {
-		var release func()
-		if s.deps.Files != nil && assetID != "" {
-			if rel, lErr := s.deps.Files.Locks().AcquireRead(assetID); lErr == nil {
-				release = rel
-			}
-		}
-		if release != nil {
-			defer release()
-		}
-		if s.deps.Tags != nil {
-			if td, tErr := s.deps.Tags.ReadMetadata(r.Context(), localAbs); tErr == nil && td.Lyrics != "" {
-				writeJSON(w, http.StatusOK, map[string]any{"text": td.Lyrics})
-				return
-			}
-		}
-		if lrcTxt := s.readSafeSidecarLyrics(localAbs); lrcTxt != "" {
-			writeJSON(w, http.StatusOK, map[string]any{"text": lrcTxt})
+		if txt := s.readLocalTrackLyrics(r.Context(), localAbs, assetID); txt != "" {
+			writeJSON(w, http.StatusOK, map[string]any{"text": txt})
 			return
 		}
 	}

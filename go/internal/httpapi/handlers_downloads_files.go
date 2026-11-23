@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/agonie0v0/melokeep/internal/download"
 	"github.com/agonie0v0/melokeep/internal/files"
@@ -491,6 +492,107 @@ func (s *Server) resolveLibraryTarget(ctx context.Context, rawPath string, audio
 	return vp, nil, nil
 }
 
+var (
+	inlineStreamMaxRangeBytes     int64         = 1 << 20 // 1 MiB per inline Range chunk
+	inlineStreamWriteStallTimeout time.Duration = 10 * time.Second
+	attachmentWriteStallTimeout   time.Duration = 30 * time.Second
+)
+
+func parseNonNegDecimal(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+func capInlineRangeHeader(rawRange string, totalSize, maxChunk int64) (string, bool) {
+	trimmed := strings.TrimSpace(rawRange)
+	if totalSize <= 0 || maxChunk <= 0 || trimmed == "" {
+		return "", false
+	}
+	if len(trimmed) < len("bytes=") || !strings.EqualFold(trimmed[:len("bytes=")], "bytes=") {
+		return "", false
+	}
+	spec := strings.TrimSpace(trimmed[len("bytes="):])
+	if spec == "" || strings.Contains(spec, ",") {
+		return "", false
+	}
+	startStr, endStr, ok := strings.Cut(spec, "-")
+	if !ok {
+		return "", false
+	}
+	startStr = strings.TrimSpace(startStr)
+	if startStr == "" {
+		return "", false
+	}
+	start, ok := parseNonNegDecimal(startStr)
+	if !ok || start < 0 || start >= totalSize {
+		return "", false
+	}
+	endStr = strings.TrimSpace(endStr)
+	var reqEnd int64
+	if endStr == "" {
+		reqEnd = totalSize - 1
+	} else {
+		parsedEnd, pOK := parseNonNegDecimal(endStr)
+		if !pOK || parsedEnd < start {
+			return "", false
+		}
+		if parsedEnd >= totalSize {
+			parsedEnd = totalSize - 1
+		}
+		reqEnd = parsedEnd
+	}
+	if reqEnd-start+1 <= maxChunk {
+		return "", false
+	}
+	return fmt.Sprintf("bytes=%d-%d", start, start+maxChunk-1), true
+}
+
+// deadlineResponseWriter refreshes a per-write stall deadline on each WriteHeader/Write.
+// It intentionally does not implement io.ReaderFrom so http.ServeContent streams via chunked Write loops
+// instead of bypassing write deadlines through sendfile.
+type deadlineResponseWriter struct {
+	http.ResponseWriter
+	rc      *http.ResponseController
+	ctx     context.Context
+	timeout time.Duration
+}
+
+func (dw *deadlineResponseWriter) Unwrap() http.ResponseWriter {
+	return dw.ResponseWriter
+}
+
+func (dw *deadlineResponseWriter) refreshDeadline() {
+	if dw.rc != nil && dw.timeout > 0 {
+		_ = dw.rc.SetWriteDeadline(time.Now().Add(dw.timeout))
+	}
+}
+
+func (dw *deadlineResponseWriter) WriteHeader(statusCode int) {
+	dw.refreshDeadline()
+	dw.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (dw *deadlineResponseWriter) Write(p []byte) (int, error) {
+	if dw.ctx != nil {
+		if err := dw.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
+	dw.refreshDeadline()
+	return dw.ResponseWriter.Write(p)
+}
+
 func (s *Server) serveLocalPath(w http.ResponseWriter, r *http.Request, absPath, assetID, disposition string) {
 	if s.deps.Files != nil && assetID != "" {
 		release, err := s.deps.Files.Locks().AcquireRead(assetID)
@@ -527,7 +629,30 @@ func (s *Server) serveLocalPath(w http.ResponseWriter, r *http.Request, absPath,
 	} else {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, strings.ReplaceAll(name, `"`, "")))
 	}
-	http.ServeContent(w, r, name, info.ModTime(), f)
+	w.Header().Set("ETag", fmt.Sprintf(`"%x-%x"`, info.ModTime().UnixNano(), info.Size()))
+	w.Header().Set("Cache-Control", "private, no-cache")
+
+	if disposition == "inline" && r.Method == http.MethodGet {
+		if cappedRange, ok := capInlineRangeHeader(r.Header.Get("Range"), info.Size(), inlineStreamMaxRangeBytes); ok {
+			cloned := r.Clone(r.Context())
+			cloned.Header.Set("Range", cappedRange)
+			r = cloned
+		}
+	}
+
+	timeout := attachmentWriteStallTimeout
+	if disposition == "inline" {
+		timeout = inlineStreamWriteStallTimeout
+	}
+	rc := http.NewResponseController(w)
+	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	wrappedW := &deadlineResponseWriter{
+		ResponseWriter: w,
+		rc:             rc,
+		ctx:            r.Context(),
+		timeout:        timeout,
+	}
+	http.ServeContent(wrappedW, r, name, info.ModTime(), f)
 }
 
 func (s *Server) handleLocalAudio(w http.ResponseWriter, r *http.Request) {
