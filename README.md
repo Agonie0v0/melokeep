@@ -101,7 +101,7 @@ services:
     environment:
       MELOKEEP_USER: admin
       MELOKEEP_PASS: "请改成你自己的强密码" # 若密码含 $ 请写成 $$
-      # NAS 有专用目录读写用户时，填入对应 UID/GID（在终端执行 id 用户名 查看）：
+      # 默认以 10001:10001 运行；若 NAS 有专用读写用户或需以 root (0:0) 运行，填入对应 UID/GID：
       # PUID: '1000'
       # PGID: '1000'
 ```

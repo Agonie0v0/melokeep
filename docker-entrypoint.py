@@ -9,13 +9,17 @@ from runtime_config import initialize_environment
 
 def runtime_ids():
     current_uid, current_gid = os.getuid(), os.getgid()
+    default_uid = 10001 if current_uid == 0 else current_uid
+    default_gid = 10001 if current_uid == 0 else current_gid
+    raw_uid = os.environ.get('PUID', '').strip()
+    raw_gid = os.environ.get('PGID', '').strip()
     try:
-        uid = int(os.environ.get('PUID', '10001' if current_uid == 0 else str(current_uid)))
-        gid = int(os.environ.get('PGID', '10001' if current_uid == 0 else str(current_gid)))
+        uid = int(raw_uid) if raw_uid else default_uid
+        gid = int(raw_gid) if raw_gid else default_gid
     except ValueError:
-        raise SystemExit('PUID 和 PGID 必须是数字，请填写 NAS 用户的 UID/GID。')
-    if not 1 <= uid <= 2147483647 or not 0 <= gid <= 2147483647:
-        raise SystemExit('PUID 和 PGID 范围无效：PUID 必须大于 0，PGID 不能小于 0。')
+        raise SystemExit('PUID 和 PGID 必须是数字，请填写 NAS 用户的 UID/GID（或 0 以 root 运行）。')
+    if not 0 <= uid <= 2147483647 or not 0 <= gid <= 2147483647:
+        raise SystemExit('PUID 和 PGID 范围无效：PUID 和 PGID 必须为 0 到 2147483647 之间的整数。')
     if current_uid != 0 and (uid, gid) != (current_uid, current_gid):
         raise SystemExit('容器已通过 user 指定运行身份，无法切换到 PUID/PGID；请移除 user 或让两者一致。')
     return uid, gid
@@ -82,23 +86,27 @@ def main():
                     repair_owner(item, uid, gid)
             repair_owner(private, uid, gid)
             private.chmod(0o700)
-            groups = []
-            allow_self_update = os.environ.get('MELOKEEP_ALLOW_DOCKER_SELF_UPDATE', '1').strip().lower()
-            if allow_self_update not in ('0', 'false', 'no', 'off'):
-                sock_path = Path(os.environ.get('MELOKEEP_DOCKER_SOCKET', '/var/run/docker.sock'))
+            if (uid, gid) != (0, 0):
+                groups = []
+                allow_self_update = os.environ.get('MELOKEEP_ALLOW_DOCKER_SELF_UPDATE', '1').strip().lower()
+                if allow_self_update not in ('0', 'false', 'no', 'off'):
+                    sock_path = Path(os.environ.get('MELOKEEP_DOCKER_SOCKET', '/var/run/docker.sock'))
+                    try:
+                        if sock_path.exists():
+                            sock_stat = sock_path.stat()
+                            if stat.S_ISSOCK(sock_stat.st_mode):
+                                groups = [sock_stat.st_gid]
+                    except OSError:
+                        groups = []
                 try:
-                    if sock_path.exists():
-                        sock_stat = sock_path.stat()
-                        if stat.S_ISSOCK(sock_stat.st_mode):
-                            groups = [sock_stat.st_gid]
+                    os.setgroups(groups)
                 except OSError:
-                    groups = []
-            try:
-                os.setgroups(groups)
-            except OSError:
-                os.setgroups([])
-            os.setgid(gid)
-            os.setuid(uid)
+                    try:
+                        os.setgroups([])
+                    except OSError:
+                        pass
+                os.setgid(gid)
+                os.setuid(uid)
         if private.is_symlink():
             raise SystemExit(f'{private} 不能是符号链接，请使用数据目录内的真实文件夹。')
         for directory in (data, private, music):

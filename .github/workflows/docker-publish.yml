@@ -265,7 +265,7 @@ jobs:
 
       - name: 验证已发布镜像可启动
         run: |
-          for identity in 10001:10001 1026:100; do
+          for identity in 10001:10001 1026:100 0:0; do
             runtime_uid=${identity%:*}
             runtime_gid=${identity#*:}
             storage=/tmp/melokeep-smoke/${runtime_uid}
