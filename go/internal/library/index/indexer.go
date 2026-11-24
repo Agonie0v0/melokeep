@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -134,15 +135,20 @@ func (idx *Indexer) ScanRootWithOptions(ctx context.Context, rootRec store.RootR
 	var unchangedIDs []string
 	var coverRepairIDs []string
 	var toRead []pendingRead
-	var walkErrMsg string
+	var walkErrs []string
 
 	walkErr := filepath.WalkDir(canon, func(p string, d fs.DirEntry, wErr error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if wErr != nil {
-			walkErrMsg = fmt.Sprintf("目录遍历异常(%s): %v", p, wErr)
-			return fs.SkipAll
+			walkErrs = append(walkErrs, fmt.Sprintf("目录遍历异常(%s): %v", p, wErr))
+			if p == canon {
+				return fs.SkipAll
+			}
+			// os.ReadDir(p) has already failed for child directories; returning nil skips p
+			// and continues sibling directories, whereas SkipDir when d == nil skips parent.
+			return nil
 		}
 		name := d.Name()
 		if p != canon && (files.InternalDirs[name] || strings.HasPrefix(name, ".melokeep-")) {
@@ -153,8 +159,14 @@ func (idx *Indexer) ScanRootWithOptions(ctx context.Context, rootRec store.RootR
 		}
 		info, iErr := os.Lstat(p)
 		if iErr != nil {
-			walkErrMsg = fmt.Sprintf("读取文件属性失败(%s): %v", p, iErr)
-			return fs.SkipAll
+			walkErrs = append(walkErrs, fmt.Sprintf("读取文件属性失败(%s): %v", p, iErr))
+			if p == canon {
+				return fs.SkipAll
+			}
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		isLink, lErr := files.IsReparseOrSymlink(p, info)
 		if lErr != nil || isLink {
@@ -216,10 +228,11 @@ func (idx *Indexer) ScanRootWithOptions(ctx context.Context, rootRec store.RootR
 		return nil
 	})
 
-	if walkErr != nil && walkErrMsg == "" {
-		walkErrMsg = walkErr.Error()
-	}
-	if walkErrMsg != "" {
+	walkErrMsg := formatWalkErrors(walkErrs, walkErr)
+	if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) || ctx.Err() != nil {
+		if walkErrMsg == "" && ctx.Err() != nil {
+			walkErrMsg = ctx.Err().Error()
+		}
 		stats.Healthy = false
 		stats.StructuralError = walkErrMsg
 		_, _ = idx.store.AdvanceScanGeneration(ctx, rootRec.ID, stats.Generation, false, walkErrMsg)
@@ -330,6 +343,14 @@ func (idx *Indexer) ScanRootWithOptions(ctx context.Context, rootRec store.RootR
 		}
 	}
 
+	if walkErrMsg != "" {
+		stats.Healthy = false
+		stats.StructuralError = walkErrMsg
+		// Keep completeWithoutErrors=false so unseen tracks in unreadable subdirs are never marked missing.
+		_, _ = idx.store.AdvanceScanGeneration(ctx, rootRec.ID, stats.Generation, false, walkErrMsg)
+		return stats, nil
+	}
+
 	markedMissing, err := idx.store.AdvanceScanGeneration(ctx, rootRec.ID, stats.Generation, true, "")
 	if err != nil {
 		return stats, err
@@ -437,6 +458,19 @@ func (idx *Indexer) markGenerationBatch(ctx context.Context, assetIDs []string, 
 		}
 	}
 	return nil
+}
+
+func formatWalkErrors(walkErrs []string, walkErr error) string {
+	switch {
+	case len(walkErrs) == 1:
+		return walkErrs[0]
+	case len(walkErrs) > 1:
+		return fmt.Sprintf("%s（另有 %d 处目录遍历异常）", walkErrs[0], len(walkErrs)-1)
+	case walkErr != nil:
+		return walkErr.Error()
+	default:
+		return ""
+	}
 }
 
 func nonEmptyOr(val, fallback string) string {

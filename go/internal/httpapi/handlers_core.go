@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -796,14 +797,24 @@ func (s *Server) handleWriteEngineConfig(w http.ResponseWriter, r *http.Request)
 			if wd := strings.TrimSpace(s.deps.WorkDir); wd != "" && filepath.IsAbs(wd) {
 				defaultRoot = filepath.Clean(wd)
 			}
-			_, resolvedDir, err := files.ResolveManagedDir(roots, trimmed, defaultRoot)
+			matchedRoot, resolvedDir, err := files.ResolveManagedDir(roots, trimmed, defaultRoot)
 			if err != nil {
 				writeDomainError(w, err)
 				return
 			}
 			if !s.deps.ReadOnly {
-				if err := os.MkdirAll(resolvedDir, 0o750); err != nil {
+				if err := os.MkdirAll(resolvedDir, 0o755); err != nil {
+					if errors.Is(err, os.ErrPermission) {
+						if permErr := files.CheckNearestWritableAncestor(matchedRoot.CanonicalPath, resolvedDir); permErr != nil {
+							writeDomainError(w, permErr)
+							return
+						}
+					}
 					writeDomainError(w, model.WrapError(model.ErrInvalidInput, http.StatusBadRequest, "创建下载目录失败: "+err.Error(), err))
+					return
+				}
+				if err := files.CheckDirWritable(resolvedDir); err != nil {
+					writeDomainError(w, err)
 					return
 				}
 			}

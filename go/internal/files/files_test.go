@@ -3,9 +3,11 @@ package files
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -716,5 +718,151 @@ func TestResolveManagedDir(t *testing.T) {
 		t.Fatal("expected regular file target to be rejected")
 	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput {
 		t.Fatalf("expected ErrInvalidInput for regular file, got %v", err)
+	}
+}
+
+func TestCheckDirWritableAndNearestAncestor(t *testing.T) {
+	base := t.TempDir()
+	rootDir := filepath.Join(base, "music")
+	outsideDir := filepath.Join(base, "outside")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canon, err := CanonicalizeRoot(rootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := Root{ID: "r-perm", CanonicalPath: canon, CaseMode: "sensitive"}
+
+	// 1. Blank and "." rejected with ErrInvalidInput 400.
+	for _, bad := range []string{"", "   ", "."} {
+		err := CheckDirWritable(bad)
+		if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput || de.HTTPStatus() != http.StatusBadRequest {
+			t.Fatalf("CheckDirWritable(%q): expected 400 ErrInvalidInput, got %v", bad, err)
+		}
+	}
+
+	// 2. Writable empty dir passes and cleans up write probe file.
+	writableDir := filepath.Join(canon, "writable")
+	if err := os.MkdirAll(writableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckDirWritable(writableDir); err != nil {
+		t.Fatalf("CheckDirWritable(writableDir) failed: %v", err)
+	}
+	entries, err := os.ReadDir(writableDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected probe file cleaned up, remaining entries=%d", len(entries))
+	}
+
+	// 3. Non-existent dir returns ErrNotFound 404.
+	missingDir := filepath.Join(canon, "missing-dir")
+	if err := CheckDirWritable(missingDir); err == nil {
+		t.Fatal("expected missing dir error")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrNotFound || de.HTTPStatus() != http.StatusNotFound {
+		t.Fatalf("expected 404 ErrNotFound for missing dir, got %v", err)
+	}
+
+	// 4. Regular file returns ErrInvalidInput 400.
+	regFile := filepath.Join(canon, "not_a_dir.txt")
+	if err := os.WriteFile(regFile, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckDirWritable(regFile); err == nil {
+		t.Fatal("expected regular file error")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrInvalidInput || de.HTTPStatus() != http.StatusBadRequest {
+		t.Fatalf("expected 400 ErrInvalidInput for regular file, got %v", err)
+	}
+
+	// 5. CheckNearestWritableAncestor succeeds for root and nested non-existent subdirs without creating them.
+	if err := CheckNearestWritableAncestor(canon, canon); err != nil {
+		t.Fatalf("CheckNearestWritableAncestor(canon, canon) failed: %v", err)
+	}
+	nested := filepath.Join(canon, "待刮削", "level2", "level3")
+	if err := CheckNearestWritableAncestor(canon, nested); err != nil {
+		t.Fatalf("CheckNearestWritableAncestor nested failed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(canon, "待刮削")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected CheckNearestWritableAncestor not to create nested dirs, lstat err=%v", err)
+	}
+
+	// 6. Outside root returns ErrForbidden 403.
+	if err := CheckNearestWritableAncestor(canon, outsideDir); err == nil {
+		t.Fatal("expected outside root to fail")
+	} else if de, ok := model.AsDomainError(err); !ok || de.Code != model.ErrForbidden || de.HTTPStatus() != http.StatusForbidden {
+		t.Fatalf("expected 403 ErrForbidden for outside root, got %v", err)
+	}
+
+	// 7. Unix permission checks (0o000 / 0o500).
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		assertPermErr := func(label string, err error, wantPath string) {
+			t.Helper()
+			if err == nil {
+				t.Fatalf("%s: expected permission error, got nil", label)
+			}
+			if !errors.Is(err, os.ErrPermission) {
+				t.Fatalf("%s: expected os.ErrPermission in chain, got %v", label, err)
+			}
+			de, ok := model.AsDomainError(err)
+			if !ok || de.Code != model.ErrForbidden || de.HTTPStatus() != http.StatusForbidden {
+				t.Fatalf("%s: expected 403 ErrForbidden, got %v", label, err)
+			}
+			if !strings.Contains(de.Detail, wantPath) || !strings.Contains(de.Detail, "UID:GID=") || !strings.Contains(de.Detail, "PUID/PGID") {
+				t.Fatalf("%s: expected path (%s), UID:GID, and PUID/PGID hint in detail %q", label, wantPath, de.Detail)
+			}
+		}
+
+		lockedDir := filepath.Join(canon, "locked-dir")
+		if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(lockedDir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+		roDir := filepath.Join(canon, "ro-dir")
+		if err := os.MkdirAll(roDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(roDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+		// ResolveManagedDir remains a pure path/symlink validator on 0o500 dir itself.
+		if _, resolvedRO, err := ResolveManagedDir([]Root{root}, roDir, canon); err != nil || resolvedRO != roDir {
+			t.Fatalf("expected ResolveManagedDir(roDir) to succeed without write probe, got dir=%q err=%v", resolvedRO, err)
+		}
+
+		// 0o000 checks.
+		assertPermErr("CheckDirWritable(0o000)", CheckDirWritable(lockedDir), lockedDir)
+		assertPermErr("CheckNearestWritableAncestor(0o000/sub)", CheckNearestWritableAncestor(canon, filepath.Join(lockedDir, "sub")), lockedDir)
+		_, vpErr := ValidatePath([]Root{root}, filepath.Join(lockedDir, "track.flac"), ValidateOptions{MustExist: false})
+		assertPermErr("ValidatePath(0o000)", vpErr, lockedDir)
+		_, _, rmErr := ResolveManagedDir([]Root{root}, filepath.Join(lockedDir, "sub"), canon)
+		assertPermErr("ResolveManagedDir(0o000/sub)", rmErr, lockedDir)
+
+		// 0o500 checks.
+		assertPermErr("CheckDirWritable(0o500)", CheckDirWritable(roDir), roDir)
+		assertPermErr("CheckNearestWritableAncestor(0o500/nested)", CheckNearestWritableAncestor(canon, filepath.Join(roDir, "nested", "sub")), roDir)
+
+		// CopyFileDurable and WriteFileDurable permission errors.
+		srcFile := filepath.Join(writableDir, "src.flac")
+		if err := os.WriteFile(srcFile, []byte("AUDIO-PAYLOAD"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, copyErrDirect := CopyFileDurable(srcFile, filepath.Join(roDir, "out.flac"))
+		assertPermErr("CopyFileDurable(openfile 0o500)", copyErrDirect, roDir)
+		_, _, copyErrMkdir := CopyFileDurable(srcFile, filepath.Join(roDir, "newsub", "out.flac"))
+		assertPermErr("CopyFileDurable(mkdirall 0o500)", copyErrMkdir, filepath.Join(roDir, "newsub"))
+		_, writeErr := WriteFileDurable(filepath.Join(roDir, "note.lrc"), []byte("[00:00]test"))
+		assertPermErr("WriteFileDurable(0o500)", writeErr, roDir)
 	}
 }

@@ -247,6 +247,22 @@ func simplifyRootErrorReason(reason string) string {
 	return singleLine
 }
 
+func extractWalkSubpath(reason string) string {
+	trimmed := strings.TrimSpace(reason)
+	for _, prefix := range []string{"目录遍历异常(", "读取文件属性失败("} {
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		rest := trimmed[len(prefix):]
+		end := strings.Index(rest, "): ")
+		if end <= 0 {
+			return ""
+		}
+		return strings.TrimSpace(rest[:end])
+	}
+	return ""
+}
+
 func formatUnhealthyRootLabel(rt store.RootRecord, reason string) string {
 	target := strings.TrimSpace(rt.CanonicalPath)
 	if target == "" {
@@ -255,6 +271,9 @@ func formatUnhealthyRootLabel(rt store.RootRecord, reason string) string {
 	summary := simplifyRootErrorReason(reason)
 	if target == "" {
 		return summary
+	}
+	if sub := extractWalkSubpath(reason); sub != "" && filepath.Clean(sub) != filepath.Clean(target) {
+		return fmt.Sprintf("%s (子目录 %s %s)", target, sub, summary)
 	}
 	return fmt.Sprintf("%s (%s)", target, summary)
 }

@@ -379,6 +379,30 @@ func TestLibraryRefreshUnhealthyRootReadableLabelAndLog(t *testing.T) {
 			reason: "disk read failed",
 			want:   "uuid-fallback (disk read failed)",
 		},
+		{
+			name:   "walk subdir permission denied",
+			root:   store.RootRecord{ID: "uuid-sub", CanonicalPath: "/music"},
+			reason: "目录遍历异常(/music/待刮削): open /music/待刮削: permission denied",
+			want:   "/music (子目录 /music/待刮削 无访问权限)",
+		},
+		{
+			name:   "walk subdir multi-error suffix",
+			root:   store.RootRecord{ID: "uuid-multi", CanonicalPath: "/music"},
+			reason: "目录遍历异常(/music/待刮削): open /music/待刮削: permission denied（另有 2 处目录遍历异常）",
+			want:   "/music (子目录 /music/待刮削 无访问权限)",
+		},
+		{
+			name:   "walk root itself permission denied",
+			root:   store.RootRecord{ID: "uuid-root", CanonicalPath: "/music"},
+			reason: "目录遍历异常(/music): open /music: permission denied",
+			want:   "/music (无访问权限)",
+		},
+		{
+			name:   "lstat subdir permission denied",
+			root:   store.RootRecord{ID: "uuid-lstat", CanonicalPath: "/music"},
+			reason: "读取文件属性失败(/music/locked-dir): lstat /music/locked-dir: permission denied",
+			want:   "/music (子目录 /music/locked-dir 无访问权限)",
+		},
 	}
 	for _, tc := range cases {
 		if got := formatUnhealthyRootLabel(tc.root, tc.reason); got != tc.want {

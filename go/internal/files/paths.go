@@ -260,6 +260,13 @@ func ValidatePath(roots []Root, candidate string, opts ValidateOptions) (Validat
 	}, nil
 }
 
+func wrapChainLstatError(fallbackAction, cur string, err error) error {
+	if errors.Is(err, os.ErrPermission) {
+		return formatPermissionError("目录无访问权限", filepath.Dir(cur), err)
+	}
+	return model.WrapError(model.ErrForbidden, http.StatusForbidden, fmt.Sprintf("%s（%s）: %v", fallbackAction, cur, err), err)
+}
+
 func verifyNoSymlinkChain(path string) error {
 	clean := filepath.Clean(path)
 	vol := filepath.VolumeName(clean)
@@ -282,7 +289,7 @@ func verifyNoSymlinkChain(path string) error {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
-			return model.WrapError(model.ErrForbidden, http.StatusForbidden, "路径校验失败", err)
+			return wrapChainLstatError("路径校验失败", cur, err)
 		}
 		isLink, lerr := IsReparseOrSymlink(cur, st)
 		if lerr != nil || isLink {
@@ -307,7 +314,7 @@ func verifyRelativeChainNoSymlinks(rootCanon, rel string) error {
 			if errors.Is(err, os.ErrNotExist) {
 				break
 			}
-			return model.WrapError(model.ErrForbidden, http.StatusForbidden, "文件状态检验失败", err)
+			return wrapChainLstatError("文件状态检验失败", cur, err)
 		}
 		isLink, lerr := IsReparseOrSymlink(cur, st)
 		if lerr != nil || isLink {
@@ -737,4 +744,122 @@ func ListSubdirectories(roots []Root, maxPerRoot int) []model.LibraryFolderDTO {
 		})
 	}
 	return out
+}
+
+func formatPermissionError(action, targetPath string, err error) *model.DomainError {
+	var detail string
+	if runtime.GOOS != "windows" {
+		detail = fmt.Sprintf(
+			"%s（%s，当前运行用户 UID:GID=%d:%d）：%v。请检查宿主机/NAS 目录权限，或在 docker-compose.yml 中将 PUID/PGID 设为目录所属用户的 UID/GID",
+			action, targetPath, os.Getuid(), os.Getgid(), err,
+		)
+	} else {
+		detail = fmt.Sprintf("%s（%s）：%v。请检查目录访问与写入权限", action, targetPath, err)
+	}
+	return model.WrapError(model.ErrForbidden, http.StatusForbidden, detail, err)
+}
+
+// CheckDirWritable verifies dir exists, is a non-symlink directory, can be listed,
+// and accepts creating and removing a temporary probe file.
+func CheckDirWritable(dir string) error {
+	trimmed := strings.TrimSpace(dir)
+	if trimmed == "" {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不能为空")
+	}
+	cleanDir := filepath.Clean(trimmed)
+	if cleanDir == "" || cleanDir == "." {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不能为空")
+	}
+
+	st, err := os.Lstat(cleanDir)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return formatPermissionError("目录无访问权限", cleanDir, err)
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return model.WrapError(model.ErrNotFound, http.StatusNotFound, fmt.Sprintf("目录不存在（%s）", cleanDir), err)
+		}
+		return model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("读取目录状态失败（%s）: %v", cleanDir, err), err)
+	}
+	if !st.IsDir() {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, fmt.Sprintf("目标路径不是目录（%s）", cleanDir))
+	}
+	if isLink, lErr := IsReparseOrSymlink(cleanDir, st); lErr != nil || isLink {
+		return model.NewError(model.ErrForbidden, http.StatusForbidden, "禁止将符号链接或目录联接设为下载目录")
+	}
+
+	f, err := os.Open(cleanDir)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return formatPermissionError("目录无读取权限", cleanDir, err)
+		}
+		return model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("打开目录失败（%s）: %v", cleanDir, err), err)
+	}
+	_, rErr := f.Readdirnames(1)
+	_ = f.Close()
+	if rErr != nil && !errors.Is(rErr, io.EOF) {
+		if errors.Is(rErr, os.ErrPermission) {
+			return formatPermissionError("目录无读取权限", cleanDir, rErr)
+		}
+		return model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("读取目录内容失败（%s）: %v", cleanDir, rErr), rErr)
+	}
+
+	probe, err := os.CreateTemp(cleanDir, ".melokeep-write-probe-*")
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return formatPermissionError("目录无写入权限", cleanDir, err)
+		}
+		return model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("目录写入检测失败（%s）: %v", cleanDir, err), err)
+	}
+	probePath := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(probePath)
+	return nil
+}
+
+// CheckNearestWritableAncestor walks upward from targetDir toward rootCanon
+// and validates writability on the deepest existing ancestor inside rootCanon.
+func CheckNearestWritableAncestor(rootCanon, targetDir string) error {
+	trimmedRoot := strings.TrimSpace(rootCanon)
+	trimmedTarget := strings.TrimSpace(targetDir)
+	if trimmedRoot == "" || trimmedTarget == "" {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不能为空")
+	}
+	cleanRoot := filepath.Clean(trimmedRoot)
+	cleanTarget := filepath.Clean(trimmedTarget)
+	if cleanRoot == "" || cleanRoot == "." || cleanTarget == "" || cleanTarget == "." {
+		return model.NewError(model.ErrInvalidInput, http.StatusBadRequest, "目录路径不能为空")
+	}
+
+	rel, relErr := filepath.Rel(cleanRoot, cleanTarget)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return model.NewError(model.ErrForbidden, http.StatusForbidden, "目录路径超出允许根目录")
+	}
+
+	isAtRoot := func(p string) bool {
+		if p == cleanRoot {
+			return true
+		}
+		return runtime.GOOS == "windows" && strings.EqualFold(p, cleanRoot)
+	}
+
+	cur := cleanTarget
+	for !isAtRoot(cur) {
+		_, err := os.Lstat(cur)
+		if err == nil {
+			return CheckDirWritable(cur)
+		}
+		if errors.Is(err, os.ErrPermission) {
+			return formatPermissionError("目录无访问权限", filepath.Dir(cur), err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("读取目录状态失败（%s）: %v", cur, err), err)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return CheckDirWritable(cleanRoot)
 }

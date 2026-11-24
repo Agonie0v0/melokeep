@@ -3,6 +3,7 @@ package files
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +11,13 @@ import (
 
 	"github.com/agonie0v0/melokeep/internal/model"
 )
+
+func wrapDstWriteError(dst, fallbackMsg string, err error) error {
+	if errors.Is(err, os.ErrPermission) {
+		return formatPermissionError("目标目录无写入权限", filepath.Dir(dst), err)
+	}
+	return model.WrapError(model.ErrInternal, http.StatusInternalServerError, fallbackMsg, err)
+}
 
 func HashFileSHA256(path string) (string, int64, error) {
 	f, err := os.Open(path)
@@ -29,7 +37,7 @@ func HashFileSHA256(path string) (string, int64, error) {
 // and removes partial dst on any write error without ever modifying src.
 func CopyFileDurable(src, dst string) (string, int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", 0, model.WrapError(model.ErrInternal, http.StatusInternalServerError, "创建目标目录失败", err)
+		return "", 0, wrapDstWriteError(dst, "创建目标目录失败", err)
 	}
 	in, err := os.Open(src)
 	if err != nil {
@@ -39,7 +47,7 @@ func CopyFileDurable(src, dst string) (string, int64, error) {
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return "", 0, model.WrapError(model.ErrInternal, http.StatusInternalServerError, "创建暂存或备份文件失败", err)
+		return "", 0, wrapDstWriteError(dst, "创建暂存或备份文件失败", err)
 	}
 	h := sha256.New()
 	n, copyErr := io.Copy(io.MultiWriter(out, h), in)
@@ -63,11 +71,11 @@ func CopyFileDurable(src, dst string) (string, int64, error) {
 
 func WriteFileDurable(dst string, data []byte) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", model.WrapError(model.ErrInternal, http.StatusInternalServerError, "创建目标目录失败", err)
+		return "", wrapDstWriteError(dst, "创建目标目录失败", err)
 	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return "", model.WrapError(model.ErrInternal, http.StatusInternalServerError, "写入文件失败", err)
+		return "", wrapDstWriteError(dst, "写入文件失败", err)
 	}
 	if _, err := out.Write(data); err != nil {
 		_ = out.Close()

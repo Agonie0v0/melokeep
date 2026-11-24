@@ -3,9 +3,12 @@ package index
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,5 +273,103 @@ func TestIndexerBackfillsMissingCoverAndDetectsSidecarCover(t *testing.T) {
 	}
 	if covs = coverByName(); covs["plain.wav"] == nil || *covs["plain.wav"] == "" {
 		t.Fatalf("expected plain.wav cover after manual scan, got %v", covs["plain.wav"])
+	}
+}
+
+func TestFormatWalkErrors(t *testing.T) {
+	if got := formatWalkErrors(nil, nil); got != "" {
+		t.Fatalf("expected empty string, got %q", got)
+	}
+	single := "目录遍历异常(/music/b-locked): open /music/b-locked: permission denied"
+	if got := formatWalkErrors([]string{single}, nil); got != single {
+		t.Fatalf("single error: got %q, want %q", got, single)
+	}
+	multi := formatWalkErrors([]string{single, "err2", "err3"}, nil)
+	wantMulti := single + "（另有 2 处目录遍历异常）"
+	if multi != wantMulti {
+		t.Fatalf("multi error: got %q, want %q", multi, wantMulti)
+	}
+	if got := formatWalkErrors(nil, errors.New("walk failed")); got != "walk failed" {
+		t.Fatalf("walkErr fallback: got %q", got)
+	}
+}
+
+func TestScanRootContinuesSiblingDirsWhenSubdirUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires non-root Unix permissions to test unreadable subdirectory")
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Options{Path: store.DefaultDBPath(t.TempDir())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	rootDir := filepath.Join(t.TempDir(), "music")
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, rootRec, err := files.RegisterRoot(rootDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertRoot(ctx, rootRec); err != nil {
+		t.Fatal(err)
+	}
+
+	writeMinimalWAV(t, filepath.Join(rootRec.CanonicalPath, "a-dir", "a.wav"))
+	writeMinimalWAV(t, filepath.Join(rootRec.CanonicalPath, "b-locked", "hidden.wav"))
+	writeMinimalWAV(t, filepath.Join(rootRec.CanonicalPath, "c-dir", "c.wav"))
+
+	idx := NewIndexer(st, files.NewAssetLockManager(5*time.Second), media.NewTagService(&countingTagger{}, nil))
+	stats1, err := idx.ScanRoot(ctx, rootRec)
+	if err != nil {
+		t.Fatalf("initial ScanRoot: %v", err)
+	}
+	if !stats1.Healthy || stats1.ScannedFiles != 3 || stats1.UpdatedOrNew != 3 || stats1.MarkedMissing != 0 {
+		t.Fatalf("unexpected initial scan stats: %+v", stats1)
+	}
+
+	lockedDir := filepath.Join(rootRec.CanonicalPath, "b-locked")
+	if err := os.Chmod(lockedDir, 0o000); err != nil {
+		t.Fatalf("chmod b-locked: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(lockedDir, 0o755)
+	})
+
+	writeMinimalWAV(t, filepath.Join(rootRec.CanonicalPath, "c-dir", "d.wav"))
+
+	rootRec, _, _ = st.GetRoot(ctx, rootRec.ID)
+	stats2, err := idx.ScanRoot(ctx, rootRec)
+	if err != nil {
+		t.Fatalf("partial ScanRoot: %v", err)
+	}
+	if stats2.Healthy || !strings.Contains(stats2.StructuralError, "b-locked") {
+		t.Fatalf("expected unhealthy root mentioning b-locked, got %+v", stats2)
+	}
+	if stats2.UpdatedOrNew != 1 {
+		t.Fatalf("expected c-dir/d.wav indexed (UpdatedOrNew=1), got %+v", stats2)
+	}
+	if stats2.MarkedMissing != 0 {
+		t.Fatalf("expected MarkedMissing=0 on partial failure, got %+v", stats2)
+	}
+
+	page, err := idx.QueryFiles(ctx, store.LibraryFilesQuery{Limit: 20})
+	if err != nil {
+		t.Fatalf("QueryFiles: %v", err)
+	}
+	if len(page.Items) != 4 {
+		t.Fatalf("expected all 4 tracks active, got %d (%+v)", len(page.Items), page.Items)
+	}
+	seen := make(map[string]bool, len(page.Items))
+	for _, it := range page.Items {
+		seen[filepath.ToSlash(filepath.Join(it.Folder, it.Name))] = true
+	}
+	for _, wantRel := range []string{"a-dir/a.wav", "b-locked/hidden.wav", "c-dir/c.wav", "c-dir/d.wav"} {
+		if !seen[wantRel] {
+			t.Fatalf("expected active track %q, got %+v", wantRel, seen)
+		}
 	}
 }

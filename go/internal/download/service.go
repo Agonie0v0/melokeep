@@ -997,6 +997,14 @@ func (s *Service) executeJob(dlID string) {
 		return
 	}
 
+	if targetRoot, downloadBaseDir, err := s.resolveDownloadTargetBase(spec); err != nil {
+		s.finishError(tc, dl, spec, err)
+		return
+	} else if err := files.CheckNearestWritableAncestor(targetRoot.CanonicalPath, downloadBaseDir); err != nil {
+		s.finishError(tc, dl, spec, err)
+		return
+	}
+
 	dlDetail := "开始下载音频"
 	dl, err = s.store.CompareAndSetDownload(s.baseCtx, store.CASDownloadParams{
 		ID:               dlID,
@@ -1197,32 +1205,10 @@ func (s *Service) executeJob(dlID string) {
 		effectiveLayout = strings.TrimSpace(spec.layoutOverride)
 	}
 	func() {
-		roots := s.coords.Roots()
-		if len(roots) == 0 {
-			pubErr = model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "未配置可写音乐根目录")
+		targetRoot, downloadBaseDir, rErr := s.resolveDownloadTargetBase(spec)
+		if rErr != nil {
+			pubErr = rErr
 			return
-		}
-		targetRoot := roots[0]
-		downloadBaseDir := targetRoot.CanonicalPath
-		wd := strings.TrimSpace(spec.snap.Runtime.WorkDir)
-		if spec.rootID != "" {
-			for _, r := range roots {
-				if r.ID == spec.rootID {
-					targetRoot = r
-					downloadBaseDir = targetRoot.CanonicalPath
-					break
-				}
-			}
-			if wd != "" && wd != config.DefaultRuntimeConfig().WorkDir {
-				if matchedRoot, resolvedDir, rErr := files.ResolveManagedDir(roots, wd, roots[0].CanonicalPath); rErr == nil && matchedRoot.ID == targetRoot.ID {
-					downloadBaseDir = resolvedDir
-				}
-			}
-		} else if wd != "" && wd != config.DefaultRuntimeConfig().WorkDir {
-			if matchedRoot, resolvedDir, rErr := files.ResolveManagedDir(roots, wd, roots[0].CanonicalPath); rErr == nil {
-				targetRoot = matchedRoot
-				downloadBaseDir = resolvedDir
-			}
 		}
 		targetPath := TargetAudioPathWithOptions(downloadBaseDir, effectiveLayout, pTrack, ext, dlID, PathOptions{
 			BookTitle:    spec.bookTitle,
@@ -1391,6 +1377,41 @@ func (s *Service) executeJob(dlID string) {
 			}
 		}()
 	}
+}
+
+func (s *Service) resolveDownloadTargetBase(spec taskSpec) (files.Root, string, error) {
+	if s.coords == nil {
+		return files.Root{}, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "未配置可写音乐根目录")
+	}
+	roots := s.coords.Roots()
+	if len(roots) == 0 {
+		return files.Root{}, "", model.NewError(model.ErrUnavailable, http.StatusServiceUnavailable, "未配置可写音乐根目录")
+	}
+	targetRoot := roots[0]
+	downloadBaseDir := targetRoot.CanonicalPath
+	if spec.rootID != "" {
+		for _, r := range roots {
+			if r.ID == spec.rootID {
+				targetRoot = r
+				downloadBaseDir = targetRoot.CanonicalPath
+				break
+			}
+		}
+	}
+	wd := strings.TrimSpace(spec.snap.Runtime.WorkDir)
+	if wd != "" && wd != config.DefaultRuntimeConfig().WorkDir {
+		matchedRoot, resolvedDir, rErr := files.ResolveManagedDir(roots, wd, roots[0].CanonicalPath)
+		if rErr != nil {
+			return files.Root{}, "", rErr
+		}
+		if spec.rootID == "" {
+			targetRoot = matchedRoot
+			downloadBaseDir = resolvedDir
+		} else if matchedRoot.ID == targetRoot.ID {
+			downloadBaseDir = resolvedDir
+		}
+	}
+	return targetRoot, downloadBaseDir, nil
 }
 
 func (s *Service) checkPauseOrCancel(tc *taskControl, dl model.Download, _ taskSpec) bool {

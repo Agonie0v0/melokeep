@@ -1668,3 +1668,114 @@ func TestDownloadUsesConfiguredRuntimeWorkDirAndIndexesAsset(t *testing.T) {
 		t.Fatalf("expected explicit RootID with matching-root WorkDir to publish under sub2, got ok=%v err=%v asset=%+v", ok, err, a3)
 	}
 }
+
+func TestDownloadPreflightFailsFastBeforeHTTPTransfer(t *testing.T) {
+	payload := sampleMP3Bytes(t)
+	var audioHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		audioHits.Add(1)
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	prov := &stubProvider{
+		id: "AudiusMusicClient",
+		resolve: func(ctx context.Context, track model.ProviderTrack, policy model.QualityPolicy) ([]model.ResolvedMedia, error) {
+			return []model.ResolvedMedia{{
+				VariantID: "mp3_320",
+				Variant:   track.Variants[0],
+				URL:       srv.URL + "/preflight.mp3",
+				Codec:     "mp3",
+			}}, nil
+		},
+	}
+
+	st, svc, canon, _ := setupDownloadEnv(t, prov, nil)
+	ctx := context.Background()
+	actor := auth.WebAdminActor("admin")
+
+	// 1. Cross-platform: regular file configured as WorkDir fails fast before downloading any bytes.
+	notDir := filepath.Join(canon, "not_a_dir.txt")
+	if err := os.WriteFile(notDir, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rtFile := config.DefaultRuntimeConfig()
+	rtFile.EmbedMetadata = false
+	rtFile.WorkDir = notDir
+	snapFile := config.NewSnapshot(rtFile, config.DefaultResourceBudgets())
+
+	pubFile := seedTrack(t, st, "AudiusMusicClient", "pf-file-1", "Preflight File Song", "Open Lab")
+	resFile, err := svc.Enqueue(ctx, actor, snapFile, EnqueueRequest{
+		PublicID:  pubFile,
+		QualityID: "mp3_320",
+	})
+	if err != nil || !resFile.Created {
+		t.Fatalf("Enqueue file-workdir failed: err=%v res=%+v", err, resFile)
+	}
+	doneFile := waitForStatus(t, svc, resFile.Download.ID, model.DownloadFailed, 5*time.Second)
+	if audioHits.Load() != 0 {
+		t.Fatalf("expected 0 HTTP audio transfers on preflight failure, got %d", audioHits.Load())
+	}
+	if doneFile.File != nil || doneFile.Attempt != 1 || !strings.Contains(doneFile.Detail, "不是目录") {
+		t.Fatalf("unexpected failed download state for file workdir: %+v", doneFile)
+	}
+
+	// 2. Unix: 0o000 and 0o500 WorkDir (both direct and nested) fail fast with 0 HTTP hits.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		roDir := filepath.Join(canon, "ro-dir")
+		if err := os.MkdirAll(roDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(roDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+		lockedDir := filepath.Join(canon, "locked-dir")
+		if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(lockedDir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+		for _, tc := range []struct {
+			locator string
+			workDir string
+			wantDir string
+		}{
+			{"pf-ro-direct", roDir, "ro-dir"},
+			{"pf-ro-nested", filepath.Join(roDir, "待刮削"), "ro-dir"},
+			{"pf-locked-direct", lockedDir, "locked-dir"},
+			{"pf-locked-nested", filepath.Join(lockedDir, "sub"), "locked-dir"},
+		} {
+			rt := config.DefaultRuntimeConfig()
+			rt.EmbedMetadata = false
+			rt.WorkDir = tc.workDir
+			snap := config.NewSnapshot(rt, config.DefaultResourceBudgets())
+
+			pubID := seedTrack(t, st, "AudiusMusicClient", tc.locator, "Preflight Perm Song", "Open Lab")
+			res, err := svc.Enqueue(ctx, actor, snap, EnqueueRequest{
+				PublicID:  pubID,
+				QualityID: "mp3_320",
+			})
+			if err != nil || !res.Created {
+				t.Fatalf("%s: Enqueue failed: err=%v res=%+v", tc.locator, err, res)
+			}
+			done := waitForStatus(t, svc, res.Download.ID, model.DownloadFailed, 5*time.Second)
+			if audioHits.Load() != 0 {
+				t.Fatalf("%s: expected 0 HTTP audio transfers on preflight failure, got %d", tc.locator, audioHits.Load())
+			}
+			if done.File != nil || done.Attempt != 1 {
+				t.Fatalf("%s: unexpected failed download state: %+v", tc.locator, done)
+			}
+			if !strings.Contains(done.Detail, tc.wantDir) || !strings.Contains(done.Detail, "UID:GID=") || !strings.Contains(done.Detail, "PUID/PGID") {
+				t.Fatalf("%s: expected %q, UID:GID, and PUID/PGID hint in detail %q", tc.locator, tc.wantDir, done.Detail)
+			}
+		}
+	}
+}

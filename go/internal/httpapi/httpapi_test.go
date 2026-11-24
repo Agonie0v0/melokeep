@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -3444,6 +3445,81 @@ func TestEngineConfigWorkDirValidationAndOpenDir(t *testing.T) {
 	}
 	if openRec2.Code != http.StatusBadRequest || !strings.Contains(errResp.Detail, wantTop) {
 		t.Fatalf("expected non-desktop open-dir error to mention %q, got %d %s", wantTop, openRec2.Code, openRec2.Body.String())
+	}
+}
+
+func TestEngineConfigWorkDirRejectsFileAndUnwritableDirs(t *testing.T) {
+	srv, _, canonRoot := newTestServer(t, nil)
+	putEngine := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/engine/config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-MeloKeep-Request", "1")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	prevWorkDir := srv.currentSnapshot().Runtime.WorkDir
+
+	// 1. Cross-platform: existing regular file as work_dir must be rejected and leave Runtime.WorkDir unchanged.
+	notDirPath := filepath.Join(canonRoot, "not_a_dir.txt")
+	if err := os.WriteFile(notDirPath, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recFile := putEngine(`{"global_client_cfg":{"work_dir":"not_a_dir.txt"}}`)
+	if recFile.Code != http.StatusBadRequest || !strings.Contains(recFile.Body.String(), "不是目录") {
+		t.Fatalf("expected 400 non-dir rejection, got %d %s", recFile.Code, recFile.Body.String())
+	}
+	if got := srv.currentSnapshot().Runtime.WorkDir; got != prevWorkDir {
+		t.Fatalf("Runtime.WorkDir changed after file rejection: got %q want %q", got, prevWorkDir)
+	}
+
+	// 2. Unix: 0o500 and 0o000 subdirectories must be rejected with 403 + UID:GID + PUID/PGID hint.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		roDir := filepath.Join(canonRoot, "ro-dir")
+		if err := os.MkdirAll(roDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(roDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+		lockedDir := filepath.Join(canonRoot, "locked-dir")
+		if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(lockedDir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+		for _, tc := range []struct {
+			name    string
+			workDir string
+			wantDir string
+		}{
+			{"0o500 dir", "ro-dir", "ro-dir"},
+			{"0o500 nested", "ro-dir/待刮削", "ro-dir"},
+			{"0o000 dir", "locked-dir", "locked-dir"},
+			{"0o000 nested", "locked-dir/待刮削", "locked-dir"},
+		} {
+			payload, _ := json.Marshal(map[string]any{
+				"global_client_cfg": map[string]any{"work_dir": tc.workDir},
+			})
+			rec := putEngine(string(payload))
+			body := rec.Body.String()
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s: expected 403, got %d %s", tc.name, rec.Code, body)
+			}
+			if !strings.Contains(body, "UID:GID=") || !strings.Contains(body, "PUID/PGID") || !strings.Contains(body, tc.wantDir) {
+				t.Fatalf("%s: expected UID:GID, PUID/PGID, and %q in %s", tc.name, tc.wantDir, body)
+			}
+			if got := srv.currentSnapshot().Runtime.WorkDir; got != prevWorkDir {
+				t.Fatalf("%s: Runtime.WorkDir changed: got %q want %q", tc.name, got, prevWorkDir)
+			}
+		}
 	}
 }
 
