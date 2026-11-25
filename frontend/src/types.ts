@@ -388,6 +388,12 @@ export interface UpdateCommitItem {
   url?: string;
 }
 
+export interface SystemUpdateSettings {
+  github_token_configured: boolean;
+  github_token_source?: "settings" | "env" | "" | string;
+  github_token_saved: boolean;
+}
+
 export interface SystemUpdateInfo {
   repo: string;
   mode: "release" | "compare" | "commits" | "error";
@@ -403,4 +409,7 @@ export interface SystemUpdateInfo {
   cached: boolean;
   error?: string;
   self_update?: SelfUpdateStatus;
+  github_token_configured?: boolean;
+  github_token_source?: "settings" | "env" | "" | string;
+  github_token_saved?: boolean;
 }

@@ -667,20 +667,63 @@ type UpdateCommitDTO struct {
 
 // SystemUpdateDTO summarizes version comparison and changelog data for the UI.
 type SystemUpdateDTO struct {
-	Repo         string               `json:"repo"`
-	Mode         string               `json:"mode"` // "release", "compare", "commits", or "error"
-	Current      BuildInfoDTO         `json:"current"`
-	Latest       *UpdateTargetDTO     `json:"latest,omitempty"`
-	HasUpdate    bool                 `json:"has_update"`
-	Comparable   bool                 `json:"comparable"`
-	AheadBy      int                  `json:"ahead_by,omitempty"`
-	BehindBy     int                  `json:"behind_by,omitempty"`
-	ReleaseNotes string               `json:"release_notes,omitempty"`
-	Commits      []UpdateCommitDTO    `json:"commits"`
-	CheckedAt    string               `json:"checked_at"`
-	Cached       bool                 `json:"cached"`
-	Error        string               `json:"error,omitempty"`
-	SelfUpdate   *SelfUpdateStatusDTO `json:"self_update,omitempty"`
+	Repo                  string               `json:"repo"`
+	Mode                  string               `json:"mode"` // "release", "compare", "commits", or "error"
+	Current               BuildInfoDTO         `json:"current"`
+	Latest                *UpdateTargetDTO     `json:"latest,omitempty"`
+	HasUpdate             bool                 `json:"has_update"`
+	Comparable            bool                 `json:"comparable"`
+	AheadBy               int                  `json:"ahead_by,omitempty"`
+	BehindBy              int                  `json:"behind_by,omitempty"`
+	ReleaseNotes          string               `json:"release_notes,omitempty"`
+	Commits               []UpdateCommitDTO    `json:"commits"`
+	CheckedAt             string               `json:"checked_at"`
+	Cached                bool                 `json:"cached"`
+	Error                 string               `json:"error,omitempty"`
+	SelfUpdate            *SelfUpdateStatusDTO `json:"self_update,omitempty"`
+	GitHubTokenConfigured bool                 `json:"github_token_configured"`
+	GitHubTokenSource     string               `json:"github_token_source,omitempty"`
+	GitHubTokenSaved      bool                 `json:"github_token_saved"`
+}
+
+// SystemUpdateSettingsDTO describes persisted and runtime GitHub token status for update checks.
+type SystemUpdateSettingsDTO struct {
+	GitHubTokenConfigured bool   `json:"github_token_configured"`
+	GitHubTokenSource     string `json:"github_token_source,omitempty"`
+	GitHubTokenSaved      bool   `json:"github_token_saved"`
+}
+
+// AppUpdateAssetDTO describes a release asset returned for mobile app update checks.
+type AppUpdateAssetDTO struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+	ContentType        string `json:"content_type,omitempty"`
+}
+
+// AppUpdateReleaseDTO describes a GitHub release matched for a mobile platform.
+type AppUpdateReleaseDTO struct {
+	TagName     string              `json:"tag_name"`
+	Name        string              `json:"name"`
+	HTMLURL     string              `json:"html_url"`
+	Body        string              `json:"body"`
+	PublishedAt string              `json:"published_at"`
+	Assets      []AppUpdateAssetDTO `json:"assets"`
+	Draft       bool                `json:"draft"`
+	Prerelease  bool                `json:"prerelease"`
+}
+
+// AppUpdateCheckDTO summarizes the proxied GitHub release lookup for a mobile platform.
+type AppUpdateCheckDTO struct {
+	Platform              string               `json:"platform"`
+	Repo                  string               `json:"repo"`
+	Release               *AppUpdateReleaseDTO `json:"release,omitempty"`
+	CheckedAt             string               `json:"checked_at"`
+	Cached                bool                 `json:"cached"`
+	Error                 string               `json:"error,omitempty"`
+	GitHubTokenConfigured bool                 `json:"github_token_configured"`
+	GitHubTokenSource     string               `json:"github_token_source,omitempty"`
+	GitHubTokenSaved      bool                 `json:"github_token_saved"`
 }
 
 // AppearancePreferencesDTO describes persisted UI theme and density preferences.

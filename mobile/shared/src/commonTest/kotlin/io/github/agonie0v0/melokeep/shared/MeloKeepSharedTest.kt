@@ -2364,6 +2364,7 @@ class MeloKeepSharedTest {
 		}
 		assertEquals(403, err.statusCode)
 		assertTrue(err.message.contains("获取 GitHub 最新版本失败"))
+		assertTrue(err.message.contains("可在 Web 或连接 MeloKeep 服务端后配置 GitHub Token 避免限流"))
 
 		httpClient.close()
 	}
@@ -3720,6 +3721,247 @@ class MeloKeepSharedTest {
 		assertEquals(listOf("trk-2"), fallbackResult.tracks.map { it.id })
 
 		controllerScope.cancel()
+		client.close()
+	}
+
+	@Test
+	fun serverAppUpdateProxySettingsFallbackAndErrorPassthroughWork() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-upd",
+			tokenId = "tid-upd",
+			mediaToken = "",
+			mediaTokenExpiresAt = 0L,
+			authEnabled = true,
+		)
+
+		var serverMode = "ok"
+		var tokenSavedOnServer = false
+		val recordedServerRequests = mutableListOf<String>()
+		val recordedGithubUrls = mutableListOf<String>()
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+
+		val serverEngine = MockEngine { request ->
+			val path = request.url.encodedPath
+			recordedServerRequests += "${request.method.value} ${request.url}"
+			when {
+				request.method == HttpMethod.Get && path == "/api/system/update/settings" -> {
+					assertEquals("Bearer tok-upd", request.headers[HttpHeaders.Authorization])
+					respond(
+						content = if (tokenSavedOnServer) {
+							"""{"github_token_configured":true,"github_token_source":"settings","github_token_saved":true}"""
+						} else {
+							"""{"github_token_configured":false,"github_token_source":"","github_token_saved":false}"""
+						},
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Put && path == "/api/system/update/settings" -> {
+					assertEquals("Bearer tok-upd", request.headers[HttpHeaders.Authorization])
+					val body = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					val clearFlag = body["clear_github_token"]?.jsonPrimitive?.contentOrNull == "true"
+					tokenSavedOnServer = if (clearFlag) {
+						assertNull(body["github_token"])
+						false
+					} else {
+						assertEquals("ghp_server_token_123", body["github_token"]?.jsonPrimitive?.contentOrNull)
+						true
+					}
+					respond(
+						content = if (tokenSavedOnServer) {
+							"""{"github_token_configured":true,"github_token_source":"settings","github_token_saved":true}"""
+						} else {
+							"""{"github_token_configured":true,"github_token_source":"env","github_token_saved":false}"""
+						},
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Get && path == "/api/system/update/app" -> {
+					assertEquals("Bearer tok-upd", request.headers[HttpHeaders.Authorization])
+					val platform = request.url.parameters["platform"]
+					when (serverMode) {
+						"ok" -> {
+							val assetName = if (platform == "ios") "MeloKeep-v2.1.0.ipa" else "MeloKeep-v2.1.0.apk"
+							val assetUrl = "https://github.com/Agonie0v0/melokeep/releases/download/v2.1.0/$assetName"
+							respond(
+								content = """
+									{
+									  "platform": "$platform",
+									  "repo": "Agonie0v0/melokeep",
+									  "release": {
+									    "tag_name": "v2.1.0",
+									    "name": "MeloKeep 2.1.0",
+									    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v2.1.0",
+									    "body": "Server proxied release",
+									    "published_at": "2026-11-25T00:00:00Z",
+									    "draft": false,
+									    "prerelease": false,
+									    "assets": [
+									      {
+									        "name": "$assetName",
+									        "browser_download_url": "$assetUrl",
+									        "size": 1234567,
+									        "content_type": "application/octet-stream"
+									      }
+									    ]
+									  },
+									  "checked_at": "2026-11-25T10:00:00Z",
+									  "cached": false,
+									  "error": "",
+									  "github_token_configured": true,
+									  "github_token_source": "settings",
+									  "github_token_saved": true
+									}
+								""".trimIndent(),
+								status = HttpStatusCode.OK,
+								headers = jsonHeaders,
+							)
+						}
+						"server_error_field" -> respond(
+							content = """
+								{
+								  "platform": "$platform",
+								  "repo": "Agonie0v0/melokeep",
+								  "release": null,
+								  "checked_at": "2026-11-25T10:00:00Z",
+								  "cached": false,
+								  "error": "GitHub Token 无效或已过期（HTTP 401）",
+								  "github_token_configured": true,
+								  "github_token_source": "settings",
+								  "github_token_saved": true
+								}
+							""".trimIndent(),
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+						"not_found" -> respond("""{"detail":"Not Found"}""", HttpStatusCode.NotFound, jsonHeaders)
+						else -> respond("{}", HttpStatusCode.InternalServerError, jsonHeaders)
+					}
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val fallbackEngine = MockEngine { request ->
+			recordedGithubUrls += request.url.toString()
+			respond(
+				content = """
+					[
+					  {
+					    "tag_name": "v2.0.5",
+					    "name": "Direct GitHub 2.0.5",
+					    "html_url": "https://github.com/Agonie0v0/melokeep/releases/tag/v2.0.5",
+					    "body": "Direct fallback release",
+					    "published_at": "2026-11-24T00:00:00Z",
+					    "draft": false,
+					    "prerelease": false,
+					    "assets": [
+					      {
+					        "name": "MeloKeep-v2.0.5.apk",
+					        "browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v2.0.5/MeloKeep-v2.0.5.apk",
+					        "size": 999999
+					      },
+					      {
+					        "name": "MeloKeep-v2.0.5.ipa",
+					        "browser_download_url": "https://github.com/Agonie0v0/melokeep/releases/download/v2.0.5/MeloKeep-v2.0.5.ipa",
+					        "size": 1111111
+					      }
+					    ]
+					  }
+					]
+				""".trimIndent(),
+				status = HttpStatusCode.OK,
+				headers = jsonHeaders,
+			)
+		}
+
+		val client = MeloKeepApiClient(store, serverEngine)
+		val fallbackHttpClient = HttpClient(fallbackEngine) { expectSuccess = false }
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val settingsController = MeloSettingsController(client, controllerScope)
+
+		// 1. GET / PUT /api/system/update/settings
+		val initialSettings = client.fetchSystemUpdateSettings()
+		assertFalse(initialSettings.githubTokenConfigured)
+		assertFalse(initialSettings.githubTokenSaved)
+
+		val savedSettings = settingsController.saveSystemUpdateSettings(githubToken = "  ghp_server_token_123  ")
+		assertTrue(savedSettings.githubTokenConfigured)
+		assertEquals("settings", savedSettings.githubTokenSource)
+		assertTrue(savedSettings.githubTokenSaved)
+
+		val fetchedAfterSave = settingsController.fetchSystemUpdateSettings()
+		assertTrue(fetchedAfterSave.githubTokenSaved)
+
+		val clearedSettings = client.saveSystemUpdateSettings(clearGitHubToken = true)
+		assertTrue(clearedSettings.githubTokenConfigured)
+		assertEquals("env", clearedSettings.githubTokenSource)
+		assertFalse(clearedSettings.githubTokenSaved)
+
+		// 2. Server-proxied update resolution succeeds (both Android force=true and iOS via controller)
+		val androidResolved = client.resolveLatestAppRelease(
+			platform = "android",
+			force = true,
+			fallbackHttpClient = fallbackHttpClient,
+		)
+		assertTrue(androidResolved.viaServer)
+		assertEquals("v2.1.0", androidResolved.release?.tagName)
+		assertEquals(true, androidResolved.tokenSettings?.githubTokenSaved)
+		assertTrue(recordedServerRequests.any { it == "GET https://melo.example.com/api/system/update/app?platform=android&force=1" })
+		assertTrue(recordedGithubUrls.isEmpty())
+
+		val iosResolved = settingsController.resolveIosAppUpdate(force = false)
+		assertTrue(iosResolved.viaServer)
+		assertEquals("v2.1.0", iosResolved.release?.tagName)
+		assertNotNull(iosResolved.release?.findIosIpaAsset())
+		assertTrue(recordedServerRequests.any { it == "GET https://melo.example.com/api/system/update/app?platform=ios" })
+
+		// 3. Server error field in 200 payload throws MeloApiException(502, resp.error) without falling back
+		serverMode = "server_error_field"
+		val serverErr = assertFailsWith<MeloApiException> {
+			client.resolveLatestAppRelease(
+				platform = "android",
+				force = true,
+				fallbackHttpClient = fallbackHttpClient,
+			)
+		}
+		assertEquals(502, serverErr.statusCode)
+		assertEquals("GitHub Token 无效或已过期（HTTP 401）", serverErr.message)
+		assertTrue(recordedGithubUrls.isEmpty())
+
+		// 4. 404 on /api/system/update/app silently falls back to direct MeloAppUpdateChecker
+		serverMode = "not_found"
+		val fallbackResolved = client.resolveLatestAppRelease(
+			platform = "android",
+			force = false,
+			fallbackHttpClient = fallbackHttpClient,
+		)
+		assertFalse(fallbackResolved.viaServer)
+		assertNull(fallbackResolved.tokenSettings)
+		assertEquals("v2.0.5", fallbackResolved.release?.tagName)
+		assertEquals(1, recordedGithubUrls.size)
+
+		// 5. Disconnected client goes directly to MeloAppUpdateChecker without calling server
+		store.clearSession(keepServerUrl = false)
+		recordedServerRequests.clear()
+		recordedGithubUrls.clear()
+		val directResolved = client.resolveLatestAppRelease(
+			platform = "android",
+			force = true,
+			fallbackHttpClient = fallbackHttpClient,
+		)
+		assertFalse(directResolved.viaServer)
+		assertNull(directResolved.tokenSettings)
+		assertEquals("v2.0.5", directResolved.release?.tagName)
+		assertTrue(recordedServerRequests.isEmpty())
+		assertEquals(1, recordedGithubUrls.size)
+
+		controllerScope.cancel()
+		fallbackHttpClient.close()
 		client.close()
 	}
 }

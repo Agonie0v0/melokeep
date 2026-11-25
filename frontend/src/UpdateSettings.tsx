@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowUpCircle,
   Check,
   CircleAlert,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   GitCommitHorizontal,
   RefreshCw,
 } from "lucide-react";
@@ -14,11 +16,17 @@ import {
   applySystemUpdate,
   checkSystemHealth,
   fetchSystemUpdateStatus,
+  saveSystemUpdateSettings,
 } from "./api";
-import type { SelfUpdateStatus, SystemUpdateInfo } from "./types";
+import type {
+  SelfUpdateStatus,
+  SystemUpdateInfo,
+  SystemUpdateSettings,
+} from "./types";
 import {
   DOCKER_SOCK_COMPOSE_LINE,
   DOCKER_SOCK_RUN_FLAG,
+  formatGitHubTokenStatus,
   formatSelfUpdateState,
   getSelfUpdateActionMode,
 } from "./update-utils";
@@ -137,6 +145,24 @@ export function UpdateSettings({
   const [healthPhase, setHealthPhase] = useState<
     "idle" | "waiting_restart" | "ready_reloading" | "timeout"
   >("idle");
+  const [tokenInput, setTokenInput] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [tokenBusy, setTokenBusy] = useState<"save" | "clear" | null>(null);
+  const [tokenOverride, setTokenOverride] =
+    useState<SystemUpdateSettings | null>(null);
+  const [tokenNotice, setTokenNotice] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
+  const prevInfoRef = useRef<SystemUpdateInfo | null>(info);
+
+  useEffect(() => {
+    if (prevInfoRef.current === info) return;
+    prevInfoRef.current = info;
+    if (info && typeof info.github_token_configured === "boolean") {
+      setTokenOverride(null);
+    }
+  }, [info]);
 
   useEffect(() => {
     return () => {
@@ -298,6 +324,75 @@ export function UpdateSettings({
     selfState.isRunning ||
     healthPhase === "waiting_restart" ||
     healthPhase === "ready_reloading";
+
+  const tokenStatus = formatGitHubTokenStatus(tokenOverride ?? info);
+
+  async function submitTokenSettings(
+    mode: "save" | "clear",
+    payload: { github_token?: string; clear_github_token?: boolean },
+    getLabel: (next: SystemUpdateSettings) => string,
+  ) {
+    if (tokenBusy !== null || updatingNow) return;
+    setTokenBusy(mode);
+    setTokenNotice(null);
+    try {
+      const next = await saveSystemUpdateSettings(payload);
+      const label = getLabel(next);
+      setTokenOverride(next);
+      setTokenInput("");
+      setShowToken(false);
+      setTokenNotice({
+        tone: "success",
+        text: `${label}，正在重新检测更新…`,
+      });
+      try {
+        await onCheck(true);
+        setTokenNotice({
+          tone: "success",
+          text: `${label}，已完成更新检测。`,
+        });
+      } catch (checkErr) {
+        setTokenNotice({
+          tone: "error",
+          text: `${label}，但重新检测失败：${
+            checkErr instanceof Error ? checkErr.message : String(checkErr)
+          }`,
+        });
+      }
+    } catch (e) {
+      setTokenNotice({
+        tone: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setTokenBusy(null);
+    }
+  }
+
+  function handleSaveToken(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = tokenInput.trim();
+    if (!trimmed) {
+      setTokenNotice({
+        tone: "error",
+        text: "请输入有效的 GitHub Personal Access Token",
+      });
+      return;
+    }
+    void submitTokenSettings(
+      "save",
+      { github_token: trimmed },
+      () => "GitHub Token 已保存",
+    );
+  }
+
+  function handleClearToken() {
+    void submitTokenSettings("clear", { clear_github_token: true }, (next) =>
+      next.github_token_configured
+        ? "已清空页面保存的 Token（当前回退使用环境变量）"
+        : "已清空 GitHub Token",
+    );
+  }
 
   return (
     <div className="settings-form update-settings">
@@ -529,6 +624,97 @@ export function UpdateSettings({
             未关联远程提交基线，下方仅显示仓库最近提交。
           </p>
         )}
+      </section>
+
+      <section className="settings-section update-token-section">
+        <h2 className="update-token-title">
+          GitHub 访问令牌
+          <small
+            className={`update-badge ${
+              tokenStatus.badgeTone === "configured" ? "up-to-date" : ""
+            }`.trim()}
+          >
+            {tokenStatus.badgeText}
+          </small>
+        </h2>
+        <p className="update-token-desc">
+          填写 GitHub Personal Access
+          Token（公开仓库无需勾选私人权限）可将限额从 60 次/小时提升至 5,000
+          次/小时；一处配置后 Web 端与已连接的手机 App
+          检测更新均自动生效，令牌仅保存在服务端不回传明文。
+        </p>
+        <form
+          className="update-token-form"
+          onSubmit={(e) => handleSaveToken(e)}
+        >
+          <div className="update-token-controls">
+            <div className="update-token-input-wrap">
+              <input
+                type={showToken ? "text" : "password"}
+                className="update-token-input"
+                aria-label="GitHub Personal Access Token"
+                autoComplete="off"
+                spellCheck={false}
+                value={tokenInput}
+                disabled={tokenBusy !== null || updatingNow}
+                placeholder={
+                  tokenStatus.saved
+                    ? "已保存令牌（留空不变，输入新令牌可覆盖）"
+                    : "输入 github_pat_... 或 ghp_..."
+                }
+                onChange={(e) => {
+                  setTokenInput(e.target.value);
+                  if (tokenNotice?.tone === "error") setTokenNotice(null);
+                }}
+              />
+              <button
+                type="button"
+                className="update-token-reveal"
+                aria-label={showToken ? "隐藏 Token" : "显示 Token"}
+                aria-pressed={showToken}
+                disabled={tokenBusy !== null || updatingNow}
+                onClick={() => setShowToken((prev) => !prev)}
+              >
+                {showToken ? (
+                  <EyeOff aria-hidden="true" />
+                ) : (
+                  <Eye aria-hidden="true" />
+                )}
+              </button>
+            </div>
+            <div className="update-token-actions">
+              <button
+                type="submit"
+                className="primary"
+                disabled={
+                  tokenBusy !== null || updatingNow || !tokenInput.trim()
+                }
+              >
+                {tokenBusy === "save" ? "正在保存…" : "保存并立即检测"}
+              </button>
+              {tokenStatus.saved && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={tokenBusy !== null || updatingNow}
+                  onClick={() => handleClearToken()}
+                >
+                  {tokenBusy === "clear" ? "正在清空…" : "清空 Token"}
+                </button>
+              )}
+            </div>
+          </div>
+          {tokenNotice && (
+            <p
+              className={`update-token-feedback ${
+                tokenNotice.tone === "error" ? "is-error" : "is-success"
+              }`}
+              role={tokenNotice.tone === "error" ? "alert" : "status"}
+            >
+              {tokenNotice.text}
+            </p>
+          )}
+        </form>
       </section>
 
       <section className="settings-section">

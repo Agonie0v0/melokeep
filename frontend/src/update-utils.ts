@@ -1,4 +1,8 @@
-import type { SelfUpdateStatus, SystemUpdateInfo } from "./types";
+import type {
+  SelfUpdateStatus,
+  SystemUpdateInfo,
+  SystemUpdateSettings,
+} from "./types";
 
 export const DOCKER_SOCK_COMPOSE_LINE =
   "- /var/run/docker.sock:/var/run/docker.sock";
@@ -84,5 +88,64 @@ export function formatSelfUpdateState(
     isRestarting,
     isFailed,
     isUpToDate,
+  };
+}
+
+export interface GitHubTokenStatus {
+  configured: boolean;
+  saved: boolean;
+  source: string;
+  badgeText: string;
+  badgeTone: "configured" | "default";
+}
+
+export function formatGitHubTokenStatus(
+  info:
+    | Pick<
+        SystemUpdateInfo,
+        "github_token_configured" | "github_token_source" | "github_token_saved"
+      >
+    | SystemUpdateSettings
+    | null
+    | undefined,
+): GitHubTokenStatus {
+  const source = String(info?.github_token_source || "").trim();
+  const saved = Boolean(info?.github_token_saved);
+  const configured = Boolean(
+    info?.github_token_configured || saved || source === "settings",
+  );
+  if (saved || source === "settings") {
+    return {
+      configured: true,
+      saved,
+      source,
+      badgeText: "已配置（页面保存）",
+      badgeTone: "configured",
+    };
+  }
+  if (configured && source === "env") {
+    return {
+      configured: true,
+      saved: false,
+      source,
+      badgeText: "已配置（环境变量）",
+      badgeTone: "configured",
+    };
+  }
+  if (configured) {
+    return {
+      configured: true,
+      saved,
+      source,
+      badgeText: "已配置",
+      badgeTone: "configured",
+    };
+  }
+  return {
+    configured: false,
+    saved: false,
+    source,
+    badgeText: "未配置（匿名 60 次/小时）",
+    badgeTone: "default",
   };
 }

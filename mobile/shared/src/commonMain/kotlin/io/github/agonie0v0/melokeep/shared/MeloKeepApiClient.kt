@@ -269,6 +269,91 @@ class MeloKeepApiClient(
 		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
 	): MeloGitHubRelease? = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull(httpClient, repo)
 
+	suspend fun fetchSystemUpdateSettings(): MeloSystemUpdateSettings {
+		val response = httpClient.get(buildUrl("/api/system/update/settings")) {
+			applyMeloHeaders()
+		}
+		return decodeResponse(response)
+	}
+
+	suspend fun saveSystemUpdateSettings(
+		githubToken: String? = null,
+		clearGitHubToken: Boolean = false,
+	): MeloSystemUpdateSettings {
+		val normalizedToken = githubToken?.trim()
+		if (!clearGitHubToken && normalizedToken.isNullOrEmpty()) {
+			throw MeloApiException(400, "请输入有效的 GitHub Token")
+		}
+		val response = httpClient.put(buildUrl("/api/system/update/settings")) {
+			applyMeloHeaders()
+			contentType(ContentType.Application.Json)
+			setBody(
+				MeloSystemUpdateSettingsRequest(
+					githubToken = if (clearGitHubToken) null else normalizedToken,
+					clearGitHubToken = clearGitHubToken,
+				)
+			)
+		}
+		return decodeResponse(response)
+	}
+
+	suspend fun fetchServerAppUpdate(
+		platform: String,
+		force: Boolean = false,
+	): MeloAppUpdateResponse {
+		val normalizedPlatform = platform.trim().lowercase()
+		val response = httpClient.get(buildUrl("/api/system/update/app")) {
+			applyMeloHeaders()
+			parameter("platform", normalizedPlatform)
+			if (force) {
+				parameter("force", "1")
+			}
+		}
+		return decodeResponse(response)
+	}
+
+	suspend fun resolveLatestAppRelease(
+		platform: String,
+		force: Boolean = false,
+		fallbackHttpClient: HttpClient? = null,
+		repo: String = MeloAppUpdateChecker.DEFAULT_REPO,
+	): MeloResolvedAppUpdate {
+		val normalizedPlatform = platform.trim().lowercase()
+		if (settingsStore.currentConfig().isAuthenticated) {
+			try {
+				val resp = fetchServerAppUpdate(platform = normalizedPlatform, force = force)
+				if (resp.error.isNotBlank()) {
+					throw MeloApiException(502, resp.error)
+				}
+				return MeloResolvedAppUpdate(
+					release = resp.release,
+					viaServer = true,
+					tokenSettings = resp.toSettings(),
+				)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: MeloApiException) {
+				if (e.statusCode !in SERVER_APP_UPDATE_FALLBACK_STATUS_CODES) {
+					throw e
+				}
+			} catch (_: Throwable) {
+				// Fall back to direct GitHub Releases lookup when the server is unreachable or unsupported.
+			}
+		}
+
+		val directClient = fallbackHttpClient ?: httpClient
+		val directRelease = when (normalizedPlatform) {
+			"ios" -> MeloAppUpdateChecker.fetchLatestIosReleaseOrNull(directClient, repo)
+			"android" -> MeloAppUpdateChecker.fetchLatestAndroidReleaseOrNull(directClient, repo)
+			else -> throw MeloApiException(400, "不支持的更新平台: $platform")
+		}
+		return MeloResolvedAppUpdate(
+			release = directRelease,
+			viaServer = false,
+			tokenSettings = null,
+		)
+	}
+
 	suspend fun authStatus(baseUrl: String? = null, bearerToken: String? = null): MeloAuthStatus {
 		val url = buildUrl("/api/auth/status", baseUrl)
 		val response = httpClient.get(url) {
@@ -1351,6 +1436,7 @@ class MeloKeepApiClient(
 		private const val MAX_REDIRECT_HOPS = 3
 		private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
 		private val LOGIN_REDIRECT_STATUS_CODES = setOf(301, 302, 307, 308)
+		private val SERVER_APP_UPDATE_FALLBACK_STATUS_CODES = setOf(0, 401, 404, 405)
 
 		internal fun isHtmlBody(rawBody: String): Boolean {
 			val head = rawBody.trimStart().take(1024)

@@ -56,10 +56,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloApiException
 import io.github.agonie0v0.melokeep.shared.MeloGitHubAsset
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
+import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloSemVer
+import io.github.agonie0v0.melokeep.shared.MeloSystemUpdateSettings
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
 import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import io.ktor.client.HttpClient
@@ -131,7 +133,8 @@ internal fun formatReleaseTag(tag: String): String? {
 
 class ChangelogViewModel(
 	private val appContext: Context,
-	private val preferenceManager: PreferenceManager
+	private val preferenceManager: PreferenceManager,
+	private val meloApiClient: MeloKeepApiClient
 ) : ViewModel() {
 	private val appVersionName: String = runCatching {
 		appContext.packageManager
@@ -157,6 +160,12 @@ class ChangelogViewModel(
 
 	val installState: StateFlow<ApkUpdateInstallState>
 		field = MutableStateFlow<ApkUpdateInstallState>(ApkUpdateInstallState.Idle)
+
+	val serverTokenSettings: StateFlow<MeloSystemUpdateSettings?>
+		field = MutableStateFlow<MeloSystemUpdateSettings?>(null)
+
+	val checkedViaServer: StateFlow<Boolean>
+		field = MutableStateFlow(false)
 
 	private var checkJob: Job? = null
 	private var downloadJob: Job? = null
@@ -189,6 +198,58 @@ class ChangelogViewModel(
 		}
 	}
 
+	fun refreshServerTokenSettings() {
+		if (!meloApiClient.settingsStore.currentConfig().isAuthenticated) {
+			serverTokenSettings.value = null
+			checkedViaServer.value = false
+			return
+		}
+		viewModelScope.launch {
+			try {
+				serverTokenSettings.value = meloApiClient.fetchSystemUpdateSettings()
+			} catch (e: CancellationException) {
+				throw e
+			} catch (_: Throwable) {
+				// 旧版服务端未提供配置接口或暂不可达时静默忽略
+			}
+		}
+	}
+
+	suspend fun saveServerGitHubToken(token: String): Result<MeloSystemUpdateSettings> {
+		val trimmed = token.trim()
+		if (trimmed.isEmpty()) {
+			return Result.failure(IllegalArgumentException("请输入有效的 GitHub Token"))
+		}
+		return try {
+			val updated = meloApiClient.saveSystemUpdateSettings(
+				githubToken = trimmed,
+				clearGitHubToken = false
+			)
+			serverTokenSettings.value = updated
+			checkForUpdates(manual = true, showSheet = false)
+			Result.success(updated)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			Result.failure(e)
+		}
+	}
+
+	suspend fun clearServerGitHubToken(): Result<MeloSystemUpdateSettings> {
+		return try {
+			val updated = meloApiClient.saveSystemUpdateSettings(
+				clearGitHubToken = true
+			)
+			serverTokenSettings.value = updated
+			checkForUpdates(manual = true, showSheet = false)
+			Result.success(updated)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			Result.failure(e)
+		}
+	}
+
 	fun checkForUpdates(
 		currentVersion: String = appVersionName,
 		manual: Boolean = false,
@@ -203,7 +264,18 @@ class ChangelogViewModel(
 				checkFeedback.value = UpdateCheckFeedback.Checking
 			}
 			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestAndroidReleaseOrNull(updateClient)
+				val resolved = meloApiClient.resolveLatestAppRelease(
+					platform = "android",
+					force = manual,
+					fallbackHttpClient = updateClient
+				)
+				checkedViaServer.value = resolved.viaServer
+				if (resolved.viaServer && resolved.tokenSettings != null) {
+					serverTokenSettings.value = resolved.tokenSettings
+				} else if (!meloApiClient.settingsStore.currentConfig().isAuthenticated) {
+					serverTokenSettings.value = null
+				}
+				val fetched = resolved.release
 				preferenceManager.lastUpdateCheckTimeMs = System.currentTimeMillis()
 				latestRelease.value = fetched
 
@@ -234,6 +306,19 @@ class ChangelogViewModel(
 				throw e
 			} catch (e: Exception) {
 				Logger.e("ChangelogViewModel", "couldn't check for updates", e)
+				if (meloApiClient.settingsStore.currentConfig().isAuthenticated) {
+					checkedViaServer.value = e is MeloApiException && e.statusCode == 502
+					try {
+						serverTokenSettings.value = meloApiClient.fetchSystemUpdateSettings()
+					} catch (ce: CancellationException) {
+						throw ce
+					} catch (_: Throwable) {
+						// Ignore best-effort token status refresh failure
+					}
+				} else {
+					checkedViaServer.value = false
+					serverTokenSettings.value = null
+				}
 				if (manual) {
 					checkFeedback.value = UpdateCheckFeedback.Error(
 						e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请检查网络连接"

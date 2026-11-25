@@ -195,10 +195,16 @@ object MeloAppUpdateChecker {
 			throw MeloApiException(response.status.value, "读取 GitHub 版本响应失败：${e.message ?: "网络异常"}")
 		}
 		if (!response.status.isSuccess()) {
-			val detail = MeloKeepApiClient.parseApiErrorMessage(text, response.status.value)
+			val statusCode = response.status.value
+			val detail = MeloKeepApiClient.parseApiErrorMessage(text, statusCode)
+			val rateLimitHint = if (statusCode == 403 || statusCode == 429) {
+				"（可在 Web 或连接 MeloKeep 服务端后配置 GitHub Token 避免限流）"
+			} else {
+				""
+			}
 			throw MeloApiException(
-				statusCode = response.status.value,
-				message = "获取 GitHub 最新版本失败 (${response.status.value})：$detail",
+				statusCode = statusCode,
+				message = "获取 GitHub 最新版本失败 ($statusCode)：$detail$rateLimitHint",
 			)
 		}
 		return try {

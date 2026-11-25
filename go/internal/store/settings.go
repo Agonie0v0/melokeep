@@ -18,6 +18,7 @@ const (
 	NamespaceLibraryIndex    = "library_index"
 	NamespaceUIPreferences   = "ui_preferences"
 	NamespaceAuthMediaSecret = "auth_media_secret"
+	NamespaceSystemUpdate    = "system_update"
 )
 
 type SettingRecord struct {

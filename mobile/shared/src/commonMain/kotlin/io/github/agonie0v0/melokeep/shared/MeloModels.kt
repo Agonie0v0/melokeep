@@ -857,3 +857,50 @@ internal data class MeloLocalPlaylistTracksRequest(
 internal data class MeloLocalPlaylistRenameRequest(
 	val name: String,
 )
+
+@Serializable
+data class MeloSystemUpdateSettings(
+	@SerialName("github_token_configured")
+	val githubTokenConfigured: Boolean = false,
+	@SerialName("github_token_source")
+	val githubTokenSource: String = "",
+	@SerialName("github_token_saved")
+	val githubTokenSaved: Boolean = false,
+)
+
+@Serializable
+data class MeloAppUpdateResponse(
+	val platform: String = "",
+	val repo: String = "",
+	val release: MeloGitHubRelease? = null,
+	@SerialName("checked_at")
+	val checkedAt: String = "",
+	val cached: Boolean = false,
+	val error: String = "",
+	@SerialName("github_token_configured")
+	val githubTokenConfigured: Boolean = false,
+	@SerialName("github_token_source")
+	val githubTokenSource: String = "",
+	@SerialName("github_token_saved")
+	val githubTokenSaved: Boolean = false,
+) {
+	fun toSettings(): MeloSystemUpdateSettings = MeloSystemUpdateSettings(
+		githubTokenConfigured = githubTokenConfigured,
+		githubTokenSource = githubTokenSource,
+		githubTokenSaved = githubTokenSaved,
+	)
+}
+
+data class MeloResolvedAppUpdate(
+	val release: MeloGitHubRelease?,
+	val viaServer: Boolean,
+	val tokenSettings: MeloSystemUpdateSettings? = null,
+)
+
+@Serializable
+internal data class MeloSystemUpdateSettingsRequest(
+	@SerialName("github_token")
+	val githubToken: String? = null,
+	@SerialName("clear_github_token")
+	val clearGitHubToken: Boolean = false,
+)

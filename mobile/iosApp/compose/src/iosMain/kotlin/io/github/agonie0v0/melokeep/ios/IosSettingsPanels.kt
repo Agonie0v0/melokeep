@@ -97,11 +97,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
+import io.github.agonie0v0.melokeep.shared.MeloApiException
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
+import io.github.agonie0v0.melokeep.shared.MeloSystemUpdateSettings
 import io.github.agonie0v0.melokeep.shared.findIosIpaAsset
 import io.github.agonie0v0.melokeep.shared.hasIosUpdateFor
 import io.ktor.http.encodeURLParameter
@@ -2919,62 +2920,124 @@ internal fun iosOpenExternalUrl(rawUrl: String): Boolean {
 	}.isSuccess
 }
 
+private fun formatIosServerTokenBadge(settings: MeloSystemUpdateSettings?): Pair<String, Boolean> {
+	if (settings == null) return "未获取到状态" to false
+	return when {
+		settings.githubTokenSaved || settings.githubTokenSource == "settings" ->
+			"已配置（已保存）" to true
+		settings.githubTokenConfigured && settings.githubTokenSource == "env" ->
+			"已配置（环境变量）" to true
+		settings.githubTokenConfigured ->
+			"已配置" to true
+		else ->
+			"未配置（60 次/小时）" to false
+	}
+}
+
 @Composable
 internal fun IosAppUpdateDialog(
 	currentVersion: String,
+	settingsController: MeloSettingsController,
 	initialRelease: MeloGitHubRelease? = null,
+	initialTokenSettings: MeloSystemUpdateSettings? = null,
+	initialViaServer: Boolean = false,
 	onReleaseLoaded: (MeloGitHubRelease?) -> Unit = {},
+	onTokenSettingsLoaded: (MeloSystemUpdateSettings?) -> Unit = {},
+	onViaServerChanged: (Boolean) -> Unit = {},
 	onShowNotice: (String) -> Unit = {},
 	onDismiss: () -> Unit,
 ) {
 	val scope = rememberCoroutineScope()
 	val clipboard = LocalClipboardManager.current
+	val settingsState by settingsController.state.collectAsState()
+	val meloConnected = settingsState.serverConfig.isAuthenticated
 
 	var release by remember(initialRelease) { mutableStateOf(initialRelease) }
 	var checkedOnce by remember { mutableStateOf(initialRelease != null) }
 	var loading by remember { mutableStateOf(initialRelease == null) }
 	var errorMessage by remember { mutableStateOf<String?>(null) }
 	var launchFeedback by remember { mutableStateOf<String?>(null) }
+	var tokenSettings by remember(initialTokenSettings) { mutableStateOf(initialTokenSettings) }
+	var checkedViaServer by remember(initialViaServer) { mutableStateOf(initialViaServer) }
+	var tokenInput by rememberSaveable { mutableStateOf("") }
+	var tokenVisible by rememberSaveable { mutableStateOf(false) }
+	var tokenSubmitting by remember { mutableStateOf(false) }
+	var tokenFeedback by remember { mutableStateOf<String?>(null) }
+	var tokenFeedbackIsError by remember { mutableStateOf(false) }
 
-	val checkNow: () -> Unit = {
-		if (!loading) {
-			loading = true
-			errorMessage = null
-			launchFeedback = null
-			scope.launch {
+	suspend fun executeUpdateCheck(forceCheck: Boolean) {
+		loading = true
+		errorMessage = null
+		launchFeedback = null
+		try {
+			val resolved = settingsController.resolveIosAppUpdate(force = forceCheck)
+			release = resolved.release
+			checkedOnce = true
+			checkedViaServer = resolved.viaServer
+			onViaServerChanged(resolved.viaServer)
+			if (resolved.viaServer && resolved.tokenSettings != null) {
+				tokenSettings = resolved.tokenSettings
+				onTokenSettingsLoaded(resolved.tokenSettings)
+			}
+			onReleaseLoaded(resolved.release)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
+			checkedOnce = true
+			if (meloConnected) {
+				val serverError = e is MeloApiException && e.statusCode == 502
+				checkedViaServer = serverError
+				onViaServerChanged(serverError)
 				try {
-					val fetched = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
-					release = fetched
-					checkedOnce = true
-					onReleaseLoaded(fetched)
-				} catch (e: CancellationException) {
-					throw e
-				} catch (e: Throwable) {
-					errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
-					checkedOnce = true
-				} finally {
-					loading = false
+					val refreshed = settingsController.fetchSystemUpdateSettings()
+					tokenSettings = refreshed
+					onTokenSettingsLoaded(refreshed)
+				} catch (ce: CancellationException) {
+					throw ce
+				} catch (_: Throwable) {
+					// 忽略旧版服务端或暂不可达时的刷新失败
 				}
+			}
+		} finally {
+			loading = false
+		}
+	}
+
+	val runUpdateCheck: (Boolean) -> Unit = { forceCheck ->
+		if (!loading) {
+			scope.launch {
+				executeUpdateCheck(forceCheck)
 			}
 		}
 	}
 
 	LaunchedEffect(Unit) {
 		if (!checkedOnce) {
-			loading = true
-			try {
-				val fetched = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
-				release = fetched
-				checkedOnce = true
-				onReleaseLoaded(fetched)
-			} catch (e: CancellationException) {
-				throw e
-			} catch (e: Throwable) {
-				errorMessage = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败，请稍后重试"
-				checkedOnce = true
-			} finally {
-				loading = false
+			executeUpdateCheck(forceCheck = false)
+		}
+	}
+
+	LaunchedEffect(meloConnected) {
+		if (meloConnected) {
+			if (tokenSettings == null) {
+				try {
+					val fetchedSettings = settingsController.fetchSystemUpdateSettings()
+					tokenSettings = fetchedSettings
+					onTokenSettingsLoaded(fetchedSettings)
+				} catch (e: CancellationException) {
+					throw e
+				} catch (_: Throwable) {
+					// 旧版服务端不支持该接口时静默忽略
+				}
 			}
+		} else {
+			tokenSettings = null
+			checkedViaServer = false
+			tokenFeedback = null
+			tokenFeedbackIsError = false
+			onTokenSettingsLoaded(null)
+			onViaServerChanged(false)
 		}
 	}
 
@@ -3060,7 +3123,7 @@ internal fun IosAppUpdateDialog(
 							)
 							Spacer(Modifier.width(10.dp))
 							Text(
-								text = "正在拉取 GitHub Release…",
+								text = if (meloConnected) "正在检查版本更新…" else "正在拉取 GitHub Release…",
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
@@ -3232,6 +3295,218 @@ internal fun IosAppUpdateDialog(
 						}
 					}
 				}
+
+				if (meloConnected) {
+					val (tokenBadgeText, tokenConfigured) = formatIosServerTokenBadge(tokenSettings)
+					Surface(
+						shape = RoundedCornerShape(12.dp),
+						color = MaterialTheme.colorScheme.surfaceContainerHigh,
+						border = BorderStroke(
+							IosHairlineWidth,
+							MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+						),
+						modifier = Modifier.fillMaxWidth(),
+					) {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(12.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Text(
+									text = "服务端 GitHub Token",
+									style = MaterialTheme.typography.labelLarge,
+									fontWeight = FontWeight.SemiBold,
+									color = MaterialTheme.colorScheme.onSurface,
+								)
+								Surface(
+									shape = CircleShape,
+									color = if (tokenConfigured) {
+										MaterialTheme.colorScheme.meloPositive.copy(alpha = 0.14f)
+									} else {
+										MaterialTheme.colorScheme.surfaceContainer
+									},
+								) {
+									Text(
+										text = tokenBadgeText,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.Medium,
+										color = if (tokenConfigured) {
+											MaterialTheme.colorScheme.meloPositive
+										} else {
+											MaterialTheme.colorScheme.onSurfaceVariant
+										},
+										modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+									)
+								}
+							}
+
+							Text(
+								text = buildString {
+									append("配置在当前 MeloKeep 服务端，Web 端与已连接的手机端共用（不回传明文），可提升至 5,000 次/小时。")
+									if (checkedViaServer) {
+										append(" 本次已通过服务端检测。")
+									}
+								},
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+
+							OutlinedTextField(
+								value = tokenInput,
+								onValueChange = { tokenInput = it },
+								singleLine = true,
+								enabled = !tokenSubmitting && !loading,
+								label = { Text("GitHub Token") },
+								placeholder = {
+									Text(
+										if (tokenSettings?.githubTokenSaved == true) {
+											"已保存（输入新令牌覆盖）"
+										} else {
+											"ghp_... 或 github_pat_..."
+										}
+									)
+								},
+								visualTransformation = if (tokenVisible) {
+									VisualTransformation.None
+								} else {
+									PasswordVisualTransformation()
+								},
+								trailingIcon = {
+									IconButton(onClick = { tokenVisible = !tokenVisible }) {
+										Icon(
+											imageVector = if (tokenVisible) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+											contentDescription = null,
+											modifier = Modifier.size(18.dp),
+										)
+									}
+								},
+								shape = RoundedCornerShape(10.dp),
+								modifier = Modifier.fillMaxWidth(),
+							)
+
+							tokenFeedback?.let { fb ->
+								Text(
+									text = fb,
+									style = MaterialTheme.typography.labelSmall,
+									color = if (tokenFeedbackIsError) {
+										MaterialTheme.colorScheme.error
+									} else {
+										MaterialTheme.colorScheme.meloPositive
+									},
+								)
+							}
+
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Button(
+									onClick = {
+										val trimmed = tokenInput.trim()
+										if (trimmed.isEmpty() || tokenSubmitting || loading) return@Button
+										tokenSubmitting = true
+										tokenFeedback = null
+										tokenFeedbackIsError = false
+										scope.launch {
+											var savedOk = false
+											try {
+												val updated = settingsController.saveSystemUpdateSettings(
+													githubToken = trimmed,
+													clearGitHubToken = false,
+												)
+												tokenSettings = updated
+												onTokenSettingsLoaded(updated)
+												tokenInput = ""
+												tokenFeedback = "已保存到服务端并重新检测"
+												tokenFeedbackIsError = false
+												onShowNotice("已保存服务端 GitHub Token")
+												savedOk = true
+											} catch (e: CancellationException) {
+												throw e
+											} catch (e: Throwable) {
+												tokenFeedback = e.message?.takeIf { it.isNotBlank() } ?: "保存失败"
+												tokenFeedbackIsError = true
+											} finally {
+												tokenSubmitting = false
+											}
+											if (savedOk) {
+												runUpdateCheck(true)
+											}
+										}
+									},
+									enabled = !tokenSubmitting && !loading && tokenInput.isNotBlank(),
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier.weight(1f),
+								) {
+									if (tokenSubmitting) {
+										CircularProgressIndicator(
+											modifier = Modifier.size(14.dp),
+											strokeWidth = 2.dp,
+											color = MaterialTheme.colorScheme.onPrimary,
+										)
+										Spacer(Modifier.width(6.dp))
+										Text("保存中…")
+									} else {
+										Text("保存并检测", maxLines = 1, overflow = TextOverflow.Ellipsis)
+									}
+								}
+
+								if (tokenSettings?.githubTokenSaved == true) {
+									OutlinedButton(
+										onClick = {
+											if (tokenSubmitting || loading) return@OutlinedButton
+											tokenSubmitting = true
+											tokenFeedback = null
+											tokenFeedbackIsError = false
+											scope.launch {
+												var clearedOk = false
+												try {
+													val updated = settingsController.saveSystemUpdateSettings(
+														clearGitHubToken = true,
+													)
+													tokenSettings = updated
+													onTokenSettingsLoaded(updated)
+													tokenFeedback = "已清空服务端保存的令牌"
+													tokenFeedbackIsError = false
+													onShowNotice("已清空服务端 GitHub Token")
+													clearedOk = true
+												} catch (e: CancellationException) {
+													throw e
+												} catch (e: Throwable) {
+													tokenFeedback = e.message?.takeIf { it.isNotBlank() } ?: "清空失败"
+													tokenFeedbackIsError = true
+												} finally {
+													tokenSubmitting = false
+												}
+												if (clearedOk) {
+													runUpdateCheck(true)
+												}
+											}
+										},
+										enabled = !tokenSubmitting && !loading,
+										shape = RoundedCornerShape(10.dp),
+										border = BorderStroke(
+											IosHairlineWidth,
+											MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+										),
+										colors = ButtonDefaults.outlinedButtonColors(
+											contentColor = MaterialTheme.colorScheme.error,
+										),
+									) {
+										Text("清空")
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		},
 		confirmButton = {
@@ -3241,8 +3516,8 @@ internal fun IosAppUpdateDialog(
 		},
 		dismissButton = {
 			TextButton(
-				onClick = checkNow,
-				enabled = !loading,
+				onClick = { runUpdateCheck(true) },
+				enabled = !loading && !tokenSubmitting,
 			) {
 				Text("重新检查")
 			}

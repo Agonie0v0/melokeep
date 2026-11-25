@@ -91,6 +91,7 @@ import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloSettingsUiState
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
+import io.github.agonie0v0.melokeep.shared.MeloSystemUpdateSettings
 import io.github.agonie0v0.melokeep.shared.findAndroidApkAsset
 import io.github.agonie0v0.melokeep.shared.hasAndroidUpdateFor
 import kotlinx.coroutines.Dispatchers
@@ -3247,6 +3248,20 @@ internal fun SettingsStorageCachePanel(
 // 9. 版本与更新面板（MeloVersionUpdateSheet 内容）
 // =============================================================================
 
+private fun formatServerGitHubTokenBadge(settings: MeloSystemUpdateSettings?): Pair<String, Boolean> {
+	if (settings == null) return "未获取到状态" to false
+	return when {
+		settings.githubTokenSaved || settings.githubTokenSource == "settings" ->
+			"已配置（已保存）" to true
+		settings.githubTokenConfigured && settings.githubTokenSource == "env" ->
+			"已配置（环境变量）" to true
+		settings.githubTokenConfigured ->
+			"已配置" to true
+		else ->
+			"未配置（60 次/小时）" to false
+	}
+}
+
 @Composable
 internal fun SettingsVersionUpdatePanel(
 	changelogViewModel: ChangelogViewModel,
@@ -3255,11 +3270,23 @@ internal fun SettingsVersionUpdatePanel(
 	nestedInSheet: Boolean = false
 ) {
 	val preferenceManager = koinInject<PreferenceManager>()
+	val settingsController = koinInject<MeloSettingsController>()
+	val settingsState by settingsController.state.collectAsStateWithLifecycle()
+	val serverConnected = settingsState.serverConfig.isAuthenticated
 	val checkFeedback by changelogViewModel.checkFeedback.collectAsStateWithLifecycle()
 	val latestRelease by changelogViewModel.latestRelease.collectAsStateWithLifecycle()
 	val installState by changelogViewModel.installState.collectAsStateWithLifecycle()
+	val serverTokenSettings by changelogViewModel.serverTokenSettings.collectAsStateWithLifecycle()
+	val checkedViaServer by changelogViewModel.checkedViaServer.collectAsStateWithLifecycle()
 	val positiveColor = rememberThemePositiveColor()
+	val scope = rememberCoroutineScope()
+	val focusManager = LocalFocusManager.current
 	var linkToOpen by rememberSaveable { mutableStateOf<String?>(null) }
+	var tokenInput by rememberSaveable { mutableStateOf("") }
+	var tokenVisible by rememberSaveable { mutableStateOf(false) }
+	var tokenSubmitting by remember { mutableStateOf(false) }
+	var tokenStatusMessage by remember { mutableStateOf<String?>(null) }
+	var tokenStatusIsError by remember { mutableStateOf(false) }
 
 	val isChecking = checkFeedback is UpdateCheckFeedback.Checking
 	val hasUpdate = remember(latestRelease, appVersionName) {
@@ -3281,6 +3308,12 @@ internal fun SettingsVersionUpdatePanel(
 				showSheet = false
 			)
 		}
+	}
+
+	LaunchedEffect(serverConnected) {
+		tokenStatusMessage = null
+		tokenStatusIsError = false
+		changelogViewModel.refreshServerTokenSettings()
 	}
 
 	LazyColumn(
@@ -3432,6 +3465,232 @@ internal fun SettingsVersionUpdatePanel(
 									)
 								}
 							}
+						}
+					}
+				}
+			}
+		}
+
+		item(key = "update-github-token") {
+			val (badgeText, badgeConfigured) = formatServerGitHubTokenBadge(serverTokenSettings)
+			val submitSaveToken: () -> Unit = {
+				if (!tokenSubmitting && tokenInput.isNotBlank()) {
+					focusManager.clearFocus()
+					tokenSubmitting = true
+					tokenStatusMessage = null
+					tokenStatusIsError = false
+					scope.launch {
+						try {
+							val result = changelogViewModel.saveServerGitHubToken(tokenInput)
+							result.onSuccess {
+								tokenInput = ""
+								tokenStatusIsError = false
+								tokenStatusMessage = "已保存到服务端并立即检测更新"
+							}.onFailure { err ->
+								tokenStatusIsError = true
+								tokenStatusMessage = err.message?.takeIf { it.isNotBlank() } ?: "保存 GitHub Token 失败"
+							}
+						} finally {
+							tokenSubmitting = false
+						}
+					}
+				}
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				MeloSectionLabel(
+					title = "GitHub 访问令牌",
+					trailing = if (serverConnected) {
+						{
+							Surface(
+								shape = CircleShape,
+								color = if (badgeConfigured) {
+									positiveColor.copy(alpha = 0.13f)
+								} else {
+									MaterialTheme.colorScheme.surfaceContainerHigh
+								},
+								border = BorderStroke(
+									width = MeloHairlineWidth,
+									color = if (badgeConfigured) {
+										positiveColor.copy(alpha = 0.34f)
+									} else {
+										MaterialTheme.colorScheme.outline.copy(alpha = 0.32f)
+									}
+								)
+							) {
+								Text(
+									text = badgeText,
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = FontWeight.Medium,
+									color = if (badgeConfigured) {
+										positiveColor
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+									modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+								)
+							}
+						}
+					} else {
+						null
+					}
+				)
+
+				MeloGroupedCard {
+					if (serverConnected) {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(16.dp),
+							verticalArrangement = Arrangement.spacedBy(10.dp)
+						) {
+							Text(
+								text = "填写 GitHub Personal Access Token（公开仓库无需勾选私人权限）可将限额从 60 次/小时提升至 5,000 次/小时；配置保存在当前 MeloKeep 服务端，Web 端与已连接的手机端共用，不回传明文。",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant
+							)
+
+							if (checkedViaServer) {
+								Text(
+									text = "本次更新检测已复用当前 MeloKeep 服务端通道",
+									style = MaterialTheme.typography.labelSmall,
+									color = positiveColor
+								)
+							}
+
+							OutlinedTextField(
+								value = tokenInput,
+								onValueChange = { tokenInput = it },
+								singleLine = true,
+								enabled = !tokenSubmitting,
+								modifier = Modifier.fillMaxWidth(),
+								label = { Text("GitHub Personal Access Token") },
+								placeholder = {
+									Text(
+										if (serverTokenSettings?.githubTokenSaved == true) {
+											"已保存（输入新令牌可覆盖）"
+										} else {
+											"ghp_... 或 github_pat_..."
+										}
+									)
+								},
+								visualTransformation = if (tokenVisible) {
+									VisualTransformation.None
+								} else {
+									PasswordVisualTransformation()
+								},
+								trailingIcon = {
+									IconButton(onClick = { tokenVisible = !tokenVisible }) {
+										Icon(
+											imageVector = if (tokenVisible) MeloIcons.VisibilityOff else MeloIcons.Visibility,
+											contentDescription = "切换令牌可见性"
+										)
+									}
+								},
+								keyboardOptions = KeyboardOptions(
+									autoCorrectEnabled = false,
+									keyboardType = KeyboardType.Password,
+									imeAction = ImeAction.Done
+								),
+								keyboardActions = KeyboardActions(
+									onDone = { submitSaveToken() }
+								),
+								shape = RoundedCornerShape(12.dp)
+							)
+
+							tokenStatusMessage?.let { msg ->
+								Text(
+									text = msg,
+									style = MaterialTheme.typography.bodySmall,
+									color = if (tokenStatusIsError) {
+										MaterialTheme.colorScheme.error
+									} else {
+										positiveColor
+									}
+								)
+							}
+
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(10.dp),
+								verticalAlignment = Alignment.CenterVertically
+							) {
+								Button(
+									onClick = submitSaveToken,
+									enabled = !tokenSubmitting && tokenInput.isNotBlank(),
+									modifier = Modifier
+										.weight(1f)
+										.height(44.dp),
+									shape = RoundedCornerShape(12.dp)
+								) {
+									if (tokenSubmitting) {
+										CircularProgressIndicator(
+											modifier = Modifier.size(16.dp),
+											strokeWidth = 2.dp,
+											color = MaterialTheme.colorScheme.onPrimary
+										)
+										Spacer(Modifier.width(8.dp))
+										Text("保存中…")
+									} else {
+										Text("保存并立即检测")
+									}
+								}
+
+								if (serverTokenSettings?.githubTokenSaved == true) {
+									OutlinedButton(
+										onClick = {
+											focusManager.clearFocus()
+											tokenSubmitting = true
+											tokenStatusMessage = null
+											tokenStatusIsError = false
+											scope.launch {
+												try {
+													val result = changelogViewModel.clearServerGitHubToken()
+													result.onSuccess {
+														tokenStatusIsError = false
+														tokenStatusMessage = "已清空服务端保存的令牌并重新检测"
+													}.onFailure { err ->
+														tokenStatusIsError = true
+														tokenStatusMessage = err.message?.takeIf { it.isNotBlank() } ?: "清空失败"
+													}
+												} finally {
+													tokenSubmitting = false
+												}
+											}
+										},
+										enabled = !tokenSubmitting,
+										modifier = Modifier.height(44.dp),
+										shape = RoundedCornerShape(12.dp),
+										border = BorderStroke(
+											MeloHairlineWidth,
+											MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+										),
+										colors = ButtonDefaults.outlinedButtonColors(
+											contentColor = MaterialTheme.colorScheme.error
+										)
+									) {
+										Text("清空")
+									}
+								}
+							}
+						}
+					} else {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(16.dp),
+							verticalArrangement = Arrangement.spacedBy(4.dp)
+						) {
+							Text(
+								text = "未连接 MeloKeep 服务端",
+								style = MaterialTheme.typography.bodyMedium,
+								fontWeight = FontWeight.Medium
+							)
+							Text(
+								text = "连接并登录 MeloKeep 服务端后，可复用并在此配置服务端共用的 GitHub Token，避免匿名检查更新受 60 次/小时限流影响。",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant
+							)
 						}
 					}
 				}

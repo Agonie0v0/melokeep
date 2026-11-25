@@ -63,11 +63,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
-import io.github.agonie0v0.melokeep.shared.MeloAppUpdateChecker
 import io.github.agonie0v0.melokeep.shared.MeloGitHubRelease
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsStore
 import io.github.agonie0v0.melokeep.shared.MeloStudioController
+import io.github.agonie0v0.melokeep.shared.MeloSystemUpdateSettings
 import io.github.agonie0v0.melokeep.shared.hasIosUpdateFor
 import kotlinx.coroutines.CancellationException
 
@@ -118,6 +118,8 @@ fun IosHubProfileRoute(
 
 	var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
 	var latestRelease by remember { mutableStateOf<MeloGitHubRelease?>(null) }
+	var serverTokenSettings by remember { mutableStateOf<MeloSystemUpdateSettings?>(null) }
+	var checkedViaServer by remember { mutableStateOf(false) }
 
 	val tempCacheBytes = remember(cacheRefreshTick, imageLoader) {
 		val coilDisk = runCatching { imageLoader.diskCache?.size ?: 0L }.getOrDefault(0L)
@@ -127,10 +129,17 @@ fun IosHubProfileRoute(
 	val hasNewVersion = latestRelease?.hasIosUpdateFor(appVersion) == true
 	val displayLatestTag = latestRelease?.tagName?.let { normalizeIosVersionLabel(it) }.orEmpty()
 
-	LaunchedEffect(appVersion) {
-		if (latestRelease == null) {
+	LaunchedEffect(appVersion, meloConnected) {
+		if (latestRelease == null || (meloConnected && !checkedViaServer)) {
 			try {
-				latestRelease = MeloAppUpdateChecker.fetchLatestIosReleaseOrNull()
+				val resolved = settingsController.resolveIosAppUpdate(force = false)
+				latestRelease = resolved.release
+				checkedViaServer = resolved.viaServer
+				if (resolved.viaServer && resolved.tokenSettings != null) {
+					serverTokenSettings = resolved.tokenSettings
+				} else if (!meloConnected) {
+					serverTokenSettings = null
+				}
 			} catch (e: CancellationException) {
 				throw e
 			} catch (_: Throwable) {
@@ -142,6 +151,10 @@ fun IosHubProfileRoute(
 	LaunchedEffect(meloConnected) {
 		if (meloConnected && settingsState.engineConfig == null && !settingsState.loadingConfig) {
 			settingsController.loadConfig()
+		}
+		if (!meloConnected) {
+			serverTokenSettings = null
+			checkedViaServer = false
 		}
 	}
 
@@ -544,8 +557,13 @@ fun IosHubProfileRoute(
 	if (showUpdateDialog) {
 		IosAppUpdateDialog(
 			currentVersion = appVersion,
+			settingsController = settingsController,
 			initialRelease = latestRelease,
+			initialTokenSettings = serverTokenSettings,
+			initialViaServer = checkedViaServer,
 			onReleaseLoaded = { fetched -> latestRelease = fetched },
+			onTokenSettingsLoaded = { fetched -> serverTokenSettings = fetched },
+			onViaServerChanged = { via -> checkedViaServer = via },
 			onShowNotice = { cacheClearHint = null; subsonicManager.clearMessages() },
 			onDismiss = { showUpdateDialog = false },
 		)

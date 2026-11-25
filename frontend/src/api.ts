@@ -1,4 +1,8 @@
-import type { DeleteDownloadResult, SelfUpdateStatus } from "./types";
+import type {
+  DeleteDownloadResult,
+  SelfUpdateStatus,
+  SystemUpdateSettings,
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -200,6 +204,13 @@ export function applySystemUpdate(): Promise<SelfUpdateStatus> {
 
 export function fetchSystemUpdateStatus(): Promise<SelfUpdateStatus> {
   return api<SelfUpdateStatus>("/system/update/status");
+}
+
+export function saveSystemUpdateSettings(payload: {
+  github_token?: string;
+  clear_github_token?: boolean;
+}): Promise<SystemUpdateSettings> {
+  return api<SystemUpdateSettings>("/system/update/settings", "PUT", payload);
 }
 
 export async function checkSystemHealth(): Promise<boolean> {

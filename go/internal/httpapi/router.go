@@ -71,6 +71,7 @@ type Server struct {
 	updateMu           sync.Mutex
 	updateCache        *model.SystemUpdateDTO
 	updateCacheExpires time.Time
+	appUpdateCache     map[string]appUpdateCacheEntry
 	selfUpdater        *dockerupdate.Manager
 
 	prefsMu sync.Mutex
@@ -119,6 +120,7 @@ func NewServer(deps Dependencies) (*Server, error) {
 		resolveCache:   make(map[string]resolvedCacheEntry),
 		playbackReport: make(map[playbackDedupeKey]time.Time),
 		legacyTasks:    make(map[string]*legacyTaskEntry),
+		appUpdateCache: make(map[string]appUpdateCacheEntry),
 	}
 	s.registerRoutes()
 	return s, nil
@@ -367,6 +369,9 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodGet, "/api/system/update", "engine_api.system_update", s.handleSystemUpdate)
 	s.addRoute(http.MethodGet, "/api/system/update/status", "engine_api.system_update_status", s.handleSystemUpdateStatus)
 	s.addRoute(http.MethodPost, "/api/system/update/apply", "engine_api.system_update_apply", s.handleSystemUpdateApply)
+	s.addRoute(http.MethodGet, "/api/system/update/settings", "engine_api.system_update_settings_read", s.handleSystemUpdateSettingsRead)
+	s.addRoute(http.MethodPut, "/api/system/update/settings", "engine_api.system_update_settings_write", s.handleSystemUpdateSettingsWrite)
+	s.addRoute(http.MethodGet, "/api/system/update/app", "engine_api.system_update_app", s.handleSystemUpdateApp)
 	s.addRoute(http.MethodPost, "/api/restart", "legacy.app.restartserver", s.handleRestart)
 	s.addRoute(http.MethodPost, "/api/open-dir", "legacy.app.opendir", s.handleOpenDir)
 	s.addRoute(http.MethodPost, "/api/cache/clear", "legacy.app.clearcache", s.handleCacheClear)

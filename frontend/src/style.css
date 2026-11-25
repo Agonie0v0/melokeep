@@ -6117,6 +6117,79 @@ tr.current {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.update-token-title {
+  flex-wrap: wrap;
+}
+.settings-section .update-token-desc {
+  margin: 0 0 14px;
+}
+.update-token-form {
+  display: grid;
+  gap: 10px;
+}
+.update-token-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.update-token-input-wrap {
+  position: relative;
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 480px;
+}
+.settings-section .update-token-input-wrap .update-token-input {
+  margin-top: 0;
+  padding-right: 42px;
+}
+.update-token-reveal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.update-token-reveal:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.update-token-reveal svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.update-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-token-actions button {
+  min-height: 40px;
+}
+.update-token-feedback {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+.update-token-feedback.is-success {
+  background: var(--emerald-bg);
+  color: var(--emerald);
+}
+.update-token-feedback.is-error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
 
 /* 正在播放：队列拖拽排序 */
 .np-queue-drag-handle {
@@ -6224,6 +6297,16 @@ tr.current {
 @media (max-width: 600px) {
   .update-command-row {
     width: 100%;
+  }
+  .update-token-input-wrap {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .update-token-actions {
+    width: 100%;
+  }
+  .update-token-actions button {
+    flex: 1 1 auto;
   }
 
   .navidrome-library .music-table.is-multi-select tbody tr {

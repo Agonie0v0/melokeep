@@ -17,6 +17,7 @@ import {
 import {
   DOCKER_SOCK_COMPOSE_LINE,
   DOCKER_SOCK_RUN_FLAG,
+  formatGitHubTokenStatus,
   formatSelfUpdateState,
   getSelfUpdateActionMode,
 } from "../src/update-utils.ts";
@@ -24,6 +25,7 @@ import {
   applySystemUpdate,
   checkSystemHealth,
   fetchSystemUpdateStatus,
+  saveSystemUpdateSettings,
 } from "../src/api.ts";
 
 test("sanitizeMinMatchScore clamps to 50..100 and falls back cleanly", () => {
@@ -465,6 +467,164 @@ test("self-update API helpers call expected endpoints and handle errors", async 
 
     await assert.rejects(() => applySystemUpdate(), /更新任务已在进行中/);
     assert.equal(await checkSystemHealth(), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("formatGitHubTokenStatus classifies settings, env, generic configured, and default states", () => {
+  assert.deepEqual(formatGitHubTokenStatus(null), {
+    configured: false,
+    saved: false,
+    source: "",
+    badgeText: "未配置（匿名 60 次/小时）",
+    badgeTone: "default",
+  });
+  assert.deepEqual(formatGitHubTokenStatus(undefined), {
+    configured: false,
+    saved: false,
+    source: "",
+    badgeText: "未配置（匿名 60 次/小时）",
+    badgeTone: "default",
+  });
+
+  assert.deepEqual(
+    formatGitHubTokenStatus({
+      github_token_configured: true,
+      github_token_source: "settings",
+      github_token_saved: true,
+    }),
+    {
+      configured: true,
+      saved: true,
+      source: "settings",
+      badgeText: "已配置（页面保存）",
+      badgeTone: "configured",
+    },
+  );
+  assert.deepEqual(formatGitHubTokenStatus({ github_token_saved: true }), {
+    configured: true,
+    saved: true,
+    source: "",
+    badgeText: "已配置（页面保存）",
+    badgeTone: "configured",
+  });
+  assert.deepEqual(
+    formatGitHubTokenStatus({
+      github_token_configured: true,
+      github_token_source: "env",
+      github_token_saved: false,
+    }),
+    {
+      configured: true,
+      saved: false,
+      source: "env",
+      badgeText: "已配置（环境变量）",
+      badgeTone: "configured",
+    },
+  );
+  assert.deepEqual(
+    formatGitHubTokenStatus({
+      github_token_configured: true,
+      github_token_source: "",
+      github_token_saved: false,
+    }),
+    {
+      configured: true,
+      saved: false,
+      source: "",
+      badgeText: "已配置",
+      badgeTone: "configured",
+    },
+  );
+  assert.deepEqual(
+    formatGitHubTokenStatus({
+      github_token_configured: false,
+      github_token_source: "env",
+      github_token_saved: false,
+    }),
+    {
+      configured: false,
+      saved: false,
+      source: "env",
+      badgeText: "未配置（匿名 60 次/小时）",
+      badgeTone: "default",
+    },
+  );
+});
+
+test("saveSystemUpdateSettings sends PUT /api/system/update/settings and parses response", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({
+        url,
+        method: init.method || "GET",
+        headers: init.headers,
+        body: init.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if (url === "/api/system/update/settings" && init.method === "PUT") {
+        const parsed = JSON.parse(String(init.body));
+        if (parsed.clear_github_token) {
+          return new Response(
+            JSON.stringify({
+              github_token_configured: false,
+              github_token_source: "",
+              github_token_saved: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            github_token_configured: true,
+            github_token_source: "settings",
+            github_token_saved: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const saved = await saveSystemUpdateSettings({
+      github_token: "ghp_test_token",
+    });
+    assert.deepEqual(saved, {
+      github_token_configured: true,
+      github_token_source: "settings",
+      github_token_saved: true,
+    });
+
+    const cleared = await saveSystemUpdateSettings({
+      clear_github_token: true,
+    });
+    assert.deepEqual(cleared, {
+      github_token_configured: false,
+      github_token_source: "",
+      github_token_saved: false,
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, "/api/system/update/settings");
+    assert.equal(calls[0].method, "PUT");
+    assert.equal(calls[0].headers["Content-Type"], "application/json");
+    assert.equal(calls[0].headers["X-MeloKeep-Request"], "1");
+    assert.deepEqual(calls[0].body, { github_token: "ghp_test_token" });
+    assert.equal(calls[1].url, "/api/system/update/settings");
+    assert.equal(calls[1].method, "PUT");
+    assert.deepEqual(calls[1].body, { clear_github_token: true });
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "仅管理员可修改" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    await assert.rejects(
+      () => saveSystemUpdateSettings({ github_token: "bad" }),
+      /仅管理员可修改/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

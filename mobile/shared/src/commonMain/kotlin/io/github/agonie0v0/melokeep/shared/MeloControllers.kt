@@ -2373,6 +2373,20 @@ class MeloSettingsController(
 		}
 	}
 
+	suspend fun resolveIosAppUpdate(force: Boolean = false): MeloResolvedAppUpdate =
+		apiClient.resolveLatestAppRelease(platform = "ios", force = force)
+
+	suspend fun fetchSystemUpdateSettings(): MeloSystemUpdateSettings =
+		apiClient.fetchSystemUpdateSettings()
+
+	suspend fun saveSystemUpdateSettings(
+		githubToken: String? = null,
+		clearGitHubToken: Boolean = false,
+	): MeloSystemUpdateSettings = apiClient.saveSystemUpdateSettings(
+		githubToken = githubToken,
+		clearGitHubToken = clearGitHubToken,
+	)
+
 	fun clearError() {
 		_state.update { it.copy(errorMessage = null) }
 	}
