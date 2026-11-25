@@ -38,13 +38,17 @@ export const tagLabels: Record<string, string> = {
 };
 export const processingLabels: Record<string, string> = {
   queued: "等待处理",
+  scanning: "正在扫描",
   identifying: "识别与匹配",
   tagging: "写入与整理",
   organizing: "整理目录",
   indexing: "更新曲库",
   complete: "已完成",
   ready: "等待应用",
+  preview_ready: "预览就绪",
+  applying: "正在写入",
   needs_review: "待确认",
+  needs_attention: "需人工处理",
   failed: "处理失败",
   partial: "部分完成",
   paused: "已暂停",

@@ -945,7 +945,13 @@
 .processing-inline.is-complete {
   color: var(--emerald);
 }
-.processing-inline.is-needs_review {
+.processing-inline.is-ready,
+.processing-inline.is-preview_ready {
+  color: var(--accent);
+}
+.processing-inline.is-needs_review,
+.processing-inline.is-needs_attention,
+.processing-inline.is-partial {
   color: var(--amber);
 }
 .processing-inline.is-failed {

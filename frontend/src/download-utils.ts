@@ -1,5 +1,31 @@
 import type { DeleteDownloadResult, DownloadJob } from "./types";
 
+export interface DownloadProcessingAction {
+  jobId: string;
+  label: string;
+  emphasis: "review" | "apply" | "inspect";
+}
+
+export function getDownloadProcessingAction(
+  processing?: DownloadJob["processing"] | null,
+): DownloadProcessingAction | null {
+  const jobId = processing?.id?.trim();
+  if (!jobId) return null;
+  switch (processing?.status?.trim()) {
+    case "needs_review":
+      return { jobId, label: "前往确认", emphasis: "review" };
+    case "ready":
+    case "preview_ready":
+      return { jobId, label: "前往应用", emphasis: "apply" };
+    case "needs_attention":
+    case "failed":
+    case "partial":
+      return { jobId, label: "查看处理", emphasis: "inspect" };
+    default:
+      return null;
+  }
+}
+
 export function hasDeletableDownloadFile(
   job: Pick<DownloadJob, "file">,
 ): boolean {

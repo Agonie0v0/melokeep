@@ -80,10 +80,14 @@ type Version = {
 
 export function LibraryJobs({
   focus,
+  focusKey,
+  onClearFocus,
   changed,
   onStartDirectory,
 }: {
   focus: string;
+  focusKey?: number;
+  onClearFocus?: () => void;
   changed: () => void;
   onStartDirectory?: () => void;
 }) {
@@ -131,8 +135,11 @@ export function LibraryJobs({
     };
   }, []);
   useEffect(() => {
-    if (focus) setSelected(focus);
-  }, [focus]);
+    if (focus) {
+      setDetail(null);
+      setSelected(focus);
+    }
+  }, [focus, focusKey]);
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
@@ -368,6 +375,7 @@ export function LibraryJobs({
             onClick={() => {
               setSelected("");
               setDetail(null);
+              onClearFocus?.();
             }}
           >
             <ArrowLeft />

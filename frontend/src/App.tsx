@@ -48,6 +48,7 @@ import {
   countDeletableDownloadFiles,
   formatDownloadRemovalError,
   formatDownloadRemovalNotice,
+  getDownloadProcessingAction,
   hasDeletableDownloadFile,
   removeDownloadJobsBatch,
 } from "./download-utils";
@@ -65,6 +66,11 @@ import {
 } from "./audiobook-utils";
 import { formatLibraryRefreshNotice, inferToastTone } from "./library-utils";
 import { playbackErrorMessage } from "./playback-errors";
+import {
+  buildShuffledTracks,
+  playbackSignature,
+  resolvePlaybackStep,
+} from "./playback-queue";
 import {
   formatFileSizeBytes,
   formatFriendlyQuality,
@@ -170,34 +176,6 @@ function loadInitialLyricsOffsetMs(): number {
   } catch {
     return 0;
   }
-}
-const playbackSignature = (list: Track[], fromQueue: boolean) =>
-  `${fromQueue ? "q" : "l"}:${list.map((t) => t.id).join("\0")}`;
-function buildShuffledTracks(
-  list: Track[],
-  anchorId?: string,
-  avoidFirstId?: string,
-): Track[] {
-  const pool = [...list];
-  let anchor: Track | undefined;
-  if (anchorId) {
-    const idx = pool.findIndex((t) => t.id === anchorId);
-    if (idx >= 0) {
-      [anchor] = pool.splice(idx, 1);
-    }
-  }
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  if (anchor) {
-    return [anchor, ...pool];
-  }
-  if (avoidFirstId && pool.length > 1 && pool[0].id === avoidFirstId) {
-    const swapIdx = 1 + Math.floor(Math.random() * (pool.length - 1));
-    [pool[0], pool[swapIdx]] = [pool[swapIdx], pool[0]];
-  }
-  return pool;
 }
 export function App() {
   const appearanceCtrl = useAppearance();
@@ -455,6 +433,19 @@ export function App() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [assistantTracks, setAssistantTracks] = useState<Track[]>([]);
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("local");
+  const [libraryJobFocus, setLibraryJobFocus] = useState<{
+    id: string;
+    key: number;
+  } | null>(null);
+  const libraryJobFocusSeqRef = useRef(0);
+  function openLibraryJob(jobId: string) {
+    const cleanId = jobId.trim();
+    if (!cleanId) return;
+    libraryJobFocusSeqRef.current += 1;
+    setLibraryJobFocus({ id: cleanId, key: libraryJobFocusSeqRef.current });
+    setLibraryTab("jobs");
+    setView("files");
+  }
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("engine");
   const [updateInfo, setUpdateInfo] = useState<SystemUpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -1468,46 +1459,31 @@ export function App() {
       });
     } else audio.current?.pause();
   }
-  function step(direction: number) {
-    const fromQueue = playingFromQueue.current;
-    const list = fromQueue ? playlist : playbackQueue.current;
-    if (!list.length) return;
-    if (shuffle) {
-      const sig = playbackSignature(list, fromQueue);
-      let state = shuffleOrderRef.current;
-      if (state.signature !== sig || state.tracks.length !== list.length) {
-        const tracks = buildShuffledTracks(list, current?.id);
-        state = { signature: sig, tracks, cursor: 0 };
-        shuffleOrderRef.current = state;
-      }
-      let next = state.cursor + direction;
-      if (next >= state.tracks.length) {
-        if (!repeat) return;
-        const lastId = current?.id || state.tracks[state.tracks.length - 1]?.id;
-        state = {
-          signature: sig,
-          tracks: buildShuffledTracks(list, undefined, lastId),
-          cursor: 0,
-        };
-        shuffleOrderRef.current = state;
-        next = 0;
-      } else if (next < 0) {
-        if (!repeat) return;
-        next = state.tracks.length - 1;
-      }
-      void playSequence(next, state.tracks, fromQueue, direction, list);
-      return;
+  function step(direction: number, options?: { auto?: boolean }) {
+    const resolution = resolvePlaybackStep({
+      direction,
+      autoAdvance: options?.auto,
+      current,
+      fromQueue: playingFromQueue.current,
+      contextTracks: playbackQueue.current,
+      playlistTracks: playlist,
+      repeat,
+      shuffle,
+      shuffleState: shuffleOrderRef.current,
+    });
+    if (!resolution) return;
+    if (resolution.nextShuffleState) {
+      shuffleOrderRef.current = resolution.nextShuffleState;
     }
-    const index = list.findIndex((t) => t.id === current?.id);
-    let next = index + direction;
-    if (next >= list.length) {
-      if (!repeat) return;
-      next = 0;
-    }
-    if (next < 0) next = list.length - 1;
-    void playSequence(next, list, fromQueue, direction);
+    void playSequence(
+      resolution.index,
+      resolution.list,
+      resolution.fromQueue,
+      direction >= 0 ? 1 : -1,
+      resolution.canonicalList,
+    );
   }
-  nextRef.current = () => step(1);
+  nextRef.current = () => step(1, { auto: true });
   async function favorite(track: Track) {
     try {
       const exists = favIds.has(track.id);
@@ -3668,6 +3644,7 @@ export function App() {
               active={collectionView ? "playlists" : view}
               change={(name) => {
                 setView(name);
+                setLibraryJobFocus(null);
                 if (name === "playlists")
                   setPlaylistRefresh((value) => value + 1);
                 setSearchCategoryFilter(SOURCE_FILTER_ALL);
@@ -4331,158 +4308,180 @@ export function App() {
               {managementError && <p role="alert">{managementError}</p>}
               {visibleJobs.length > 0 && (
                 <div className="download-list">
-                  {visibleJobs.map((job) => (
-                    <div className="download-row" key={job.id}>
-                      <div className="job-selection">
-                        <input
-                          type="checkbox"
-                          aria-label={`选择下载任务 ${job.track.title}`}
-                          checked={selectedJobs.includes(job.id)}
-                          disabled={managing}
-                          onChange={(e) =>
-                            setSelectedJobs(
-                              e.target.checked
-                                ? [...selectedJobs, job.id]
-                                : selectedJobs.filter((id) => id !== job.id),
-                            )
-                          }
-                        />
-                        <Cover
-                          track={job.track}
-                          onPlay={() => void play(job.track)}
-                        />
-                      </div>
-                      <div className="download-row-main">
-                        <strong>
-                          <SongTitle
+                  {visibleJobs.map((job) => {
+                    const processingAction = getDownloadProcessingAction(
+                      job.processing,
+                    );
+                    return (
+                      <div className="download-row" key={job.id}>
+                        <div className="job-selection">
+                          <input
+                            type="checkbox"
+                            aria-label={`选择下载任务 ${job.track.title}`}
+                            checked={selectedJobs.includes(job.id)}
+                            disabled={managing}
+                            onChange={(e) =>
+                              setSelectedJobs(
+                                e.target.checked
+                                  ? [...selectedJobs, job.id]
+                                  : selectedJobs.filter((id) => id !== job.id),
+                              )
+                            }
+                          />
+                          <Cover
                             track={job.track}
                             onPlay={() => void play(job.track)}
                           />
-                        </strong>
-                        <small>
-                          {job.track.artist} · {job.quality_label}
-                          {job.download_source &&
-                            ` · ${sources.find((source) => source.id === job.download_source)?.label || job.download_source}`}
-                          {job.total_bytes || job.bytes
-                            ? ` · ${formatFileSizeBytes(job.bytes)}${job.total_bytes ? ` / ${formatFileSizeBytes(job.total_bytes)}` : ""}`
-                            : ""}
-                          {job.detail && ` · ${job.detail}`}
-                        </small>
-                        {job.status !== "complete" && (
-                          <div className="progress">
-                            <span
-                              style={{
-                                width: job.total_bytes
-                                  ? `${Math.min(100, (job.bytes / job.total_bytes) * 100)}%`
-                                  : "0%",
-                              }}
+                        </div>
+                        <div className="download-row-main">
+                          <strong>
+                            <SongTitle
+                              track={job.track}
+                              onPlay={() => void play(job.track)}
                             />
-                          </div>
-                        )}
-                        {job.processing && (
-                          <small
-                            className={`processing-inline is-${job.processing.status}`}
-                            role="status"
-                          >
-                            {processingLabels[job.processing.status] ||
-                              job.processing.status}{" "}
-                            · {job.processing.detail}
+                          </strong>
+                          <small>
+                            {job.track.artist} · {job.quality_label}
+                            {job.download_source &&
+                              ` · ${sources.find((source) => source.id === job.download_source)?.label || job.download_source}`}
+                            {job.total_bytes || job.bytes
+                              ? ` · ${formatFileSizeBytes(job.bytes)}${job.total_bytes ? ` / ${formatFileSizeBytes(job.total_bytes)}` : ""}`
+                              : ""}
+                            {job.detail && ` · ${job.detail}`}
                           </small>
-                        )}
-                        {job.file && (
-                          <a
-                            href={`/api/files/content?path=${encodeURIComponent(job.file)}`}
-                            download
-                          >
-                            下载到本机
-                          </a>
-                        )}
-                      </div>
-                      <span
-                        className={`state status-dot-label is-${job.status} ${job.status === "complete" ? "done" : ""}`}
-                      >
-                        <i className="status-dot" aria-hidden="true" />
-                        {statusLabels[job.status]}
-                      </span>
-                      <div className="job-actions">
-                        {["failed", "paused", "cancelled"].includes(
-                          job.status,
-                        ) ? (
-                          <button
-                            className="secondary"
-                            disabled={managing}
-                            onClick={() =>
-                              void api<DownloadJob>(
-                                `/downloads/${job.id}/${job.status === "cancelled" ? "retry" : "resume"}`,
-                                "POST",
-                              )
-                                .then((updated) =>
-                                  setJobs((old) =>
-                                    old.map((j) =>
-                                      j.id === updated.id ? updated : j,
-                                    ),
-                                  ),
+                          {job.status !== "complete" && (
+                            <div className="progress">
+                              <span
+                                style={{
+                                  width: job.total_bytes
+                                    ? `${Math.min(100, (job.bytes / job.total_bytes) * 100)}%`
+                                    : "0%",
+                                }}
+                              />
+                            </div>
+                          )}
+                          {job.processing && (
+                            <small
+                              className={`processing-inline is-${job.processing.status}`}
+                              role="status"
+                            >
+                              {processingLabels[job.processing.status] ||
+                                job.processing.status}{" "}
+                              · {job.processing.detail}
+                            </small>
+                          )}
+                          {job.file && (
+                            <a
+                              href={`/api/files/content?path=${encodeURIComponent(job.file)}`}
+                              download
+                            >
+                              下载到本机
+                            </a>
+                          )}
+                        </div>
+                        <span
+                          className={`state status-dot-label is-${job.status} ${job.status === "complete" ? "done" : ""}`}
+                        >
+                          <i className="status-dot" aria-hidden="true" />
+                          {statusLabels[job.status]}
+                        </span>
+                        <div className="job-actions">
+                          {["failed", "paused", "cancelled"].includes(
+                            job.status,
+                          ) ? (
+                            <button
+                              className="secondary"
+                              disabled={managing}
+                              onClick={() =>
+                                void api<DownloadJob>(
+                                  `/downloads/${job.id}/${job.status === "cancelled" ? "retry" : "resume"}`,
+                                  "POST",
                                 )
-                                .catch(fail)
-                            }
-                          >
-                            {job.status === "cancelled"
-                              ? "重新下载"
-                              : "继续下载"}
-                          </button>
-                        ) : (
-                          job.status !== "complete" && (
-                            <>
-                              <Button
-                                label="暂停下载"
-                                disabled={managing}
-                                onClick={() =>
-                                  void api(`/downloads/${job.id}/pause`, "POST")
-                                    .then(() =>
-                                      api<DownloadJob[]>(
-                                        "/downloads?limit=500",
+                                  .then((updated) =>
+                                    setJobs((old) =>
+                                      old.map((j) =>
+                                        j.id === updated.id ? updated : j,
                                       ),
-                                    )
-                                    .then(setJobs)
-                                    .catch(fail)
-                                }
-                              >
-                                <Pause />
-                              </Button>
-                              <Button
-                                label="取消下载"
-                                disabled={managing}
-                                onClick={() =>
-                                  void api(
-                                    `/downloads/${job.id}/cancel`,
-                                    "POST",
+                                    ),
                                   )
-                                    .then(() =>
-                                      api<DownloadJob[]>(
-                                        "/downloads?limit=500",
-                                      ),
+                                  .catch(fail)
+                              }
+                            >
+                              {job.status === "cancelled"
+                                ? "重新下载"
+                                : "继续下载"}
+                            </button>
+                          ) : (
+                            job.status !== "complete" && (
+                              <>
+                                <Button
+                                  label="暂停下载"
+                                  disabled={managing}
+                                  onClick={() =>
+                                    void api(
+                                      `/downloads/${job.id}/pause`,
+                                      "POST",
                                     )
-                                    .then(setJobs)
-                                    .catch(fail)
-                                }
-                              >
-                                <X />
-                              </Button>
-                            </>
-                          )
-                        )}
-                        {stopped(job) && (
-                          <Button
-                            label={`移除下载记录 ${job.track.title}`}
-                            disabled={managing}
-                            onClick={() => confirmRemoval([job])}
-                          >
-                            <Trash2 />
-                          </Button>
-                        )}
+                                      .then(() =>
+                                        api<DownloadJob[]>(
+                                          "/downloads?limit=500",
+                                        ),
+                                      )
+                                      .then(setJobs)
+                                      .catch(fail)
+                                  }
+                                >
+                                  <Pause />
+                                </Button>
+                                <Button
+                                  label="取消下载"
+                                  disabled={managing}
+                                  onClick={() =>
+                                    void api(
+                                      `/downloads/${job.id}/cancel`,
+                                      "POST",
+                                    )
+                                      .then(() =>
+                                        api<DownloadJob[]>(
+                                          "/downloads?limit=500",
+                                        ),
+                                      )
+                                      .then(setJobs)
+                                      .catch(fail)
+                                  }
+                                >
+                                  <X />
+                                </Button>
+                              </>
+                            )
+                          )}
+                          {processingAction && (
+                            <button
+                              type="button"
+                              className={`secondary processing-jump-btn is-${processingAction.emphasis}`}
+                              aria-label={`${processingAction.label} ${job.track.title}`}
+                              title={`${processingAction.label}（前往音乐库 → 整理与审核）`}
+                              onClick={() =>
+                                openLibraryJob(processingAction.jobId)
+                              }
+                            >
+                              {processingAction.label}
+                              <ArrowRight aria-hidden="true" />
+                            </button>
+                          )}
+                          {stopped(job) && (
+                            <Button
+                              label={`移除下载记录 ${job.track.title}`}
+                              disabled={managing}
+                              onClick={() => confirmRemoval([job])}
+                            >
+                              <Trash2 />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               {!jobs.length && (
@@ -4623,6 +4622,8 @@ export function App() {
             <LibraryWorkspace
               tab={libraryTab}
               setTab={setLibraryTab}
+              initialJobFocus={libraryJobFocus}
+              onClearJobFocus={() => setLibraryJobFocus(null)}
               openSettings={openSettings}
               files={files}
               selected={selectedFiles}

@@ -5,6 +5,7 @@ import {
   countDeletableDownloadFiles,
   formatDownloadRemovalError,
   formatDownloadRemovalNotice,
+  getDownloadProcessingAction,
   hasDeletableDownloadFile,
   removeDownloadJobsBatch,
 } from "../src/download-utils.ts";
@@ -196,4 +197,82 @@ test("removeDownloadJobsBatch aggregates deleted files, deduplicates track_ids, 
     formatDownloadRemovalError(["错误一", "错误二"]),
     "错误一（共 2 项失败）",
   );
+});
+
+test("getDownloadProcessingAction maps actionable statuses and ignores blank or non-actionable states", () => {
+  assert.equal(getDownloadProcessingAction(), null);
+  assert.equal(getDownloadProcessingAction(null), null);
+  assert.equal(
+    getDownloadProcessingAction({
+      id: "",
+      status: "needs_review",
+      detail: "待确认",
+    }),
+    null,
+  );
+  assert.equal(
+    getDownloadProcessingAction({
+      id: "   ",
+      status: "needs_review",
+      detail: "待确认",
+    }),
+    null,
+  );
+
+  assert.deepEqual(
+    getDownloadProcessingAction({
+      id: "job-review",
+      status: "needs_review",
+      detail: "存在待确认曲目",
+    }),
+    { jobId: "job-review", label: "前往确认", emphasis: "review" },
+  );
+
+  for (const status of ["ready", "preview_ready"]) {
+    assert.deepEqual(
+      getDownloadProcessingAction({
+        id: `job-${status}`,
+        status,
+        detail: "可应用",
+      }),
+      { jobId: `job-${status}`, label: "前往应用", emphasis: "apply" },
+    );
+  }
+
+  for (const status of ["needs_attention", "failed", "partial"]) {
+    assert.deepEqual(
+      getDownloadProcessingAction({
+        id: `job-${status}`,
+        status,
+        detail: "需查看",
+      }),
+      { jobId: `job-${status}`, label: "查看处理", emphasis: "inspect" },
+    );
+  }
+
+  for (const status of [
+    "queued",
+    "scanning",
+    "identifying",
+    "tagging",
+    "organizing",
+    "indexing",
+    "applying",
+    "complete",
+    "paused",
+    "cancelled",
+    "restoring",
+    "restored",
+    "",
+    "unknown",
+  ]) {
+    assert.equal(
+      getDownloadProcessingAction({
+        id: "job-other",
+        status,
+        detail: "",
+      }),
+      null,
+    );
+  }
 });

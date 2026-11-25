@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { Folder, History, Library, WandSparkles } from "lucide-react";
 import {
   getOrderedTagEntries,
@@ -46,6 +46,8 @@ export function LibraryWorkspace({
   setTab,
   remoteDeleted,
   serverNavidromeView,
+  initialJobFocus,
+  onClearJobFocus,
   ...props
 }: LibraryProps & {
   openSettings: (tab: "library" | "navidrome") => void;
@@ -53,8 +55,19 @@ export function LibraryWorkspace({
   setTab: (tab: LibraryTab) => void;
   remoteDeleted?: (ids: string[]) => void;
   serverNavidromeView?: NavidromeViewPreferences | null;
+  initialJobFocus?: { id: string; key: number } | null;
+  onClearJobFocus?: () => void;
 }) {
-  const [focus, setFocus] = useState("");
+  const [focus, setFocus] = useState(initialJobFocus?.id ?? "");
+  const [focusKey, setFocusKey] = useState(initialJobFocus?.key ?? 0);
+  useEffect(() => {
+    if (initialJobFocus?.id) {
+      setFocus(initialJobFocus.id);
+      setFocusKey(initialJobFocus.key);
+    } else {
+      setFocus("");
+    }
+  }, [initialJobFocus?.id, initialJobFocus?.key]);
   const [workbenchModal, setWorkbenchModal] = useState<{
     directoryMode: boolean;
     directory: string;
@@ -130,6 +143,7 @@ export function LibraryWorkspace({
       setOperation(null);
       setWorkbenchModal(null);
       setFocus(job.id);
+      setFocusKey((k) => k + 1);
       setTab("jobs");
     } catch (e) {
       setError((e as Error).message);
@@ -186,7 +200,14 @@ export function LibraryWorkspace({
         label="音乐库"
         tabs={tabs}
         active={tab}
-        change={(next) => setTab(next as LibraryTab)}
+        change={(next) => {
+          const nextTab = next as LibraryTab;
+          if (nextTab !== "jobs") {
+            setFocus("");
+            onClearJobFocus?.();
+          }
+          setTab(nextTab);
+        }}
       />
       {error && !operation && !workbenchModal && (
         <p role="alert" className="library-error">
@@ -211,6 +232,11 @@ export function LibraryWorkspace({
         {tab === "jobs" && (
           <LibraryJobs
             focus={focus}
+            focusKey={focusKey}
+            onClearFocus={() => {
+              setFocus("");
+              onClearJobFocus?.();
+            }}
             changed={props.refresh}
             onStartDirectory={() => openWorkbenchForDir("")}
           />
