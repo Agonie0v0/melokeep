@@ -141,7 +141,7 @@ func (b *LogBuffer) Push(level, message, category, taskID string) {
 	b.nextID++
 	entry := LogEntry{
 		ID:       b.nextID,
-		Time:     time.Now().Format("2006-01-02 15:04:05"),
+		Time:     time.Now().Format(time.RFC3339),
 		Level:    level,
 		Category: category,
 		TaskID:   taskID,

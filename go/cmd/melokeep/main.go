@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/agonie0v0/melokeep/internal/app"
 	"github.com/agonie0v0/melokeep/internal/dockerupdate"

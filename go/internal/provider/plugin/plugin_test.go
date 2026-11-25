@@ -905,6 +905,9 @@ func TestManagerLifecycleConflictSecretsAndLoadAllIsolation(t *testing.T) {
 	if strings.Contains(testRes.Logs[0].Message, "super-secret-xyz") || !strings.Contains(testRes.Logs[0].Message, "***") {
 		t.Fatalf("expected secret redacted from ctx.log, got %q", testRes.Logs[0].Message)
 	}
+	if _, err := time.Parse(time.RFC3339, testRes.Logs[0].Time); err != nil {
+		t.Fatalf("expected RFC3339 timestamp in ctx.log, got %q: %v", testRes.Logs[0].Time, err)
+	}
 
 	// 4. Update with HiddenPlaceholder preserves secret while updating text field; toggling Enabled updates Registry.
 	updatedDTO, err := mgr.Update(ctx, "alpha-open-source", plugin.UpdateRequest{

@@ -999,6 +999,9 @@ func TestLogBufferCapacityIDsAndRedaction(t *testing.T) {
 	if strings.Contains(entries[0].Message, "secret123") {
 		t.Fatalf("expected URL token redacted from log message, got %q", entries[0].Message)
 	}
+	if _, err := time.Parse(time.RFC3339, entries[0].Time); err != nil {
+		t.Fatalf("expected RFC3339 timestamp, got %q: %v", entries[0].Time, err)
+	}
 }
 
 type episodeStubProvider struct {

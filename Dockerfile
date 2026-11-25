@@ -33,7 +33,7 @@ RUN git init . && git remote add origin https://github.com/tdlib/telegram-bot-ap
 FROM python:3.14-slim-bookworm
 LABEL org.opencontainers.image.title="MeloKeep" \
       org.opencontainers.image.source="https://github.com/Agonie0v0/melokeep"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg libchromaprint-tools curl libssl3 zlib1g libstdc++6 \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg libchromaprint-tools curl libssl3 zlib1g libstdc++6 tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 melokeep && useradd --uid 10001 --gid melokeep --create-home melokeep \
     && mkdir -p /music /data /app/frontend /app/helpers /licenses && chown -R melokeep:melokeep /music /data /app
@@ -48,7 +48,7 @@ COPY LICENSE NOTICE.md /licenses/
 COPY --from=telegram-api /opt/telegram/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
 COPY --from=telegram-api /src/LICENSE_1_0.txt /licenses/LICENSE-telegram-bot-api
 RUN telegram-bot-api --version
-ENV HOME=/data/home MELOKEEP_CONTAINER=1 MELOKEEP_STATIC_DIR=/app/frontend/dist MELOKEEP_PYTHON=/usr/local/bin/python3 MELOKEEP_PYTHON_BIN=/usr/local/bin/python3
+ENV HOME=/data/home TZ=Asia/Shanghai MELOKEEP_CONTAINER=1 MELOKEEP_STATIC_DIR=/app/frontend/dist MELOKEEP_PYTHON=/usr/local/bin/python3 MELOKEEP_PYTHON_BIN=/usr/local/bin/python3
 EXPOSE 8765
 VOLUME ["/music", "/data"]
 ENTRYPOINT ["python", "/app/docker-entrypoint.py"]

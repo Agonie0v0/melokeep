@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 import { Modal } from "./components";
+import { logTime } from "./log-time";
 import {
   ARCHIVE_FILTER_ALL,
   ARCHIVE_FILTER_INVALID,
@@ -2052,7 +2053,9 @@ export function PluginSettings({
                         <span className={`plugin-log-level is-${entry.level}`}>
                           {entry.level.toUpperCase()}
                         </span>
-                        <span className="plugin-log-time">{entry.time}</span>
+                        <span className="plugin-log-time">
+                          {logTime(entry.time)}
+                        </span>
                         <span className="plugin-log-msg">{entry.message}</span>
                       </li>
                     ))}

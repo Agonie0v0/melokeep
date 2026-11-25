@@ -109,7 +109,7 @@ func (c *logCollector) push(level, msg string) {
 		c.entries = append(c.entries, model.PluginLogEntryDTO{
 			Level:   normLevel,
 			Message: cleanMsg,
-			Time:    time.Now().UTC().Format("2006-01-02 15:04:05"),
+			Time:    time.Now().Format(time.RFC3339),
 		})
 	}
 	fn := c.logFn
