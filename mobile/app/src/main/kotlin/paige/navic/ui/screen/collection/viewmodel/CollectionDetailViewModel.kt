@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import paige.navic.R
 import paige.navic.database.mapper.toDomainModel
 import paige.navic.domain.manager.session.connectivity.ReachabilityFlow
@@ -126,6 +128,79 @@ class CollectionDetailViewModel(
 			refreshCollection(true)
 		}
 		clearSelection()
+	}
+
+	fun removeSongAtIndex(index: Int) {
+		if (index < 0) return
+		viewModelScope.launch {
+			try {
+				repository.removeSongsFromPlaylist(collectionId, listOf(index))
+				snackBarManager.notify(R.string.notice_removed_from_playlist)
+				refreshCollection(true)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				notifyOperationFailure(e, "从歌单移除歌曲失败")
+			}
+		}
+	}
+
+	fun removeSongsAtIndices(indices: List<Int>) {
+		val cleanIndices = indices.filter { it >= 0 }.distinct()
+		if (cleanIndices.isEmpty()) return
+		viewModelScope.launch {
+			try {
+				repository.removeSongsFromPlaylist(collectionId, cleanIndices)
+				if (cleanIndices.size == 1) {
+					snackBarManager.notify(R.string.notice_removed_from_playlist)
+				} else {
+					snackBarManager.notify(R.string.notice_removed_songs_from_playlist, cleanIndices.size)
+				}
+				refreshCollection(true)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				notifyOperationFailure(e, "批量移出歌单失败")
+			}
+		}
+	}
+
+	fun renamePlaylist(name: String) {
+		val cleanName = name.trim()
+		if (cleanName.isEmpty()) {
+			snackBarManager.notify(R.string.notice_error_message, "歌单名称不能为空")
+			return
+		}
+		viewModelScope.launch {
+			try {
+				repository.renamePlaylist(collectionId, cleanName)
+				snackBarManager.notify(R.string.notice_renamed_playlist, cleanName)
+				refreshCollection(true)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				notifyOperationFailure(e, "重命名歌单失败")
+			}
+		}
+	}
+
+	fun deletePlaylist(onDeleted: () -> Unit) {
+		viewModelScope.launch {
+			try {
+				repository.deletePlaylist(collectionId)
+				snackBarManager.notify(R.string.notice_deleted_playlist)
+				onDeleted()
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				notifyOperationFailure(e, "删除歌单失败")
+			}
+		}
+	}
+
+	private fun notifyOperationFailure(error: Throwable, fallback: String) {
+		val detail = error.message?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+		snackBarManager.notify(R.string.notice_error_message, detail)
 	}
 
 	fun starSelectedSong() = launch {

@@ -1106,11 +1106,29 @@ class IosSubsonicManager(
 	}
 
 	suspend fun removeSongFromPlaylist(playlistId: String, index: Int): Result<Unit> {
+		if (index < 0) return Result.success(Unit)
 		val activeClient = client ?: return Result.failure(IllegalStateException("未连接 Navidrome"))
 		return try {
 			activeClient.updatePlaylist(id = playlistId, songIndicesToRemove = listOf(index))
 			refreshPlaylistsOnly()
 			_state.update { it.copy(noticeMessage = "已从歌单移除歌曲") }
+			Result.success(Unit)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (e: Throwable) {
+			_state.update { it.copy(errorMessage = e.message ?: "移除歌曲失败") }
+			Result.failure(e)
+		}
+	}
+
+	suspend fun removeSongsFromPlaylist(playlistId: String, indices: List<Int>): Result<Unit> {
+		val cleanIndices = indices.filter { it >= 0 }.distinct().sortedDescending()
+		if (cleanIndices.isEmpty()) return Result.success(Unit)
+		val activeClient = client ?: return Result.failure(IllegalStateException("未连接 Navidrome"))
+		return try {
+			activeClient.updatePlaylist(id = playlistId, songIndicesToRemove = cleanIndices)
+			refreshPlaylistsOnly()
+			_state.update { it.copy(noticeMessage = "已从歌单移除 ${cleanIndices.size} 首歌曲") }
 			Result.success(Unit)
 		} catch (e: CancellationException) {
 			throw e

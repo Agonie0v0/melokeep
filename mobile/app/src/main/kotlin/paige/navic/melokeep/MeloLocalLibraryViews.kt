@@ -107,6 +107,7 @@ import paige.navic.ui.icons.outlined.Edit
 import paige.navic.ui.icons.outlined.LibraryMusic
 import paige.navic.ui.icons.outlined.MoreVert
 import paige.navic.ui.icons.outlined.Note
+import paige.navic.ui.icons.outlined.PlaylistRemove
 import paige.navic.ui.icons.outlined.Refresh
 import paige.navic.ui.icons.outlined.Shuffle
 import paige.navic.ui.icons.outlined.Star
@@ -610,6 +611,10 @@ internal fun LibraryLocalDetailView(
 						onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist,
 						onRemoveFromPlaylist = { track ->
 							localController.removeTrackFromPlaylist(route.id, track.id)
+						},
+						removePlaylistTitle = playlistName,
+						onRemoveTracksFromPlaylist = { tracks ->
+							localController.removeTracksFromPlaylist(route.id, tracks.map { it.id })
 						}
 					)
 				}
@@ -1579,7 +1584,9 @@ private fun LocalTrackListView(
 	showOfflineAll: Boolean = true,
 	hasMore: Boolean = false,
 	onLoadMore: (() -> Unit)? = null,
-	onRemoveFromPlaylist: ((MeloTrack) -> Unit)? = null
+	onRemoveFromPlaylist: ((MeloTrack) -> Unit)? = null,
+	removePlaylistTitle: String? = null,
+	onRemoveTracksFromPlaylist: ((List<MeloTrack>) -> Unit)? = null
 ) {
 	val player = koinInject<MediaPlayer>()
 	val downloadManager = koinInject<DownloadManager>()
@@ -1589,8 +1596,15 @@ private fun LocalTrackListView(
 	var multi by remember { mutableStateOf(false) }
 	val selected = remember { mutableStateMapOf<String, Boolean>() }
 	var sheetItem by remember { mutableStateOf<LibraryLocalTrackItem?>(null) }
+	var pendingBatchRemoveTracks by remember { mutableStateOf<List<MeloTrack>?>(null) }
 
 	val songs = remember(items) { items.map { it.song } }
+
+	LaunchedEffect(items) {
+		val validIds = items.mapTo(HashSet()) { it.song.id }
+		val staleIds = selected.keys.filter { it !in validIds }
+		staleIds.forEach { selected.remove(it) }
+	}
 
 	BackHandler(enabled = multi) {
 		multi = false
@@ -1798,9 +1812,56 @@ private fun LocalTrackListView(
 					removeSongsOffline(downloadManager, downloadsMap, selectedItems.map { it.song })
 					multi = false
 					selected.clear()
+				},
+				onRemoveFromPlaylistSelected = onRemoveTracksFromPlaylist?.let {
+					{
+						val picked = selectedItems.map { item -> item.track }
+						if (picked.isNotEmpty()) {
+							pendingBatchRemoveTracks = picked
+						}
+					}
 				}
 			)
 		}
+	}
+
+	pendingBatchRemoveTracks?.let { targets ->
+		val playlistLabel = removePlaylistTitle?.takeIf { it.isNotBlank() }?.let { "「$it」" } ?: "当前歌单"
+		AlertDialog(
+			onDismissRequest = { pendingBatchRemoveTracks = null },
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.PlaylistRemove,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error
+				)
+			},
+			title = { Text("移出歌单") },
+			text = {
+				Text("确认从$playlistLabel 移除选中的 ${targets.size} 首歌曲吗？仅从歌单移除，不会删除音乐文件。")
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						pendingBatchRemoveTracks = null
+						multi = false
+						selected.clear()
+						onRemoveTracksFromPlaylist?.invoke(targets)
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("确认移除")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingBatchRemoveTracks = null }) {
+					Text("取消")
+				}
+			}
+		)
 	}
 
 	sheetItem?.let { item ->

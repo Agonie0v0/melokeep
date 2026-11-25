@@ -339,9 +339,9 @@ internal fun IosStudioDownloadsContent(
 	onPauseAll: () -> Unit,
 	onResumeAll: () -> Unit,
 	onRetryFailed: () -> Unit,
-	onClearCompleted: () -> Unit,
+	onClearCompleted: (deleteFiles: Boolean) -> Unit,
 	onControl: (id: String, action: String) -> Unit,
-	onDelete: (id: String) -> Unit,
+	onDelete: (id: String, deleteFile: Boolean) -> Unit,
 	onPreviewPlay: (MeloDownloadJob) -> Unit,
 	onGoScrape: (filePath: String, downloadId: String) -> Unit,
 	onRescrape: (filePath: String, downloadId: String) -> Unit,
@@ -394,6 +394,15 @@ internal fun IosStudioDownloadsContent(
 	val pausedCount = statusCounts[1]
 	val failedCount = statusCounts[2]
 	val doneCount = statusCounts[3]
+
+	val clearableJobs = remember(downloads) {
+		downloads.filter { job ->
+			val statusLower = job.status.trim().lowercase()
+			statusLower in IosStudioDownloadDoneStates || statusLower == "cancelled"
+		}
+	}
+	var pendingDeleteJob by remember { mutableStateOf<MeloDownloadJob?>(null) }
+	var pendingClearCompletedConfirm by remember { mutableStateOf(false) }
 
 	val associatedJobsByDownloadId = remember(downloads, libraryJobs, ignoredLibraryJobIds) {
 		if (libraryJobs.isEmpty()) {
@@ -452,11 +461,12 @@ internal fun IosStudioDownloadsContent(
 				pausedCount = pausedCount,
 				failedCount = failedCount,
 				doneCount = doneCount,
+				clearableCount = clearableJobs.size,
 				onRefresh = onRefresh,
 				onPauseAll = onPauseAll,
 				onResumeAll = onResumeAll,
 				onRetryFailed = onRetryFailed,
-				onClearCompleted = onClearCompleted,
+				onClearCompleted = { pendingClearCompletedConfirm = true },
 				modifier = Modifier.padding(bottom = 14.dp),
 			)
 		}
@@ -498,7 +508,7 @@ internal fun IosStudioDownloadsContent(
 				onPause = { onControl(job.id, "pause") },
 				onResume = { onControl(job.id, "resume") },
 				onRetry = { onControl(job.id, "retry") },
-				onDelete = { onDelete(job.id) },
+				onDelete = { pendingDeleteJob = job },
 				onPreviewPlay = { onPreviewPlay(job) },
 				onGoScrape = {
 					job.file?.takeIf { it.isNotBlank() }?.let { filePath ->
@@ -513,6 +523,185 @@ internal fun IosStudioDownloadsContent(
 			)
 		}
 	}
+
+	pendingDeleteJob?.let { target ->
+		val currentJob = downloads.firstOrNull { it.id == target.id } ?: target
+		val hasLocalFile = !currentJob.file.isNullOrBlank()
+		var deleteFile by remember(target.id) { mutableStateOf(false) }
+		val titleText = currentJob.track.title.ifBlank { "未知曲目" }
+		val artistText = currentJob.track.artist.takeIf { it.isNotBlank() }
+
+		AlertDialog(
+			onDismissRequest = { pendingDeleteJob = null },
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error,
+				)
+			},
+			title = { Text("删除下载记录") },
+			text = {
+				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+					Text(
+						text = if (artistText != null) {
+							"确定删除「$titleText · $artistText」吗？"
+						} else {
+							"确定删除「$titleText」吗？"
+						},
+						style = MaterialTheme.typography.bodyMedium,
+					)
+					if (hasLocalFile) {
+						IosStudioDeleteLocalFileOptionRow(
+							label = "同时删除已下载的本地音频文件（不可恢复）",
+							checked = deleteFile,
+							onToggle = { deleteFile = !deleteFile },
+							onCheckedChange = { deleteFile = it },
+						)
+					} else {
+						Text(
+							text = "将从服务端下载队列移除该任务。",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					}
+				}
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						val shouldDeleteFile = hasLocalFile && deleteFile
+						pendingDeleteJob = null
+						onDelete(currentJob.id, shouldDeleteFile)
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError,
+					),
+				) {
+					Text("确认删除")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingDeleteJob = null }) {
+					Text("取消")
+				}
+			},
+		)
+	}
+
+	if (pendingClearCompletedConfirm) {
+		val clearCount = clearableJobs.size
+		val fileCount = remember(clearableJobs) {
+			clearableJobs.count { !it.file.isNullOrBlank() }
+		}
+		var deleteFiles by remember { mutableStateOf(false) }
+
+		AlertDialog(
+			onDismissRequest = { pendingClearCompletedConfirm = false },
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.DeleteSweep,
+					contentDescription = null,
+					tint = if (deleteFiles) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+				)
+			},
+			title = { Text("清理已完成下载") },
+			text = {
+				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+					Text(
+						text = if (fileCount > 0) {
+							"将清理 $clearCount 条已结束的下载记录；默认保留已下载的本地音频文件。"
+						} else {
+							"将清理 $clearCount 条已结束的下载记录，不会删除本地音频文件。"
+						},
+						style = MaterialTheme.typography.bodyMedium,
+					)
+					if (fileCount > 0) {
+						IosStudioDeleteLocalFileOptionRow(
+							label = "同时删除对应的 $fileCount 个本地音频文件（不可恢复）",
+							checked = deleteFiles,
+							onToggle = { deleteFiles = !deleteFiles },
+							onCheckedChange = { deleteFiles = it },
+						)
+					}
+				}
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						val shouldDeleteFiles = fileCount > 0 && deleteFiles
+						pendingClearCompletedConfirm = false
+						onClearCompleted(shouldDeleteFiles)
+					},
+					enabled = clearCount > 0,
+					colors = if (fileCount > 0 && deleteFiles) {
+						ButtonDefaults.buttonColors(
+							containerColor = MaterialTheme.colorScheme.error,
+							contentColor = MaterialTheme.colorScheme.onError,
+						)
+					} else {
+						ButtonDefaults.buttonColors()
+					},
+				) {
+					Text("确认清理 ($clearCount)")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingClearCompletedConfirm = false }) {
+					Text("取消")
+				}
+			},
+		)
+	}
+}
+
+@Composable
+private fun IosStudioDeleteLocalFileOptionRow(
+	label: String,
+	checked: Boolean,
+	onToggle: () -> Unit,
+	onCheckedChange: (Boolean) -> Unit,
+) {
+	Surface(
+		shape = RoundedCornerShape(12.dp),
+		color = if (checked) {
+			MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+		} else {
+			MaterialTheme.colorScheme.surfaceContainerHigh
+		},
+		border = BorderStroke(
+			width = IosHairlineWidth,
+			color = if (checked) {
+				MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+			} else {
+				MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
+			},
+		),
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(onClick = onToggle),
+	) {
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 8.dp, vertical = 6.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(4.dp),
+		) {
+			Checkbox(
+				checked = checked,
+				onCheckedChange = onCheckedChange,
+			)
+			Text(
+				text = label,
+				style = MaterialTheme.typography.bodySmall,
+				color = if (checked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+				modifier = Modifier.weight(1f),
+			)
+		}
+	}
 }
 
 @Composable
@@ -522,6 +711,7 @@ private fun IosStudioDownloadsCommandCard(
 	pausedCount: Int,
 	failedCount: Int,
 	doneCount: Int,
+	clearableCount: Int,
 	onRefresh: () -> Unit,
 	onPauseAll: () -> Unit,
 	onResumeAll: () -> Unit,
@@ -604,7 +794,7 @@ private fun IosStudioDownloadsCommandCard(
 			IosStudioBatchControlPill(
 				icon = Icons.Outlined.DeleteSweep,
 				label = "清理完成",
-				enabled = doneCount > 0,
+				enabled = clearableCount > 0,
 				onClick = onClearCompleted,
 			)
 		}

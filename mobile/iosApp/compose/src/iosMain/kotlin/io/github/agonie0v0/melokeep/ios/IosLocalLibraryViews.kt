@@ -97,6 +97,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -513,7 +514,7 @@ internal fun IosLibLocalDetailScreen(
 				)
 			}
 
-			is IosLibLocalDetailRoute.Playlist -> {
+			is IosLibLocalDetailRoute.Playlist -> key(route.id) {
 				val summary = remember(localState.playlists, route.id) {
 					localState.playlists.firstOrNull { it.id == route.id }
 				}
@@ -527,7 +528,8 @@ internal fun IosLibLocalDetailScreen(
 					}
 				}
 				val playlistName = active?.name?.takeIf { it.isNotBlank() } ?: summary?.name ?: "歌单"
-				val target = summary ?: MeloLocalPlaylistSummary(id = route.id, name = playlistName)
+				val target = (summary ?: MeloLocalPlaylistSummary(id = route.id, name = playlistName))
+					.copy(name = playlistName)
 				Column(Modifier.fillMaxSize()) {
 					IosCleanTopBar(
 						title = playlistName,
@@ -541,10 +543,53 @@ internal fun IosLibLocalDetailScreen(
 							IosLibHeaderCircleButton(
 								icon = Icons.Rounded.Delete,
 								contentDescription = "删除歌单",
+								tint = MaterialTheme.colorScheme.error,
 								onClick = { deleteTarget = target },
 							)
 						},
 					)
+					localState.errorMessage?.takeIf { it.isNotBlank() }?.let { errMsg ->
+						Surface(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 16.dp, vertical = 4.dp),
+							shape = RoundedCornerShape(12.dp),
+							color = MaterialTheme.colorScheme.errorContainer,
+							border = BorderStroke(
+								IosHairlineWidth,
+								MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+							),
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								Text(
+									text = errMsg,
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onErrorContainer,
+									modifier = Modifier.weight(1f),
+									maxLines = 2,
+									overflow = TextOverflow.Ellipsis,
+								)
+								Box(
+									modifier = Modifier
+										.size(22.dp)
+										.clip(CircleShape)
+										.clickable { localController.clearError() },
+									contentAlignment = Alignment.Center,
+								) {
+									Icon(
+										imageVector = Icons.Rounded.Close,
+										contentDescription = "关闭提示",
+										modifier = Modifier.size(14.dp),
+										tint = MaterialTheme.colorScheme.onErrorContainer,
+									)
+								}
+							}
+						}
+					}
 					LocalTrackListView(
 						items = playlistItems,
 						favoriteIds = localState.favoriteIds,
@@ -557,11 +602,20 @@ internal fun IosLibLocalDetailScreen(
 						onToggleFavorite = toggleFavorite,
 						onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist,
 						onRemoveFromPlaylist = { track ->
-							localController.removeTrackFromPlaylist(route.id, track.id)
+							if (track.id.isNotBlank()) {
+								localController.removeTrackFromPlaylist(route.id, track.id)
+							}
 						},
 						onShowNotice = onShowNotice,
 						bottomPadding = bottomPadding,
 						modifier = Modifier.weight(1f),
+						playlistTitle = playlistName,
+						onRemoveBatchFromPlaylist = { pickedTracks ->
+							val trackIds = pickedTracks.map { it.id }.filter { it.isNotBlank() }.distinct()
+							if (trackIds.isNotEmpty()) {
+								localController.removeTracksFromPlaylist(route.id, trackIds)
+							}
+						},
 					)
 				}
 			}
@@ -1452,10 +1506,24 @@ private fun LocalTrackListView(
 	onLoadMore: (() -> Unit)? = null,
 	onRemoveFromPlaylist: ((MeloTrack) -> Unit)? = null,
 	onRecordSearchResult: (() -> Unit)? = null,
+	onRemoveBatchFromPlaylist: ((List<MeloTrack>) -> Unit)? = null,
+	playlistTitle: String? = null,
 ) {
 	var multi by remember { mutableStateOf(false) }
 	val selected = remember { mutableStateMapOf<String, Boolean>() }
+	var pendingBatchRemoveTracks by remember { mutableStateOf<List<MeloTrack>?>(null) }
 	val iosTracks = remember(items) { items.map { it.iosTrack } }
+
+	LaunchedEffect(items) {
+		if (items.isEmpty()) {
+			multi = false
+			selected.clear()
+			pendingBatchRemoveTracks = null
+		} else {
+			val validIds = items.mapTo(HashSet()) { it.iosTrack.id }
+			selected.keys.filter { it !in validIds }.forEach { selected.remove(it) }
+		}
+	}
 
 	val selectedItems by remember(items) {
 		derivedStateOf { items.filter { selected[it.iosTrack.id] == true } }
@@ -1622,7 +1690,7 @@ private fun LocalTrackListView(
 		}
 
 		androidx.compose.animation.AnimatedVisibility(
-			visible = multi,
+			visible = multi && items.isNotEmpty(),
 			enter = slideInVertically { it } + fadeIn(),
 			exit = slideOutVertically { it } + fadeOut(),
 			modifier = Modifier
@@ -1683,8 +1751,58 @@ private fun LocalTrackListView(
 					multi = false
 					selected.clear()
 				},
+				onRemoveFromPlaylistSelected = onRemoveBatchFromPlaylist?.let {
+					{
+						val picked = selectedItems.map { it.track }
+						if (picked.isNotEmpty()) {
+							pendingBatchRemoveTracks = picked
+						}
+					}
+				},
 			)
 		}
+	}
+
+	pendingBatchRemoveTracks?.let { pickedTracks ->
+		val targetName = playlistTitle?.takeIf { it.isNotBlank() }
+		val desc = if (targetName != null) {
+			"确定将选中的 ${pickedTracks.size} 首歌曲从「$targetName」中移出吗？仅从歌单移除，不会删除本地音乐文件。"
+		} else {
+			"确定将选中的 ${pickedTracks.size} 首歌曲从当前歌单移出吗？仅从歌单移除，不会删除本地音乐文件。"
+		}
+		AlertDialog(
+			onDismissRequest = { pendingBatchRemoveTracks = null },
+			icon = {
+				Icon(
+					imageVector = Icons.Rounded.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error,
+				)
+			},
+			title = { Text("移出歌单") },
+			text = { Text(desc) },
+			confirmButton = {
+				Button(
+					onClick = {
+						pendingBatchRemoveTracks = null
+						onRemoveBatchFromPlaylist?.invoke(pickedTracks)
+						multi = false
+						selected.clear()
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError,
+					),
+				) {
+					Text("移出")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingBatchRemoveTracks = null }) {
+					Text("取消")
+				}
+			},
+		)
 	}
 }
 

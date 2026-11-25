@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/agonie0v0/melokeep/internal/auth"
 	"github.com/agonie0v0/melokeep/internal/config"
@@ -587,4 +588,73 @@ func TestNavidromeArtistCoverAndAvatarURL(t *testing.T) {
 	if detail.AvatarURL != "/api/artists/avatar?name=%E9%99%88%E7%BB%AE%E8%B4%9E" {
 		t.Fatalf("unexpected ArtistDetailDTO AvatarURL: %q", detail.AvatarURL)
 	}
+}
+
+func TestNavidromeStreamAndDownloadTimeouts(t *testing.T) {
+	cases := []struct {
+		endpoint   string
+		stream     bool
+		wantTO     time.Duration
+		wantHdrTO  time.Duration
+	}{
+		{endpoint: "stream", stream: true, wantTO: -1, wantHdrTO: 20 * time.Second},
+		{endpoint: "download", stream: true, wantTO: -1, wantHdrTO: 20 * time.Second},
+		{endpoint: "getCoverArt", stream: true, wantTO: 5 * time.Second, wantHdrTO: 0},
+		{endpoint: "ping", stream: false, wantTO: 30 * time.Second, wantHdrTO: 0},
+	}
+	for _, tc := range cases {
+		gotTO, gotHdrTO := requestTimeouts(tc.endpoint, tc.stream)
+		if gotTO != tc.wantTO || gotHdrTO != tc.wantHdrTO {
+			t.Fatalf("requestTimeouts(%q, %v) = (%v, %v), want (%v, %v)",
+				tc.endpoint, tc.stream, gotTO, gotHdrTO, tc.wantTO, tc.wantHdrTO)
+		}
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/stream.view", "/rest/download.view":
+			w.Header().Set("Content-Type", "audio/flac")
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			time.Sleep(40 * time.Millisecond)
+			_, _ = w.Write([]byte("fLaC-STREAM"))
+		case "/rest/getCoverArt.view":
+			w.Header().Set("Content-Type", "image/png")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte{0x89, 'P', 'N', 'G'})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	pool := transport.NewPool(transport.WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+	client, err := NewClient(pool, nil, Settings{
+		Enabled:  true,
+		URL:      srv.URL,
+		Username: "alice",
+		APIKey:   "k-stream",
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	for _, ep := range []string{"stream", "download"} {
+		ms, err := client.OpenMedia(context.Background(), ep, "s1", "")
+		if err != nil {
+			t.Fatalf("OpenMedia(%s): %v", ep, err)
+		}
+		raw, rErr := io.ReadAll(ms.Body)
+		_ = ms.Body.Close()
+		if rErr != nil || string(raw) != "fLaC-STREAM" {
+			t.Fatalf("OpenMedia(%s) body=%q err=%v", ep, string(raw), rErr)
+		}
+	}
+	cov, err := client.OpenMedia(context.Background(), "getCoverArt", "c1", "")
+	if err != nil {
+		t.Fatalf("OpenMedia(getCoverArt): %v", err)
+	}
+	_ = cov.Body.Close()
 }

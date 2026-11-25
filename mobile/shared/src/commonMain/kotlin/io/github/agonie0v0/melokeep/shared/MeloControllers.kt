@@ -553,6 +553,7 @@ class MeloStudioController(
 	val state: StateFlow<MeloStudioUiState> = _state.asStateFlow()
 
 	private var pollingJob: Job? = null
+	private var hasLoadedLibraryFiles: Boolean = false
 
 	fun selectTab(tab: MeloStudioTab) {
 		_state.update { it.copy(activeTab = tab) }
@@ -673,15 +674,23 @@ class MeloStudioController(
 		}
 	}
 
-	fun deleteDownload(id: String) {
+	fun deleteDownload(id: String, deleteFile: Boolean = false) {
 		scope.launch {
 			try {
-				apiClient.deleteDownload(id)
+				val res = apiClient.deleteDownload(id, deleteFile)
+				val notice = when {
+					deleteFile && res.fileDeleted -> "已删除下载记录，并删除本地文件"
+					deleteFile -> "已删除下载记录（本地文件已不存在）"
+					else -> "已删除下载记录"
+				}
 				_state.update { current ->
 					current.copy(
 						downloads = current.downloads.filterNot { it.id == id },
-						noticeMessage = "已删除下载记录",
+						noticeMessage = notice,
 					)
+				}
+				if (res.fileDeleted) {
+					refreshLibraryFilesIfLoaded()
 				}
 			} catch (e: CancellationException) {
 				throw e
@@ -724,9 +733,10 @@ class MeloStudioController(
 		)
 	}
 
-	fun clearCompletedDownloads() {
+	fun clearCompletedDownloads(deleteFiles: Boolean = false) {
 		val targets = _state.value.downloads.filter {
-			it.status == "complete" || it.status == "completed" || it.status == "cancelled"
+			val status = it.status.trim().lowercase()
+			status == "complete" || status == "completed" || status == "cancelled"
 		}
 		if (targets.isEmpty()) {
 			_state.update { it.copy(noticeMessage = "没有可清理的已完成下载记录") }
@@ -734,11 +744,16 @@ class MeloStudioController(
 		}
 		scope.launch {
 			val removedIds = mutableSetOf<String>()
+			var deletedFilesCount = 0
 			var firstError: String? = null
 			for (job in targets) {
 				try {
-					apiClient.deleteDownload(job.id)
+					val shouldDeleteFile = deleteFiles && !job.file.isNullOrBlank()
+					val res = apiClient.deleteDownload(job.id, shouldDeleteFile)
 					removedIds += job.id
+					if (res.fileDeleted) {
+						deletedFilesCount++
+					}
 				} catch (e: CancellationException) {
 					throw e
 				} catch (e: Throwable) {
@@ -747,20 +762,28 @@ class MeloStudioController(
 					}
 				}
 			}
+			val notice = when {
+				removedIds.isEmpty() -> null
+				deleteFiles && deletedFilesCount > 0 ->
+					"已清理 ${removedIds.size} 条已结束下载记录，并删除 $deletedFilesCount 个本地文件"
+				deleteFiles ->
+					"已清理 ${removedIds.size} 条已结束下载记录（本地文件已不存在或未产生文件）"
+				else ->
+					"已清理 ${removedIds.size} 条已结束下载记录"
+			}
 			_state.update { current ->
 				current.copy(
 					downloads = current.downloads.filterNot { it.id in removedIds },
-					noticeMessage = if (removedIds.isNotEmpty()) {
-						"已清理 ${removedIds.size} 条已结束下载记录"
-					} else {
-						current.noticeMessage
-					},
+					noticeMessage = notice ?: current.noticeMessage,
 					errorMessage = if (removedIds.isEmpty()) {
 						firstError ?: "清理下载记录失败"
 					} else {
 						firstError
 					},
 				)
+			}
+			if (deletedFilesCount > 0) {
+				refreshLibraryFilesIfLoaded()
 			}
 		}
 	}
@@ -889,10 +912,28 @@ class MeloStudioController(
 		}
 	}
 
+	private suspend fun refreshLibraryFilesIfLoaded() {
+		val snapshot = _state.value
+		val shouldRefresh = hasLoadedLibraryFiles ||
+			snapshot.libraryFiles.isNotEmpty() ||
+			snapshot.libraryFolders.isNotEmpty() ||
+			snapshot.activeTab == MeloStudioTab.LIBRARY
+		if (!shouldRefresh || !apiClient.settingsStore.currentConfig().isConfigured) {
+			return
+		}
+		fetchLibraryFilesInternal(
+			query = snapshot.fileQuery,
+			folder = snapshot.currentFolder,
+			reset = true,
+			silent = true,
+		)
+	}
+
 	private suspend fun fetchLibraryFilesInternal(
 		query: String?,
 		folder: String?,
 		reset: Boolean,
+		silent: Boolean = false,
 	) {
 		val cleanQuery = query.orEmpty()
 		val cursor = if (reset) null else _state.value.nextCursor
@@ -900,8 +941,8 @@ class MeloStudioController(
 			it.copy(
 				fileQuery = cleanQuery,
 				currentFolder = folder,
-				filesLoading = true,
-				errorMessage = null,
+				filesLoading = if (silent) it.filesLoading else true,
+				errorMessage = if (silent) it.errorMessage else null,
 			)
 		}
 		try {
@@ -911,6 +952,7 @@ class MeloStudioController(
 				query = cleanQuery.takeIf { it.isNotBlank() },
 				folder = folder?.takeIf { it.isNotBlank() },
 			)
+			hasLoadedLibraryFiles = true
 			_state.update { current ->
 				val merged = if (reset) page.items else current.libraryFiles + page.items
 				current.copy(
@@ -927,7 +969,7 @@ class MeloStudioController(
 			_state.update {
 				it.copy(
 					filesLoading = false,
-					errorMessage = e.message ?: "加载曲库文件失败",
+					errorMessage = if (silent) it.errorMessage else (e.message ?: "加载曲库文件失败"),
 				)
 			}
 		}
@@ -2682,6 +2724,41 @@ class MeloLocalLibraryController(
 					it.copy(
 						mutating = false,
 						errorMessage = e.message ?: "移除曲目失败",
+					)
+				}
+			}
+		}
+	}
+
+	fun removeTracksFromPlaylist(playlistId: String, trackIds: List<String>) {
+		if (playlistId.isBlank()) return
+		val cleanIds = trackIds.filter { it.isNotBlank() }.distinct()
+		if (cleanIds.isEmpty()) {
+			_state.update { it.copy(errorMessage = "请先选择要移除的曲目") }
+			return
+		}
+		scope.launch {
+			_state.update { it.copy(mutating = true, errorMessage = null) }
+			try {
+				val updated = apiClient.removeTracksFromLocalPlaylist(playlistId, cleanIds)
+				_state.update { current ->
+					current.copy(
+						playlists = current.playlists.map { summary ->
+							if (summary.id == updated.id) summary.mergedWith(updated) else summary
+						},
+						activePlaylist = if (current.activePlaylist?.id == updated.id) updated else current.activePlaylist,
+						mutating = false,
+						noticeMessage = "已从歌单移除 ${cleanIds.size} 首歌曲",
+					)
+				}
+			} catch (e: CancellationException) {
+				_state.update { it.copy(mutating = false) }
+				throw e
+			} catch (e: Throwable) {
+				_state.update {
+					it.copy(
+						mutating = false,
+						errorMessage = e.message ?: "批量移除曲目失败",
 					)
 				}
 			}

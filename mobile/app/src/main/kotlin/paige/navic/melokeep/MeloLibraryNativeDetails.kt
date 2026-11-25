@@ -7,6 +7,7 @@
 package paige.navic.melokeep
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,9 +42,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -51,6 +56,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -129,6 +135,7 @@ import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.common.CoverArt
 import paige.navic.ui.component.common.SongQueueSwipeBackground
 import paige.navic.ui.component.common.SwipeToDismissBox
+import paige.navic.ui.component.snackbar.ErrorSnackBar
 import paige.navic.ui.core.UiState
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.filled.Play
@@ -142,9 +149,11 @@ import paige.navic.ui.icons.outlined.ChevronForward
 import paige.navic.ui.icons.outlined.Close
 import paige.navic.ui.icons.outlined.Delete
 import paige.navic.ui.icons.outlined.Download
+import paige.navic.ui.icons.outlined.Edit
 import paige.navic.ui.icons.outlined.LibraryMusic
 import paige.navic.ui.icons.outlined.MoreVert
 import paige.navic.ui.icons.outlined.PlaylistAdd
+import paige.navic.ui.icons.outlined.PlaylistRemove
 import paige.navic.ui.icons.outlined.Queue
 import paige.navic.ui.icons.outlined.QueuePlayNext
 import paige.navic.ui.icons.outlined.Refresh
@@ -196,11 +205,41 @@ fun MeloCollectionDetailScreen(
 
 	var isMultiSelecting by rememberSaveable { mutableStateOf(false) }
 	val selectedSongIds = remember { mutableStateMapOf<String, Boolean>() }
+	val selectedRowIndices = remember { mutableStateMapOf<Int, Boolean>() }
 	var activeMenuSong by remember { mutableStateOf<DomainSong?>(null) }
+	var activeMenuSongIndex by remember { mutableStateOf<Int?>(null) }
 	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
+	var pendingBatchRemoveIndices by remember { mutableStateOf<List<Int>?>(null) }
+	var playlistMenuExpanded by remember { mutableStateOf(false) }
+	var renamePlaylistOpen by remember { mutableStateOf(false) }
+	var renamePlaylistInput by remember { mutableStateOf("") }
+	var deletePlaylistConfirmOpen by remember { mutableStateOf(false) }
+	var didNavigateBackAfterDelete by remember { mutableStateOf(false) }
 
 	val isAlbum = collection is DomainAlbum
+	val isPlaylist = collection is DomainPlaylist
 	val isStarred = if (isAlbum) (collection as DomainAlbum).starredAt != null else false
+
+	val clearAllSelections = {
+		selectedSongIds.clear()
+		selectedRowIndices.clear()
+	}
+
+	LaunchedEffect(songs.size, isPlaylist) {
+		if (isPlaylist) {
+			val staleKeys = selectedRowIndices.keys.filter { it !in songs.indices }
+			staleKeys.forEach { selectedRowIndices.remove(it) }
+		} else {
+			val validIds = songs.mapTo(HashSet()) { it.id }
+			val staleIds = selectedSongIds.keys.filter { it !in validIds }
+			staleIds.forEach { selectedSongIds.remove(it) }
+		}
+	}
+
+	BackHandler(enabled = isMultiSelecting) {
+		isMultiSelecting = false
+		clearAllSelections()
+	}
 
 	Box(
 		modifier = Modifier
@@ -299,6 +338,63 @@ fun MeloCollectionDetailScreen(
 												contentDescription = "收藏专辑",
 												tint = if (isStarred) MaterialTheme.colorScheme.meloGoldText else MaterialTheme.colorScheme.onSurfaceVariant,
 												modifier = Modifier.size(20.dp)
+											)
+										}
+									}
+								} else if (isPlaylist) {
+									Box {
+										Surface(
+											onClick = { playlistMenuExpanded = true },
+											shape = CircleShape,
+											color = MaterialTheme.colorScheme.surfaceContainer,
+											border = libraryHairlineBorder(),
+											modifier = Modifier.size(38.dp)
+										) {
+											Box(contentAlignment = Alignment.Center) {
+												Icon(
+													imageVector = Icons.Outlined.MoreVert,
+													contentDescription = "歌单管理",
+													tint = MaterialTheme.colorScheme.onSurfaceVariant,
+													modifier = Modifier.size(20.dp)
+												)
+											}
+										}
+										DropdownMenu(
+											expanded = playlistMenuExpanded,
+											onDismissRequest = { playlistMenuExpanded = false }
+										) {
+											DropdownMenuItem(
+												text = { Text("重命名歌单") },
+												leadingIcon = {
+													Icon(
+														imageVector = Icons.Outlined.Edit,
+														contentDescription = null
+													)
+												},
+												onClick = {
+													playlistMenuExpanded = false
+													renamePlaylistInput = collection.name.orEmpty()
+													renamePlaylistOpen = true
+												}
+											)
+											DropdownMenuItem(
+												text = {
+													Text(
+														text = "删除歌单",
+														color = MaterialTheme.colorScheme.error
+													)
+												},
+												leadingIcon = {
+													Icon(
+														imageVector = Icons.Outlined.Delete,
+														contentDescription = null,
+														tint = MaterialTheme.colorScheme.error
+													)
+												},
+												onClick = {
+													playlistMenuExpanded = false
+													deletePlaylistConfirmOpen = true
+												}
 											)
 										}
 									}
@@ -441,7 +537,7 @@ fun MeloCollectionDetailScreen(
 								Surface(
 									onClick = {
 										isMultiSelecting = !isMultiSelecting
-										if (!isMultiSelecting) selectedSongIds.clear()
+										if (!isMultiSelecting) clearAllSelections()
 									},
 									shape = CircleShape,
 									color = if (isMultiSelecting) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
@@ -467,7 +563,11 @@ fun MeloCollectionDetailScreen(
 					key = { idx, song -> "${song.id}-$idx" },
 					contentType = { _, _ -> "track" }
 				) { index, song ->
-					val isSelected = selectedSongIds[song.id] == true
+					val isSelected = if (isPlaylist) {
+						selectedRowIndices[index] == true
+					} else {
+						selectedSongIds[song.id] == true
+					}
 					val dlStatus = downloadsMap[song.id]?.status
 					val isFirst = index == 0
 					val isLast = index == songs.lastIndex
@@ -498,14 +598,22 @@ fun MeloCollectionDetailScreen(
 								.combinedClickable(
 									onClick = {
 										if (isMultiSelecting) {
-											selectedSongIds[song.id] = !isSelected
+											if (isPlaylist) {
+												selectedRowIndices[index] = !isSelected
+											} else {
+												selectedSongIds[song.id] = !isSelected
+											}
 										} else {
 											player.playNow(songs, index)
 										}
 									},
 									onLongClick = {
 										isMultiSelecting = true
-										selectedSongIds[song.id] = true
+										if (isPlaylist) {
+											selectedRowIndices[index] = true
+										} else {
+											selectedSongIds[song.id] = true
+										}
 									}
 								),
 							shape = rowShape,
@@ -526,7 +634,13 @@ fun MeloCollectionDetailScreen(
 									if (isMultiSelecting) {
 										Checkbox(
 											checked = isSelected,
-											onCheckedChange = { selectedSongIds[song.id] = it }
+											onCheckedChange = { checked ->
+												if (isPlaylist) {
+													selectedRowIndices[index] = checked
+												} else {
+													selectedSongIds[song.id] = checked
+												}
+											}
 										)
 									} else {
 										Text(
@@ -570,7 +684,10 @@ fun MeloCollectionDetailScreen(
 									}
 
 									IconButton(
-										onClick = { activeMenuSong = song },
+										onClick = {
+											activeMenuSong = song
+											activeMenuSongIndex = index
+										},
 										modifier = Modifier.size(32.dp)
 									) {
 										Icon(
@@ -660,8 +777,23 @@ fun MeloCollectionDetailScreen(
 				.navigationBarsPadding()
 				.padding(bottom = rememberBatchDockBottomClearance(), start = 16.dp, end = 16.dp)
 		) {
-			val pickedSongs by remember(songs) {
-				derivedStateOf { songs.filter { selectedSongIds[it.id] == true } }
+			val pickedIndices by remember(songs, isPlaylist) {
+				derivedStateOf {
+					if (isPlaylist) {
+						songs.indices.filter { selectedRowIndices[it] == true }
+					} else {
+						emptyList()
+					}
+				}
+			}
+			val pickedSongs by remember(songs, isPlaylist) {
+				derivedStateOf {
+					if (isPlaylist) {
+						pickedIndices.map { songs[it] }
+					} else {
+						songs.filter { selectedSongIds[it.id] == true }
+					}
+				}
 			}
 			val hasRemovableOffline = remember(pickedSongs, downloadsMap) {
 				pickedSongs.any {
@@ -674,18 +806,26 @@ fun MeloCollectionDetailScreen(
 				totalCount = songs.size,
 				hasOfflineRemovable = hasRemovableOffline,
 				onSelectAll = {
-					if (pickedSongs.size == songs.size) {
-						selectedSongIds.clear()
+					if (isPlaylist) {
+						if (pickedIndices.size == songs.size && songs.isNotEmpty()) {
+							selectedRowIndices.clear()
+						} else {
+							songs.indices.forEach { selectedRowIndices[it] = true }
+						}
 					} else {
-						songs.forEach { selectedSongIds[it.id] = true }
+						if (pickedSongs.size == songs.size && songs.isNotEmpty()) {
+							selectedSongIds.clear()
+						} else {
+							songs.forEach { selectedSongIds[it.id] = true }
+						}
 					}
 				},
 				onClear = {
-					selectedSongIds.clear()
+					clearAllSelections()
 				},
 				onExit = {
 					isMultiSelecting = false
-					selectedSongIds.clear()
+					clearAllSelections()
 				},
 				onDownloadSelected = {
 					if (pickedSongs.isNotEmpty()) {
@@ -693,7 +833,7 @@ fun MeloCollectionDetailScreen(
 							queueSongsOffline(downloadManager, pickedSongs)
 							snackBarState.showSnackbar("已将 ${pickedSongs.size} 首加入手机离线下载队列")
 							isMultiSelecting = false
-							selectedSongIds.clear()
+							clearAllSelections()
 						}
 					}
 				},
@@ -706,40 +846,55 @@ fun MeloCollectionDetailScreen(
 					if (pickedSongs.isNotEmpty()) {
 						player.playNow(pickedSongs, 0)
 						isMultiSelecting = false
-						selectedSongIds.clear()
+						clearAllSelections()
 					}
 				},
 				onDeleteOfflineSelected = {
 					removeSongsOffline(downloadManager, downloadsMap, pickedSongs)
 					scope.launch { snackBarState.showSnackbar("已移除所选曲目的手机离线缓存") }
 					isMultiSelecting = false
-					selectedSongIds.clear()
-				}
+					clearAllSelections()
+				},
+				onRemoveFromPlaylistSelected = if (isPlaylist) {
+					{
+						if (pickedIndices.isNotEmpty()) {
+							pendingBatchRemoveIndices = pickedIndices
+						}
+					}
+				} else null
 			)
 		}
 
 		// 单曲更多菜单 BottomSheet
 		activeMenuSong?.let { song ->
+			val targetIndex = activeMenuSongIndex
 			NativeDetailSongActionSheet(
 				song = song,
 				downloadStatus = downloadsMap[song.id]?.status,
-				onDismiss = { activeMenuSong = null },
+				onDismiss = {
+					activeMenuSong = null
+					activeMenuSongIndex = null
+				},
 				onPlayNext = {
 					player.playNextSingle(song)
 					activeMenuSong = null
+					activeMenuSongIndex = null
 					scope.launch { snackBarState.showSnackbar("下一首播放：${song.title}") }
 				},
 				onAddToQueue = {
 					player.addToQueue(listOf(song))
 					activeMenuSong = null
+					activeMenuSongIndex = null
 					scope.launch { snackBarState.showSnackbar("已添加到播放队列尾部") }
 				},
 				onAddToPlaylist = {
 					playlistDialogSongIds = listOf(song.id)
 					activeMenuSong = null
+					activeMenuSongIndex = null
 				},
 				onDownload = {
 					activeMenuSong = null
+					activeMenuSongIndex = null
 					scope.launch {
 						queueSongsOffline(downloadManager, listOf(song))
 						snackBarState.showSnackbar("已加入手机下载：${song.title}")
@@ -748,13 +903,22 @@ fun MeloCollectionDetailScreen(
 				onCancelDownload = {
 					downloadManager.cancelDownload(song.id)
 					activeMenuSong = null
+					activeMenuSongIndex = null
 					scope.launch { snackBarState.showSnackbar("已取消下载") }
 				},
 				onDeleteDownload = {
 					downloadManager.deleteDownload(song.id)
 					activeMenuSong = null
+					activeMenuSongIndex = null
 					scope.launch { snackBarState.showSnackbar("已从手机删除离线文件") }
-				}
+				},
+				onRemoveFromPlaylist = if (isPlaylist && targetIndex != null) {
+					{
+						activeMenuSong = null
+						activeMenuSongIndex = null
+						viewModel.removeSongAtIndex(targetIndex)
+					}
+				} else null
 			)
 		}
 
@@ -763,11 +927,137 @@ fun MeloCollectionDetailScreen(
 				songIds = ids.toPersistentList(),
 				onSuccess = {
 					isMultiSelecting = false
-					selectedSongIds.clear()
+					clearAllSelections()
 				},
 				onDismissRequest = { playlistDialogSongIds = null }
 			)
 		}
+
+		pendingBatchRemoveIndices?.let { indices ->
+			AlertDialog(
+				onDismissRequest = { pendingBatchRemoveIndices = null },
+				icon = {
+					Icon(
+						imageVector = Icons.Outlined.PlaylistRemove,
+						contentDescription = null,
+						tint = MaterialTheme.colorScheme.error
+					)
+				},
+				title = { Text("移出歌单") },
+				text = {
+					Text("确认从「${collection?.name ?: "当前歌单"}」移除选中的 ${indices.size} 首歌曲吗？仅从歌单移除，不会删除服务器音乐文件。")
+				},
+				confirmButton = {
+					Button(
+						onClick = {
+							pendingBatchRemoveIndices = null
+							isMultiSelecting = false
+							clearAllSelections()
+							viewModel.removeSongsAtIndices(indices)
+						},
+						colors = ButtonDefaults.buttonColors(
+							containerColor = MaterialTheme.colorScheme.error,
+							contentColor = MaterialTheme.colorScheme.onError
+						)
+					) {
+						Text("确认移除")
+					}
+				},
+				dismissButton = {
+					TextButton(onClick = { pendingBatchRemoveIndices = null }) {
+						Text("取消")
+					}
+				}
+			)
+		}
+
+		if (renamePlaylistOpen) {
+			AlertDialog(
+				onDismissRequest = { renamePlaylistOpen = false },
+				icon = {
+					Icon(
+						imageVector = Icons.Outlined.Edit,
+						contentDescription = null,
+						tint = MaterialTheme.colorScheme.primary
+					)
+				},
+				title = { Text("重命名歌单") },
+				text = {
+					OutlinedTextField(
+						value = renamePlaylistInput,
+						onValueChange = { renamePlaylistInput = it },
+						singleLine = true,
+						shape = RoundedCornerShape(12.dp),
+						label = { Text("歌单名称") },
+						modifier = Modifier.fillMaxWidth()
+					)
+				},
+				confirmButton = {
+					Button(
+						onClick = {
+							val nextName = renamePlaylistInput.trim()
+							renamePlaylistOpen = false
+							viewModel.renamePlaylist(nextName)
+						},
+						enabled = renamePlaylistInput.isNotBlank() &&
+							renamePlaylistInput.trim() != (collection?.name ?: "").trim()
+					) {
+						Text("保存")
+					}
+				},
+				dismissButton = {
+					TextButton(onClick = { renamePlaylistOpen = false }) {
+						Text("取消")
+					}
+				}
+			)
+		}
+
+		if (deletePlaylistConfirmOpen) {
+			AlertDialog(
+				onDismissRequest = { deletePlaylistConfirmOpen = false },
+				icon = {
+					Icon(
+						imageVector = Icons.Outlined.Delete,
+						contentDescription = null,
+						tint = MaterialTheme.colorScheme.error
+					)
+				},
+				title = { Text("删除歌单") },
+				text = {
+					Text("确认删除歌单「${collection?.name ?: "未命名歌单"}」吗？此操作不可撤销，不会删除音乐文件。")
+				},
+				confirmButton = {
+					Button(
+						onClick = {
+							deletePlaylistConfirmOpen = false
+							viewModel.deletePlaylist {
+								if (!didNavigateBackAfterDelete) {
+									didNavigateBackAfterDelete = true
+									backStack.removeLastOrNull()
+								}
+							}
+						},
+						colors = ButtonDefaults.buttonColors(
+							containerColor = MaterialTheme.colorScheme.error,
+							contentColor = MaterialTheme.colorScheme.onError
+						)
+					) {
+						Text("确认删除")
+					}
+				},
+				dismissButton = {
+					TextButton(onClick = { deletePlaylistConfirmOpen = false }) {
+						Text("取消")
+					}
+				}
+			)
+		}
+
+		ErrorSnackBar(
+			error = (uiState as? UiState.Error)?.error,
+			onClearError = viewModel::clearError
+		)
 	}
 }
 
@@ -2861,7 +3151,8 @@ internal fun StudioBatchSelectionDock(
 	onPlaySelected: (() -> Unit)? = null,
 	onDeleteOfflineSelected: (() -> Unit)? = null,
 	playlistButtonLabel: String = "加入歌单",
-	modifier: Modifier = Modifier
+	modifier: Modifier = Modifier,
+	onRemoveFromPlaylistSelected: (() -> Unit)? = null
 ) {
 	Surface(
 		shape = RoundedCornerShape(20.dp),
@@ -3008,6 +3299,35 @@ internal fun StudioBatchSelectionDock(
 						}
 					}
 				}
+
+				if (onRemoveFromPlaylistSelected != null) {
+					val removeEnabled = selectedCount > 0
+					Surface(
+						onClick = onRemoveFromPlaylistSelected,
+						enabled = removeEnabled,
+						shape = CircleShape,
+						color = if (removeEnabled) {
+							MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.82f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f)
+						},
+						contentColor = if (removeEnabled) {
+							MaterialTheme.colorScheme.onErrorContainer
+						} else {
+							MaterialTheme.colorScheme.outline
+						},
+						modifier = Modifier.height(36.dp)
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(4.dp)
+						) {
+							Icon(Icons.Outlined.PlaylistRemove, null, modifier = Modifier.size(15.dp))
+							Text("移出歌单", style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -3025,7 +3345,8 @@ private fun NativeDetailSongActionSheet(
 	onCancelDownload: () -> Unit,
 	onDeleteDownload: () -> Unit,
 	extraActionLabel: String? = null,
-	onExtraAction: (() -> Unit)? = null
+	onExtraAction: (() -> Unit)? = null,
+	onRemoveFromPlaylist: (() -> Unit)? = null
 ) {
 	ModalBottomSheet(
 		onDismissRequest = onDismiss,
@@ -3149,6 +3470,21 @@ private fun NativeDetailSongActionSheet(
 				) {
 					Icon(Icons.Outlined.Star, null, tint = MaterialTheme.colorScheme.meloGoldText)
 					Text(extraActionLabel)
+				}
+			}
+
+			if (onRemoveFromPlaylist != null) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable(onClick = onRemoveFromPlaylist)
+						.padding(vertical = 11.dp, horizontal = 4.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp)
+				) {
+					Icon(Icons.Outlined.PlaylistRemove, null, tint = MaterialTheme.colorScheme.error)
+					Text("从歌单移除", color = MaterialTheme.colorScheme.error)
 				}
 			}
 		}

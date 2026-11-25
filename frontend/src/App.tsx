@@ -43,7 +43,14 @@ import {
   AlertTriangle,
   Info,
 } from "lucide-react";
-import { ApiError, api } from "./api";
+import { ApiError, api, deleteDownloadJob } from "./api";
+import {
+  countDeletableDownloadFiles,
+  formatDownloadRemovalError,
+  formatDownloadRemovalNotice,
+  hasDeletableDownloadFile,
+  removeDownloadJobsBatch,
+} from "./download-utils";
 import {
   buildBatchDownloadPayloads,
   chunkArray,
@@ -481,8 +488,16 @@ export function App() {
   const [confirmation, setConfirmation] = useState<{
     title: string;
     description: string;
+    deleteFilesDescription?: string;
+    downloadDeleteFileCount?: number;
     run: () => Promise<void>;
   } | null>(null);
+  const [deleteDownloadFiles, setDeleteDownloadFiles] = useState(false);
+  const deleteDownloadFilesRef = useRef(false);
+  function setDeleteDownloadFilesSynced(next: boolean) {
+    deleteDownloadFilesRef.current = next;
+    setDeleteDownloadFiles(next);
+  }
   const [initialPlayer] = useState<LocalPlayerState>(() =>
     loadInitialPlayerPrefs(),
   );
@@ -2525,25 +2540,131 @@ export function App() {
   const chosenJobs = visibleJobs.filter((job) => selectedJobs.includes(job.id));
   const stopped = (job: DownloadJob) =>
     ["complete", "failed", "paused", "cancelled"].includes(job.status);
-  async function manageJobs(action: string, targets: DownloadJob[]) {
+  function removeDeletedTracks(deletedTrackIds: Set<string>) {
+    if (deletedTrackIds.size === 0) return;
+    playbackQueue.current = playbackQueue.current.filter(
+      (track) => !deletedTrackIds.has(track.id),
+    );
+    shuffleOrderRef.current = {
+      ...shuffleOrderRef.current,
+      tracks: shuffleOrderRef.current.tracks.filter(
+        (track) => !deletedTrackIds.has(track.id),
+      ),
+    };
+    setPlaylist((previous) =>
+      previous.filter((track) => !deletedTrackIds.has(track.id)),
+    );
+    setFavorites((previous) =>
+      previous.filter((track) => !deletedTrackIds.has(track.id)),
+    );
+    setActivePlaylist((previous) =>
+      previous
+        ? {
+            ...previous,
+            tracks: previous.tracks.filter(
+              (track) => !deletedTrackIds.has(track.id),
+            ),
+          }
+        : null,
+    );
+    if (currentRef.current && deletedTrackIds.has(currentRef.current.id)) {
+      ++playGeneration.current;
+      audio.current?.pause();
+      audio.current?.removeAttribute("src");
+      audio.current?.load();
+      setCurrent(null);
+      setLoadingPlay(false);
+    }
+  }
+  async function manageJobs(
+    action: string,
+    targets: DownloadJob[],
+    options?: { deleteFile?: boolean },
+  ) {
+    if (!targets.length) {
+      setDeleteDownloadFilesSynced(false);
+      setConfirmation(null);
+      return;
+    }
     setManaging(true);
     setManagementError("");
+    if (action === "remove") {
+      const deleteFile = options?.deleteFile === true;
+      let shouldRefreshLibrary = false;
+      try {
+        const summary = await removeDownloadJobsBatch(
+          targets,
+          deleteFile,
+          (job, shouldDeleteFile) =>
+            deleteDownloadJob(job.id, {
+              deleteFile: shouldDeleteFile,
+              hasFile: hasDeletableDownloadFile(job),
+            }),
+          (removedId) =>
+            setSelectedJobs((previous) =>
+              previous.filter((id) => id !== removedId),
+            ),
+        );
+        shouldRefreshLibrary =
+          summary.deletedTrackIds.size > 0 || summary.deletedFileCount > 0;
+        if (summary.deletedTrackIds.size > 0) {
+          removeDeletedTracks(summary.deletedTrackIds);
+          void refreshPlaylists().catch(() => {});
+          setPlaylistRefresh((value) => value + 1);
+        }
+        if (
+          summary.deletedFilePaths.size > 0 ||
+          summary.deletedTrackIds.size > 0
+        ) {
+          const pathsToRemove = new Set(summary.deletedFilePaths);
+          for (const file of files) {
+            if (file.track && summary.deletedTrackIds.has(file.track.id)) {
+              pathsToRemove.add(file.path);
+            }
+          }
+          if (pathsToRemove.size > 0) {
+            setSelectedFiles((previous) =>
+              previous.filter((path) => !pathsToRemove.has(path)),
+            );
+          }
+        }
+        if (summary.removedCount > 0) {
+          setNotice(
+            formatDownloadRemovalNotice(
+              summary.removedCount,
+              deleteFile,
+              summary.deletedFileCount,
+            ),
+          );
+        }
+        if (summary.errors.length > 0) {
+          setManagementError(formatDownloadRemovalError(summary.errors));
+        }
+        setDeleteDownloadFilesSynced(false);
+        setConfirmation(null);
+      } catch (error) {
+        setManagementError((error as Error).message);
+        setDeleteDownloadFilesSynced(false);
+        setConfirmation(null);
+      } finally {
+        await Promise.all([
+          api<DownloadJob[]>("/downloads?limit=500").then(setJobs).catch(fail),
+          shouldRefreshLibrary
+            ? loadLibraryFiles({ cursor: null })
+            : Promise.resolve(),
+        ]);
+        setManaging(false);
+      }
+      return;
+    }
     try {
       for (const job of targets) {
         await api(
-          action === "remove"
-            ? `/downloads/${job.id}`
-            : `/downloads/${job.id}/${action === "resume" && job.status === "cancelled" ? "retry" : action}`,
-          action === "remove" ? "DELETE" : "POST",
+          `/downloads/${job.id}/${action === "resume" && job.status === "cancelled" ? "retry" : action}`,
+          "POST",
         );
-        if (action === "remove")
-          setSelectedJobs((previous) => previous.filter((id) => id !== job.id));
       }
-      setNotice(
-        action === "remove"
-          ? "下载记录已移除，已下载文件保留"
-          : "下载任务已更新",
-      );
+      setNotice("下载任务已更新");
       setConfirmation(null);
     } catch (error) {
       setManagementError((error as Error).message);
@@ -2557,10 +2678,20 @@ export function App() {
   }
   function confirmRemoval(targets: DownloadJob[]) {
     setManagementError("");
+    const fileCount = countDeletableDownloadFiles(targets);
+    setDeleteDownloadFilesSynced(false);
     setConfirmation({
       title: "移除下载记录",
       description: `移除 ${targets.length} 条记录及未完成的临时文件。已下载的音乐文件会保留。`,
-      run: () => manageJobs("remove", targets),
+      deleteFilesDescription:
+        fileCount > 0
+          ? `移除 ${targets.length} 条记录及未完成的临时文件，并从磁盘永久删除 ${fileCount} 个已下载的本地音频文件。`
+          : undefined,
+      downloadDeleteFileCount: fileCount,
+      run: () =>
+        manageJobs("remove", targets, {
+          deleteFile: deleteDownloadFilesRef.current,
+        }),
     });
   }
   function confirmFileDeletion(targets: LibraryFile[]) {
@@ -2596,41 +2727,7 @@ export function App() {
               setNotice(`部分文件删除失败：${res.failed.join("；")}`);
             }
           }
-          if (deletedTrackIds.size > 0) {
-            playbackQueue.current = playbackQueue.current.filter(
-              (track) => !deletedTrackIds.has(track.id),
-            );
-            shuffleOrderRef.current = {
-              ...shuffleOrderRef.current,
-              tracks: shuffleOrderRef.current.tracks.filter(
-                (track) => !deletedTrackIds.has(track.id),
-              ),
-            };
-            setPlaylist((previous) =>
-              previous.filter((track) => !deletedTrackIds.has(track.id)),
-            );
-            setFavorites((previous) =>
-              previous.filter((track) => !deletedTrackIds.has(track.id)),
-            );
-            setActivePlaylist((previous) =>
-              previous
-                ? {
-                    ...previous,
-                    tracks: previous.tracks.filter(
-                      (track) => !deletedTrackIds.has(track.id),
-                    ),
-                  }
-                : null,
-            );
-            if (current && deletedTrackIds.has(current.id)) {
-              ++playGeneration.current;
-              audio.current?.pause();
-              audio.current?.removeAttribute("src");
-              audio.current?.load();
-              setCurrent(null);
-              setLoadingPlay(false);
-            }
-          }
+          removeDeletedTracks(deletedTrackIds);
           const removedPaths = new Set(targets.map((file) => file.path));
           setSelectedFiles((previous) =>
             previous.filter((path) => !removedPaths.has(path)),
@@ -4572,40 +4669,7 @@ export function App() {
               savePlaylist={openAddToPlaylistModal}
               remove={confirmFileDeletion}
               remoteDeleted={(ids) => {
-                const idSet = new Set(ids);
-                playbackQueue.current = playbackQueue.current.filter(
-                  (track) => !idSet.has(track.id),
-                );
-                shuffleOrderRef.current = {
-                  ...shuffleOrderRef.current,
-                  tracks: shuffleOrderRef.current.tracks.filter(
-                    (track) => !idSet.has(track.id),
-                  ),
-                };
-                setPlaylist((previous) =>
-                  previous.filter((track) => !idSet.has(track.id)),
-                );
-                setFavorites((previous) =>
-                  previous.filter((track) => !idSet.has(track.id)),
-                );
-                setActivePlaylist((previous) =>
-                  previous
-                    ? {
-                        ...previous,
-                        tracks: previous.tracks.filter(
-                          (track) => !idSet.has(track.id),
-                        ),
-                      }
-                    : null,
-                );
-                if (current && idSet.has(current.id)) {
-                  ++playGeneration.current;
-                  audio.current?.pause();
-                  audio.current?.removeAttribute("src");
-                  audio.current?.load();
-                  setCurrent(null);
-                  setLoadingPlay(false);
-                }
+                removeDeletedTracks(new Set(ids));
                 setPlaylistRefresh((value) => value + 1);
                 void loadLibraryFiles({ cursor: null });
               }}
@@ -4768,12 +4832,48 @@ export function App() {
       {confirmation && (
         <ConfirmDialog
           title={confirmation.title}
-          description={confirmation.description}
+          description={
+            confirmation.downloadDeleteFileCount &&
+            confirmation.downloadDeleteFileCount > 0 &&
+            deleteDownloadFiles
+              ? confirmation.deleteFilesDescription || confirmation.description
+              : confirmation.description
+          }
+          detail={
+            confirmation.downloadDeleteFileCount &&
+            confirmation.downloadDeleteFileCount > 0 ? (
+              <div
+                className={`confirm-dialog-option${deleteDownloadFiles ? " is-danger" : ""}`}
+              >
+                <label className="confirm-dialog-check">
+                  <input
+                    type="checkbox"
+                    checked={deleteDownloadFiles}
+                    disabled={managing}
+                    onChange={(event) =>
+                      setDeleteDownloadFilesSynced(event.target.checked)
+                    }
+                  />
+                  <span>
+                    {`同时删除已下载的本地音频文件（共 ${confirmation.downloadDeleteFileCount} 个，删除后无法恢复）`}
+                  </span>
+                </label>
+                {deleteDownloadFiles && (
+                  <p className="confirm-dialog-option-warn" role="status">
+                    已勾选：确认后将从本地磁盘永久移除对应音频文件，且无法恢复。
+                  </p>
+                )}
+              </div>
+            ) : undefined
+          }
           error={managementError}
           confirmLabel="确认操作"
           busy={managing}
           tone="danger"
-          onCancel={() => setConfirmation(null)}
+          onCancel={() => {
+            setDeleteDownloadFilesSynced(false);
+            setConfirmation(null);
+          }}
           onConfirm={() => void confirmation.run()}
         />
       )}

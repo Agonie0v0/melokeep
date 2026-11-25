@@ -3738,3 +3738,331 @@ func TestCollectionCreateAndAddTracksValidation(t *testing.T) {
 		t.Fatalf("unexpected mixed duplicate add result: len=%d detail=%q want=%q", len(mixedDup.Tracks), mixedDup.Detail, wantDupDetail)
 	}
 }
+
+func TestDownloadDeleteOptionalFileRemovalAndPermissions(t *testing.T) {
+	srv, st, canonRoot := newTestServer(t, nil)
+	dlSvc := download.NewService(st, srv.deps.Transport, srv.deps.Providers, srv.deps.Files, nil, nil, download.Options{
+		StagingRoot: t.TempDir(),
+	})
+	t.Cleanup(func() { _ = dlSvc.Close() })
+	srv.deps.Download = dlSvc
+
+	ctx := context.Background()
+	seedDownloadedJob := func(suffix string, owner string, createOnDisk bool, badPath string) (dlID string, assetID string, filePath string) {
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source:     "AudiusMusicClient",
+			Locator:    "dl-loc-" + suffix,
+			RootSource: "AudiusMusicClient",
+			Title:      "Track " + suffix,
+			Artist:     "Artist A",
+		}, []model.MediaVariant{{VariantID: "v-" + suffix, Label: "FLAC", Codec: "flac", Availability: "resolved"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pubID := "pub-dl-" + suffix
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: pubID, Kind: "candidate", TargetID: trID, Source: "AudiusMusicClient", SourceID: "dl-loc-" + suffix,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+		res, err := st.CreateDownload(ctx, store.CreateDownloadParams{
+			TrackID:        trID,
+			VariantID:      "v-" + suffix,
+			PublicID:       pubID,
+			QualityID:      "v-" + suffix,
+			QualityLabel:   "FLAC",
+			DownloadSource: "AudiusMusicClient",
+			ActorKey:       owner,
+			DedupeKey:      "dedupe-" + suffix,
+			Detail:         "queued",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if badPath != "" {
+			if _, err := st.Writer().ExecContext(ctx, `UPDATE downloads SET state = ?, file_token = ? WHERE id = ?`, string(model.DownloadComplete), badPath, res.Download.ID); err != nil {
+				t.Fatal(err)
+			}
+			return res.Download.ID, "", ""
+		}
+
+		rel := filepath.ToSlash(filepath.Join("Artist A", "Track-"+suffix+".flac"))
+		abs := filepath.Join(canonRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte("fLaC-TEST-"+suffix), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		assetRec, err := st.UpsertAsset(ctx, store.AssetRecord{
+			RootID:   "root-1",
+			RelPath:  rel,
+			PathKey:  files.ComputePathKey("insensitive", rel),
+			Folder:   "Artist A",
+			Name:     "Track-" + suffix + ".flac",
+			Status:   "active",
+			Editable: true,
+			Size:     int64(len("fLaC-TEST-" + suffix)),
+			Title:    "Track " + suffix,
+			Artist:   "Artist A",
+		}, 0, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Writer().ExecContext(ctx, `UPDATE downloads SET state = ?, file_token = ? WHERE id = ?`, string(model.DownloadComplete), "asset:"+assetRec.ID, res.Download.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !createOnDisk {
+			_ = os.Remove(abs)
+		}
+		return res.Download.ID, assetRec.ID, abs
+	}
+
+	delHTTP := func(target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodDelete, target, nil)
+		req.Header.Set("X-MeloKeep-Request", "1")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. Default delete without delete_file preserves file on disk.
+	id1, _, path1 := seedDownloadedJob("1", "anonymous:web:anonymous", true, "")
+	rec1 := delHTTP("/api/downloads/" + id1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("DELETE without delete_file failed: %d %s", rec1.Code, rec1.Body.String())
+	}
+	var out1 struct {
+		Removed     bool     `json:"removed"`
+		FileDeleted bool     `json:"file_deleted"`
+		TrackIDs    []string `json:"track_ids"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &out1); err != nil {
+		t.Fatal(err)
+	}
+	if !out1.Removed || out1.FileDeleted || out1.TrackIDs == nil || len(out1.TrackIDs) != 0 {
+		t.Fatalf("unexpected default delete response: %+v raw=%s", out1, rec1.Body.String())
+	}
+	if _, err := os.Stat(path1); err != nil {
+		t.Fatalf("expected file preserved when delete_file omitted: %v", err)
+	}
+
+	// 2. delete_file=1 deletes file, soft-deletes asset, cleans refs, and returns track_ids.
+	id2, asset2, path2 := seedDownloadedJob("2", "anonymous:web:anonymous", true, "")
+	if err := st.PutPublicRef(ctx, model.PublicRef{
+		PublicID: "asset:" + asset2, Kind: "asset", TargetID: asset2, Source: "local", SourceID: asset2,
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PutDurableRecord(ctx, durableNamespaceFavorite, "asset:"+asset2, `{"id":"asset:`+asset2+`"}`, 0); err != nil {
+		t.Fatal(err)
+	}
+	col, err := st.CreateCollection(ctx, store.CreateCollectionParams{Name: "Cleanup List", Kind: "playlist", OwnerKey: "anonymous:web:anonymous"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddCollectionItems(ctx, col.ID, []string{"asset:" + asset2}, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	rec2 := delHTTP("/api/downloads/" + id2 + "?delete_file=1")
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("DELETE ?delete_file=1 failed: %d %s", rec2.Code, rec2.Body.String())
+	}
+	var out2 struct {
+		Removed     bool     `json:"removed"`
+		FileDeleted bool     `json:"file_deleted"`
+		TrackIDs    []string `json:"track_ids"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &out2); err != nil {
+		t.Fatal(err)
+	}
+	if !out2.Removed || !out2.FileDeleted || len(out2.TrackIDs) != 2 {
+		t.Fatalf("unexpected delete_file=1 response: %+v raw=%s", out2, rec2.Body.String())
+	}
+	if _, err := os.Stat(path2); !os.IsNotExist(err) {
+		t.Fatalf("expected file removed from disk, statErr=%v", err)
+	}
+	if gotAsset, ok, _ := st.GetAsset(ctx, asset2); !ok || gotAsset.Status != "deleted" {
+		t.Fatalf("expected asset soft deleted, ok=%v status=%s", ok, gotAsset.Status)
+	}
+	if _, favOK, _ := st.GetDurableRecord(ctx, durableNamespaceFavorite, "asset:"+asset2); favOK {
+		t.Fatal("expected favorite reference cleaned up")
+	}
+	if _, colItems, _, _ := st.GetCollection(ctx, col.ID); len(colItems) != 0 {
+		t.Fatalf("expected collection item cleaned up, got %+v", colItems)
+	}
+
+	// 3. delete_file=YeS tolerates already-missing file on disk and still removes download record.
+	id3, _, _ := seedDownloadedJob("3", "anonymous:web:anonymous", false, "")
+	rec3 := delHTTP("/api/downloads/" + id3 + "?delete_file=YeS")
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("DELETE missing file failed: %d %s", rec3.Code, rec3.Body.String())
+	}
+	var out3 struct {
+		Removed     bool     `json:"removed"`
+		FileDeleted bool     `json:"file_deleted"`
+		TrackIDs    []string `json:"track_ids"`
+	}
+	_ = json.Unmarshal(rec3.Body.Bytes(), &out3)
+	if !out3.Removed || out3.FileDeleted || out3.TrackIDs == nil || len(out3.TrackIDs) != 0 {
+		t.Fatalf("unexpected missing-file response: %+v", out3)
+	}
+	if _, exists, _ := dlSvc.Get(ctx, id3); exists {
+		t.Fatal("expected download record removed when file missing")
+	}
+
+	// 4. Non-NotFound file error (path outside roots) returns error and keeps download record.
+	outsideFile := filepath.Join(t.TempDir(), "outside.flac")
+	_ = os.WriteFile(outsideFile, []byte("fLaC"), 0o644)
+	id4, _, _ := seedDownloadedJob("4", "anonymous:web:anonymous", false, outsideFile)
+	rec4 := delHTTP("/api/downloads/" + id4 + "?delete_file=true")
+	if rec4.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for outside-root file, got %d %s", rec4.Code, rec4.Body.String())
+	}
+	if _, exists, _ := dlSvc.Get(ctx, id4); !exists {
+		t.Fatal("download record must NOT be deleted when file resolution fails with non-NotFound error")
+	}
+
+	// 5. Permission checks for delete_file=1: ReadOnlyAI and missing PermLocalWrite return 403 and keep both record & file.
+	ownerActor := auth.ChannelActor("telegram", "u1", auth.PermRead, auth.PermLocalWrite)
+	id5, _, path5 := seedDownloadedJob("5", ownerActor.Key(), true, "")
+
+	callAs := func(actor auth.Actor) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodDelete, "/api/downloads/"+id5+"?delete_file=1", nil)
+		req.SetPathValue("ident", id5)
+		req = req.WithContext(withActor(req.Context(), actor))
+		rec := httptest.NewRecorder()
+		srv.handleDownloadDelete(rec, req)
+		return rec
+	}
+
+	roAI := ownerActor
+	roAI.ReadOnlyAI = true
+	if rec := callAs(roAI); rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for ReadOnlyAI, got %d %s", rec.Code, rec.Body.String())
+	}
+	readOnlyUser := auth.ChannelActor("telegram", "u1", auth.PermRead)
+	if rec := callAs(readOnlyUser); rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without PermLocalWrite, got %d %s", rec.Code, rec.Body.String())
+	}
+	otherUser := auth.ChannelActor("telegram", "u2", auth.PermRead, auth.PermLocalWrite)
+	if rec := callAs(otherUser); rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-owner, got %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(path5); err != nil {
+		t.Fatalf("file should still exist after rejected permission checks: %v", err)
+	}
+	if _, exists, _ := dlSvc.Get(ctx, id5); !exists {
+		t.Fatal("download record should still exist after rejected permission checks")
+	}
+}
+
+func TestCollectionBatchRemoveTracks(t *testing.T) {
+	srv, st, _ := newTestServer(t, nil)
+	ctx := context.Background()
+
+	seedTrack := func(id, title string) {
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source:     "AudiusMusicClient",
+			Locator:    "src-" + id,
+			RootSource: "AudiusMusicClient",
+			Title:      title,
+			Artist:     "Artist A",
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: id,
+			Kind:     "candidate",
+			TargetID: trID,
+			Source:   "AudiusMusicClient",
+			SourceID: "src-" + id,
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+		dto := model.TrackDTO{
+			ID:       id,
+			Source:   "AudiusMusicClient",
+			SourceID: "src-" + id,
+			Title:    title,
+			Artist:   "Artist A",
+			Playback: model.PlaybackDTO{State: "pending"},
+		}
+		raw, _ := json.Marshal(dto)
+		if _, err := st.PutDurableRecord(ctx, "track_dto", id, string(raw), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedTrack("trk-1", "Track A")
+	seedTrack("trk-2", "Track B")
+	seedTrack("trk-3", "Track C")
+	seedTrack("trk-4", "Track D")
+
+	postJSON := func(path string, body any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-MeloKeep-Request", "1")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	createRec := postJSON("/api/playlists", map[string]any{
+		"name":      "Batch Remove Demo",
+		"track_ids": []string{"trk-1", "trk-2", "trk-3", "trk-4"},
+	})
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create playlist failed: %d %s", createRec.Code, createRec.Body.String())
+	}
+	var created model.SavedPlaylistDTO
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+
+	// 1. Empty / whitespace-only track_ids -> 400.
+	emptyRec := postJSON("/api/playlists/"+created.ID+"/tracks/remove", map[string]any{
+		"track_ids": []string{"", "   "},
+	})
+	if emptyRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for blank track_ids, got %d %s", emptyRec.Code, emptyRec.Body.String())
+	}
+	var errDTO model.ErrorDTO
+	_ = json.Unmarshal(emptyRec.Body.Bytes(), &errDTO)
+	if errDTO.Detail != "请选择要移出的曲目" {
+		t.Fatalf("unexpected 400 detail: %v", errDTO.Detail)
+	}
+
+	// 2. Missing playlist -> 404.
+	missingRec := postJSON("/api/playlists/non-existent/tracks/remove", map[string]any{
+		"track_ids": []string{"trk-1"},
+	})
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing playlist, got %d %s", missingRec.Code, missingRec.Body.String())
+	}
+
+	// 3. Batch remove trk-2 (duplicated + padded) and trk-4 alongside absent ref.
+	remRec := postJSON("/api/playlists/"+created.ID+"/tracks/remove", map[string]any{
+		"track_ids": []string{"trk-2", " trk-2 ", "trk-4", "trk-absent", ""},
+	})
+	if remRec.Code != http.StatusOK {
+		t.Fatalf("batch remove failed: %d %s", remRec.Code, remRec.Body.String())
+	}
+	var updated model.SavedPlaylistDTO
+	if err := json.Unmarshal(remRec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Tracks) != 2 || updated.Tracks[0].ID != "trk-1" || updated.Tracks[1].ID != "trk-3" {
+		t.Fatalf("unexpected remaining tracks: %+v", updated.Tracks)
+	}
+	wantDetail := "已从歌单“Batch Remove Demo”移出 2 首曲目，共 2 首。"
+	if updated.Detail != wantDetail {
+		t.Fatalf("unexpected Detail: %q, want %q", updated.Detail, wantDetail)
+	}
+
+	// Verify DB positions compacted to 0, 1.
+	_, items, ok, err := st.GetCollection(ctx, created.ID)
+	if err != nil || !ok || len(items) != 2 || items[0].Position != 0 || items[1].Position != 1 {
+		t.Fatalf("expected compacted positions 0,1; got ok=%v items=%+v err=%v", ok, items, err)
+	}
+}

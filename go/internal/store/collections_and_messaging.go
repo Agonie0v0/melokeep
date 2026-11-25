@@ -213,6 +213,74 @@ func (s *Store) AddCollectionItems(ctx context.Context, collectionID string, pub
 	return newRev, err
 }
 
+// RemoveCollectionItems removes items matching publicRefs in a single transaction,
+// compacts positions, and bumps revision when items were removed.
+func (s *Store) RemoveCollectionItems(ctx context.Context, collectionID string, publicRefs []string, expectedRev int64) (int64, int, error) {
+	clean := make([]string, 0, len(publicRefs))
+	seen := make(map[string]bool, len(publicRefs))
+	for _, r := range publicRefs {
+		trimmed := strings.TrimSpace(r)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		clean = append(clean, trimmed)
+	}
+	now := time.Now().UTC().UnixMilli()
+	var newRev int64
+	var removedCount int
+	err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		var curRev int64
+		if err := tx.QueryRowContext(ctx, `SELECT revision FROM collections WHERE id = ?`, collectionID).Scan(&curRev); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return model.NewError(model.ErrNotFound, http.StatusNotFound, "集合不存在")
+			}
+			return err
+		}
+		if expectedRev > 0 && curRev != expectedRev {
+			return model.NewError(model.ErrConflict, http.StatusConflict, "集合版本冲突")
+		}
+		newRev = curRev
+		if len(clean) == 0 {
+			return nil
+		}
+		var removed int64
+		const chunkSize = 200
+		for start := 0; start < len(clean); start += chunkSize {
+			end := start + chunkSize
+			if end > len(clean) {
+				end = len(clean)
+			}
+			chunk := clean[start:end]
+			placeholders := make([]string, len(chunk))
+			args := make([]any, 1+len(chunk))
+			args[0] = collectionID
+			for i, v := range chunk {
+				placeholders[i] = "?"
+				args[i+1] = v
+			}
+			res, err := tx.ExecContext(ctx, `DELETE FROM collection_items WHERE collection_id = ? AND public_ref IN (`+strings.Join(placeholders, ",")+`)`, args...)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			removed += n
+		}
+		removedCount = int(removed)
+		if removedCount > 0 {
+			if err := compactCollectionItemsTx(ctx, tx, collectionID, now); err != nil {
+				return err
+			}
+			newRev = curRev + 1
+		}
+		return nil
+	})
+	return newRev, removedCount, err
+}
+
 // RemoveCollectionItem removes items matching publicRef and compacts positions inside one short transaction.
 func (s *Store) RemoveCollectionItem(ctx context.Context, collectionID, publicRef string, expectedRev int64) (int64, error) {
 	now := time.Now().UTC().UnixMilli()

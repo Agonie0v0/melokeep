@@ -14,9 +14,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/agonie0v0/melokeep/internal/model"
+	"github.com/agonie0v0/melokeep/internal/provider"
 	"github.com/agonie0v0/melokeep/internal/store"
 )
 
@@ -396,5 +399,207 @@ func TestCapInlineRangeHeader(t *testing.T) {
 			t.Errorf("%s: capInlineRangeHeader(%q, %d, %d) = (%q, %v), want (%q, %v)",
 				tc.name, tc.raw, tc.totalSize, tc.maxChunk, got, ok, tc.want, tc.wantOK)
 		}
+	}
+}
+
+func TestCapOpenEndedRangeHeader(t *testing.T) {
+	const chunk = streamRangeChunkBytes
+	cases := []struct {
+		name   string
+		raw    string
+		chunk  int64
+		want   string
+		wantOK bool
+	}{
+		{name: "empty", raw: "", chunk: chunk},
+		{name: "zero chunk", raw: "bytes=0-", chunk: 0},
+		{name: "open zero", raw: "bytes=0-", chunk: chunk, want: fmt.Sprintf("bytes=0-%d", chunk-1), wantOK: true},
+		{name: "open offset case insensitive", raw: "BYTES= 1024 - ", chunk: chunk, want: fmt.Sprintf("bytes=1024-%d", 1024+chunk-1), wantOK: true},
+		{name: "closed small untouched", raw: "bytes=0-1023", chunk: chunk},
+		{name: "closed large untouched", raw: fmt.Sprintf("bytes=0-%d", chunk*2), chunk: chunk},
+		{name: "suffix untouched", raw: "bytes=-64", chunk: chunk},
+		{name: "multi-range untouched", raw: "bytes=0-10, 20-", chunk: chunk},
+		{name: "non-bytes unit untouched", raw: "items=0-", chunk: chunk},
+		{name: "plus sign untouched", raw: "bytes=+0-", chunk: chunk},
+		{name: "missing hyphen untouched", raw: "bytes=0", chunk: chunk},
+		{name: "empty start untouched", raw: "bytes=-", chunk: chunk},
+		{name: "alpha start untouched", raw: "bytes=abc-", chunk: chunk},
+	}
+	for _, tc := range cases {
+		got, ok := capOpenEndedRangeHeader(tc.raw, tc.chunk)
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("%s: capOpenEndedRangeHeader(%q, %d) = (%q, %v), want (%q, %v)",
+				tc.name, tc.raw, tc.chunk, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+func TestHandleStreamRangeCapFallbackAnd401Refresh(t *testing.T) {
+	var seenRanges []string
+	var seenIfRanges []string
+	var mode atomic.Int32 // 0=206 capped, 1=416 then 206 on original, 2=400 then 206 on original, 3=401 refresh
+	var resolveCalls atomic.Int32
+	payload := []byte("STREAM-REMOTE-PAYLOAD-0123456789")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rng := r.Header.Get("Range")
+		seenRanges = append(seenRanges, r.URL.Path+":"+rng)
+		seenIfRanges = append(seenIfRanges, r.Header.Get("If-Range"))
+		switch r.URL.Path {
+		case "/cap-ok":
+			if rng == fmt.Sprintf("bytes=0-%d", streamRangeChunkBytes-1) {
+				w.Header().Set("Content-Type", "audio/flac")
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", len(payload)-1, len(payload)))
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+		case "/reject-416":
+			if rng == fmt.Sprintf("bytes=0-%d", streamRangeChunkBytes-1) {
+				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+			if rng == "bytes=0-" {
+				w.Header().Set("Content-Type", "audio/flac")
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", len(payload)-1, len(payload)))
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+		case "/reject-400":
+			if rng == fmt.Sprintf("bytes=0-%d", streamRangeChunkBytes-1) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if rng == "bytes=0-" {
+				w.Header().Set("Content-Type", "audio/flac")
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", len(payload)-1, len(payload)))
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/token-expired":
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/token-fresh":
+			w.Header().Set("Content-Type", "audio/flac")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	srv, st, _ := newTestServer(t, nil)
+	reg, _ := provider.NewRegistry([]provider.Entry{
+		{
+			Provider: &stubProvider{
+				id:         "AudiusMusicClient",
+				engineName: "AudiusMusicClient",
+				resolveFn: func(_ context.Context, _ model.ProviderTrack, _ model.QualityPolicy) ([]model.ResolvedMedia, error) {
+					n := resolveCalls.Add(1)
+					path := "/cap-ok"
+					switch mode.Load() {
+					case 1:
+						path = "/reject-416"
+					case 2:
+						path = "/reject-400"
+					case 3:
+						if n%2 == 1 {
+							path = "/token-expired"
+						} else {
+							path = "/token-fresh"
+						}
+					}
+					return []model.ResolvedMedia{{VariantID: "v1", URL: upstream.URL + path}}, nil
+				},
+			},
+			Meta: provider.Metadata{Label: "Audius", Category: "开放许可"},
+		},
+	})
+	srv.deps.Providers = reg
+
+	ctx := context.Background()
+	for idx, pubID := range []string{"stream-cap-0", "stream-cap-1", "stream-cap-2", "stream-cap-3"} {
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source:     "AudiusMusicClient",
+			Locator:    fmt.Sprintf("loc-%d", idx),
+			RootSource: "AudiusMusicClient",
+			Title:      fmt.Sprintf("Track %d", idx),
+			Artist:     "Artist A",
+		}, []model.MediaVariant{{VariantID: "v1", Label: "FLAC", Codec: "flac", Availability: "resolved"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: pubID, Kind: "candidate", TargetID: trID, Source: "AudiusMusicClient", SourceID: fmt.Sprintf("loc-%d", idx),
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. Open-ended Range is capped to 4 MiB chunk when contacting upstream.
+	seenRanges, seenIfRanges = nil, nil
+	req1 := httptest.NewRequest(http.MethodGet, "/api/stream/stream-cap-0", nil)
+	req1.Header.Set("Range", "bytes=0-")
+	req1.Header.Set("If-Range", `"etag-v1"`)
+	rec1 := httptest.NewRecorder()
+	srv.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusPartialContent || !bytes.Equal(rec1.Body.Bytes(), payload) {
+		t.Fatalf("capped stream failed: code=%d body=%q", rec1.Code, rec1.Body.String())
+	}
+	wantCapped := fmt.Sprintf("/cap-ok:bytes=0-%d", streamRangeChunkBytes-1)
+	if len(seenRanges) != 1 || seenRanges[0] != wantCapped || seenIfRanges[0] != `"etag-v1"` {
+		t.Fatalf("unexpected upstream headers: ranges=%v ifRanges=%v", seenRanges, seenIfRanges)
+	}
+
+	// 2. Upstream returns 416 on capped Range -> immediate fallback on same target.URL with original Range & If-Range (no refresh).
+	mode.Store(1)
+	resolveCalls.Store(0)
+	seenRanges, seenIfRanges = nil, nil
+	req2 := httptest.NewRequest(http.MethodGet, "/api/stream/stream-cap-1", nil)
+	req2.Header.Set("Range", "bytes=0-")
+	req2.Header.Set("If-Range", `"etag-v2"`)
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusPartialContent || !bytes.Equal(rec2.Body.Bytes(), payload) {
+		t.Fatalf("416 fallback failed: code=%d body=%q", rec2.Code, rec2.Body.String())
+	}
+	if resolveCalls.Load() != 1 || len(seenRanges) != 2 || seenRanges[1] != "/reject-416:bytes=0-" || seenIfRanges[1] != `"etag-v2"` {
+		t.Fatalf("expected single resolve + fallback to original Range on same URL, resolve=%d ranges=%v ifRanges=%v", resolveCalls.Load(), seenRanges, seenIfRanges)
+	}
+
+	// 3. Upstream returns 400 on capped Range -> immediate fallback on same target.URL with original Range.
+	mode.Store(2)
+	resolveCalls.Store(0)
+	seenRanges, seenIfRanges = nil, nil
+	req3 := httptest.NewRequest(http.MethodGet, "/api/stream/stream-cap-2", nil)
+	req3.Header.Set("Range", "bytes=0-")
+	req3.Header.Set("If-Range", `"etag-v3"`)
+	rec3 := httptest.NewRecorder()
+	srv.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusPartialContent || !bytes.Equal(rec3.Body.Bytes(), payload) {
+		t.Fatalf("400 fallback failed: code=%d body=%q", rec3.Code, rec3.Body.String())
+	}
+	if resolveCalls.Load() != 1 || len(seenRanges) != 2 || seenRanges[1] != "/reject-400:bytes=0-" || seenIfRanges[1] != `"etag-v3"` {
+		t.Fatalf("expected single resolve + 400 fallback, resolve=%d ranges=%v ifRanges=%v", resolveCalls.Load(), seenRanges, seenIfRanges)
+	}
+
+	// 4. Upstream returns 401 on attempt 0 -> refreshes resolved URL and succeeds on attempt 1.
+	mode.Store(3)
+	resolveCalls.Store(0)
+	seenRanges = nil
+	req4 := httptest.NewRequest(http.MethodGet, "/api/stream/stream-cap-3", nil)
+	rec4 := httptest.NewRecorder()
+	srv.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusOK || !bytes.Equal(rec4.Body.Bytes(), payload) {
+		t.Fatalf("401 refresh retry failed: code=%d body=%q", rec4.Code, rec4.Body.String())
+	}
+	if resolveCalls.Load() != 2 || len(seenRanges) != 2 || seenRanges[0] != "/token-expired:" || seenRanges[1] != "/token-fresh:" {
+		t.Fatalf("expected 401 refresh sequence, resolve=%d ranges=%v", resolveCalls.Load(), seenRanges)
 	}
 }

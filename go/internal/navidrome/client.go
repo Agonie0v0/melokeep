@@ -201,6 +201,16 @@ type subsonicError struct {
 	Message string `json:"message"`
 }
 
+func requestTimeouts(endpoint string, stream bool) (time.Duration, time.Duration) {
+	if endpoint == "getCoverArt" {
+		return 5 * time.Second, 0
+	}
+	if stream && (endpoint == "stream" || endpoint == "download") {
+		return -1, 20 * time.Second
+	}
+	return 30 * time.Second, 0
+}
+
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, extra url.Values, reqHeaders http.Header, stream bool) (*http.Response, error) {
 	s := c.Settings()
 	rev := c.Revision()
@@ -248,14 +258,12 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, extra u
 	if stream {
 		maxBytes = -1
 	}
-	timeout := 30 * time.Second
-	if endpoint == "getCoverArt" {
-		timeout = 5 * time.Second
-	}
+	timeout, responseHeaderTimeout := requestTimeouts(endpoint, stream)
 	opts := transport.RequestOptions{
 		Domain:                 transport.DomainConfiguredInternal,
 		ConfigRevision:         rev,
 		Timeout:                timeout,
+		ResponseHeaderTimeout:  responseHeaderTimeout,
 		MaxResponseBytes:       maxBytes,
 		AllowedInternalOrigins: []string{origin},
 		HasSideEffects:         strings.EqualFold(method, http.MethodPost),

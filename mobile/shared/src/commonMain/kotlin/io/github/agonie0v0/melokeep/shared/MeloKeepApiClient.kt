@@ -635,12 +635,17 @@ class MeloKeepApiClient(
 		return job.copy(track = job.track.withResolvedUrls())
 	}
 
-	suspend fun deleteDownload(id: String): Boolean {
+	suspend fun deleteDownload(
+		id: String,
+		deleteFile: Boolean = false,
+	): MeloDeleteDownloadResponse {
 		val response = httpClient.delete(buildUrl("/api/downloads/${id.encodeURLPathPart()}")) {
 			applyMeloHeaders()
+			if (deleteFile) {
+				parameter("delete_file", "1")
+			}
 		}
-		ensureSuccess(response)
-		return true
+		return decodeResponse(response)
 	}
 
 	suspend fun getLibraryFiles(
@@ -1009,6 +1014,44 @@ class MeloKeepApiClient(
 			applyMeloHeaders()
 		}
 		return decodeResponse<MeloLocalPlaylistDetail>(response).withResolvedUrls()
+	}
+
+	suspend fun removeTracksFromLocalPlaylist(
+		playlistId: String,
+		trackIds: List<String>,
+	): MeloLocalPlaylistDetail {
+		val cleanIds = trackIds.filter { it.isNotBlank() }.distinct()
+		if (cleanIds.isEmpty()) {
+			throw MeloApiException(400, "请选择要移出的曲目")
+		}
+		return try {
+			val response = httpClient.post(
+				buildUrl("/api/playlists/${playlistId.encodeURLPathPart()}/tracks/remove")
+			) {
+				applyMeloHeaders()
+				contentType(ContentType.Application.Json)
+				setBody(MeloLocalPlaylistTracksRequest(trackIds = cleanIds))
+			}
+			decodeResponse<MeloLocalPlaylistDetail>(response).withResolvedUrls()
+		} catch (e: MeloApiException) {
+			if (!e.isMissingBatchRemoveEndpoint()) {
+				throw e
+			}
+			var latest: MeloLocalPlaylistDetail? = null
+			for (tid in cleanIds) {
+				latest = removeTrackFromLocalPlaylist(playlistId, tid)
+			}
+			latest ?: getLocalPlaylistDetail(playlistId)
+		}
+	}
+
+	private fun MeloApiException.isMissingBatchRemoveEndpoint(): Boolean {
+		if (statusCode == 404 || statusCode == 405) return true
+		val text = "$message $detail".lowercase()
+		return "404" in text ||
+			"405" in text ||
+			"not found" in text ||
+			"method not allowed" in text
 	}
 
 	suspend fun getNavidromeCapabilities(): MeloNavidromeCapabilities {

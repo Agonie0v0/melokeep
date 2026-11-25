@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -88,6 +90,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // =========================================================================
@@ -461,15 +464,20 @@ internal fun IosLibPlaylistDetailScreen(
 	onShowNotice: (String) -> Unit,
 	onBack: () -> Unit,
 	bottomPadding: PaddingValues,
+	onDeleted: (() -> Unit)? = null,
 ) {
 	val scope = rememberCoroutineScope()
 	var playlist by remember(playlistId) { mutableStateOf<IosPlaylistSummary?>(null) }
 	var tracks by remember(playlistId) { mutableStateOf<List<IosTrackItem>>(emptyList()) }
 	var loading by remember(playlistId) { mutableStateOf(true) }
-	var showRenameDialog by remember { mutableStateOf(false) }
+	var showRenameDialog by remember(playlistId) { mutableStateOf(false) }
+	var showDeletePlaylistConfirm by remember(playlistId) { mutableStateOf(false) }
+	var showBatchRemoveConfirm by remember(playlistId) { mutableStateOf(false) }
+	var actionInFlight by remember(playlistId) { mutableStateOf(false) }
+	var detailNotice by remember(playlistId) { mutableStateOf<Pair<String, Boolean>?>(null) }
 
 	var multiSelecting by remember(playlistId) { mutableStateOf(false) }
-	val selectedIds = remember(playlistId) { mutableStateMapOf<String, Boolean>() }
+	val selectedIndices = remember(playlistId) { mutableStateMapOf<Int, Boolean>() }
 
 	fun reload(showSpinner: Boolean = true) {
 		scope.launch {
@@ -477,15 +485,44 @@ internal fun IosLibPlaylistDetailScreen(
 			subsonicManager.fetchPlaylistDetail(playlistId).onSuccess { (pl, list) ->
 				playlist = pl
 				tracks = list
+			}.onFailure { err ->
+				if (tracks.isNotEmpty()) {
+					detailNotice = (err.message ?: "刷新歌单失败") to true
+				}
 			}
 			loading = false
 		}
 	}
 
-	LaunchedEffect(playlistId, refreshSeq) { reload(showSpinner = tracks.isEmpty()) }
+	LaunchedEffect(detailNotice) {
+		if (detailNotice != null) {
+			delay(3000)
+			detailNotice = null
+		}
+	}
 
+	LaunchedEffect(playlistId, refreshSeq) {
+		multiSelecting = false
+		selectedIndices.clear()
+		showBatchRemoveConfirm = false
+		reload(showSpinner = tracks.isEmpty())
+	}
+
+	LaunchedEffect(tracks) {
+		if (tracks.isEmpty()) {
+			multiSelecting = false
+			selectedIndices.clear()
+			showBatchRemoveConfirm = false
+		} else {
+			selectedIndices.keys.filter { it !in tracks.indices }.forEach { selectedIndices.remove(it) }
+		}
+	}
+
+	val pickedIndices by remember(tracks) {
+		derivedStateOf { tracks.indices.filter { selectedIndices[it] == true } }
+	}
 	val selectedTracks by remember(tracks) {
-		derivedStateOf { tracks.filter { selectedIds[it.id] == true } }
+		derivedStateOf { pickedIndices.mapNotNull { tracks.getOrNull(it) } }
 	}
 	val hasOfflineRemovable by remember(selectedTracks, offlineIds, downloadingProgress) {
 		derivedStateOf { selectedTracks.any { it.id in offlineIds || it.id in downloadingProgress } }
@@ -506,8 +543,73 @@ internal fun IosLibPlaylistDetailScreen(
 						contentDescription = "重命名歌单",
 						onClick = { showRenameDialog = true },
 					)
+					IosLibHeaderCircleButton(
+						icon = Icons.Rounded.Delete,
+						contentDescription = "删除歌单",
+						tint = MaterialTheme.colorScheme.error,
+						onClick = { showDeletePlaylistConfirm = true },
+					)
 				},
 			)
+
+			detailNotice?.let { (message, isError) ->
+				Surface(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 16.dp, vertical = 4.dp),
+					shape = RoundedCornerShape(12.dp),
+					color = if (isError) {
+						MaterialTheme.colorScheme.errorContainer
+					} else {
+						MaterialTheme.colorScheme.surfaceContainerHigh
+					},
+					border = BorderStroke(
+						IosHairlineWidth,
+						if (isError) {
+							MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+						} else {
+							iosLibHairlineBorderColor()
+						},
+					),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						Text(
+							text = message,
+							style = MaterialTheme.typography.bodySmall,
+							color = if (isError) {
+								MaterialTheme.colorScheme.onErrorContainer
+							} else {
+								MaterialTheme.colorScheme.onSurface
+							},
+							modifier = Modifier.weight(1f),
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+						)
+						Box(
+							modifier = Modifier
+								.size(22.dp)
+								.clip(CircleShape)
+								.clickable { detailNotice = null },
+							contentAlignment = Alignment.Center,
+						) {
+							Icon(
+								imageVector = Icons.Rounded.Close,
+								contentDescription = "关闭提示",
+								modifier = Modifier.size(14.dp),
+								tint = if (isError) {
+									MaterialTheme.colorScheme.onErrorContainer
+								} else {
+									MaterialTheme.colorScheme.onSurfaceVariant
+								},
+							)
+						}
+					}
+				}
+			}
 
 			if (loading && tracks.isEmpty()) {
 				Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -591,7 +693,7 @@ internal fun IosLibPlaylistDetailScreen(
 								onShuffle = { if (tracks.isNotEmpty()) audioPlayer.playQueue(tracks.shuffled(), 0) },
 								onToggleMultiSelect = {
 									multiSelecting = !multiSelecting
-									if (!multiSelecting) selectedIds.clear()
+									if (!multiSelecting) selectedIndices.clear()
 								},
 							)
 						}
@@ -607,7 +709,7 @@ internal fun IosLibPlaylistDetailScreen(
 							key = { idx, t -> "pl-${t.id}-$idx" },
 							contentType = { _, _ -> "track" },
 						) { idx, track ->
-							val isSelected = selectedIds[track.id] == true
+							val isSelected = selectedIndices[idx] == true
 							val isFirst = idx == 0
 							val isLast = idx == tracks.lastIndex
 							val rowShape = iosLibGroupedItemShape(isFirst, isLast)
@@ -634,14 +736,14 @@ internal fun IosLibPlaylistDetailScreen(
 										isSelected = isSelected,
 										onClick = {
 											if (multiSelecting) {
-												selectedIds[track.id] = !isSelected
+												selectedIndices[idx] = !isSelected
 											} else {
 												audioPlayer.playQueue(tracks, idx)
 											}
 										},
 										onLongClick = {
 											multiSelecting = true
-											selectedIds[track.id] = true
+											selectedIndices[idx] = true
 										},
 										onPlayNext = {
 											audioPlayer.playNext(track)
@@ -658,7 +760,18 @@ internal fun IosLibPlaylistDetailScreen(
 										onRemoveFromPlaylist = {
 											scope.launch {
 												subsonicManager.removeSongFromPlaylist(playlistId, idx)
-												reload(showSpinner = false)
+													.onSuccess {
+														selectedIndices.clear()
+														reload(showSpinner = false)
+														val msg = "已从歌单移除歌曲"
+														detailNotice = msg to false
+														onShowNotice(msg)
+													}
+													.onFailure { err ->
+														val msg = err.message ?: "移除歌曲失败"
+														detailNotice = msg to true
+														onShowNotice(msg)
+													}
 											}
 										},
 										onRequestPhysicalDelete = onRequestPhysicalDelete?.let { fn -> { fn(track) } },
@@ -698,22 +811,22 @@ internal fun IosLibPlaylistDetailScreen(
 				),
 		) {
 			IosLibBatchSelectionDock(
-				selectedCount = selectedTracks.size,
+				selectedCount = pickedIndices.size,
 				totalCount = tracks.size,
 				hasOfflineRemovable = hasOfflineRemovable,
 				onSelectAll = {
-					if (selectedTracks.size >= tracks.size) selectedIds.clear()
-					else tracks.forEach { selectedIds[it.id] = true }
+					if (pickedIndices.size >= tracks.size) selectedIndices.clear()
+					else tracks.indices.forEach { selectedIndices[it] = true }
 				},
 				onExit = {
 					multiSelecting = false
-					selectedIds.clear()
+					selectedIndices.clear()
 				},
 				onPlaySelected = {
 					if (selectedTracks.isNotEmpty()) {
 						audioPlayer.playQueue(selectedTracks, 0)
 						multiSelecting = false
-						selectedIds.clear()
+						selectedIndices.clear()
 					}
 				},
 				onDownloadSelected = {
@@ -721,14 +834,14 @@ internal fun IosLibPlaylistDetailScreen(
 						audioPlayer.downloadTracksOffline(selectedTracks)
 						onShowNotice(iosLibOfflineQueueNotice(selectedTracks.size))
 						multiSelecting = false
-						selectedIds.clear()
+						selectedIndices.clear()
 					}
 				},
 				onAddToPlaylist = {
 					if (selectedTracks.isNotEmpty()) {
 						onOpenAddToPlaylist(selectedTracks)
 						multiSelecting = false
-						selectedIds.clear()
+						selectedIndices.clear()
 					}
 				},
 				onDeleteOfflineSelected = {
@@ -738,10 +851,141 @@ internal fun IosLibPlaylistDetailScreen(
 					}
 					onShowNotice("已移除所选曲目的手机离线缓存")
 					multiSelecting = false
-					selectedIds.clear()
+					selectedIndices.clear()
+				},
+				onRemoveFromPlaylistSelected = {
+					if (pickedIndices.isNotEmpty()) {
+						showBatchRemoveConfirm = true
+					}
 				},
 			)
 		}
+	}
+
+	if (showBatchRemoveConfirm && pickedIndices.isNotEmpty()) {
+		val displayName = playlist?.name?.takeIf { it.isNotBlank() } ?: playlistName
+		val removeCount = pickedIndices.size
+		AlertDialog(
+			onDismissRequest = { if (!actionInFlight) showBatchRemoveConfirm = false },
+			icon = {
+				Icon(
+					imageVector = Icons.Rounded.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error,
+				)
+			},
+			title = { Text("移出歌单") },
+			text = {
+				Text("确定将选中的 $removeCount 首歌曲从「$displayName」中移出吗？仅从歌单移除，不会删除曲库源文件。")
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						val targetIndices = pickedIndices.toList()
+						if (targetIndices.isEmpty()) {
+							showBatchRemoveConfirm = false
+						} else {
+							scope.launch {
+								actionInFlight = true
+								try {
+									subsonicManager.removeSongsFromPlaylist(playlistId, targetIndices)
+										.onSuccess {
+											showBatchRemoveConfirm = false
+											multiSelecting = false
+											selectedIndices.clear()
+											reload(showSpinner = false)
+											val msg = "已从歌单移出 ${targetIndices.size} 首歌曲"
+											detailNotice = msg to false
+											onShowNotice(msg)
+										}
+										.onFailure { err ->
+											showBatchRemoveConfirm = false
+											val msg = err.message ?: "移出歌单失败"
+											detailNotice = msg to true
+											onShowNotice(msg)
+										}
+								} finally {
+									actionInFlight = false
+								}
+							}
+						}
+					},
+					enabled = !actionInFlight,
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError,
+					),
+				) {
+					Text(if (actionInFlight) "移出中…" else "移出")
+				}
+			},
+			dismissButton = {
+				TextButton(
+					onClick = { showBatchRemoveConfirm = false },
+					enabled = !actionInFlight,
+				) {
+					Text("取消")
+				}
+			},
+		)
+	}
+
+	if (showDeletePlaylistConfirm) {
+		val displayName = playlist?.name?.takeIf { it.isNotBlank() } ?: playlistName
+		AlertDialog(
+			onDismissRequest = { if (!actionInFlight) showDeletePlaylistConfirm = false },
+			icon = {
+				Icon(
+					imageVector = Icons.Rounded.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error,
+				)
+			},
+			title = { Text("删除歌单") },
+			text = {
+				Text("确定删除歌单「$displayName」吗？此操作仅删除歌单本身，不会删除曲库源文件。")
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						scope.launch {
+							actionInFlight = true
+							try {
+								subsonicManager.deletePlaylist(playlistId)
+									.onSuccess {
+										showDeletePlaylistConfirm = false
+										onShowNotice("已删除歌单「$displayName」")
+										onDeleted?.invoke() ?: onBack()
+									}
+									.onFailure { err ->
+										showDeletePlaylistConfirm = false
+										val msg = err.message ?: "删除歌单失败"
+										detailNotice = msg to true
+										onShowNotice(msg)
+									}
+							} finally {
+								actionInFlight = false
+							}
+						}
+					},
+					enabled = !actionInFlight,
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError,
+					),
+				) {
+					Text(if (actionInFlight) "删除中…" else "删除")
+				}
+			},
+			dismissButton = {
+				TextButton(
+					onClick = { showDeletePlaylistConfirm = false },
+					enabled = !actionInFlight,
+				) {
+					Text("取消")
+				}
+			},
+		)
 	}
 
 	if (showRenameDialog) {
@@ -763,8 +1007,19 @@ internal fun IosLibPlaylistDetailScreen(
 					onClick = {
 						scope.launch {
 							subsonicManager.renamePlaylist(playlistId, name)
-							showRenameDialog = false
-							reload(showSpinner = false)
+								.onSuccess {
+									showRenameDialog = false
+									reload(showSpinner = false)
+									val msg = "歌单已重命名为「${name.trim()}」"
+									detailNotice = msg to false
+									onShowNotice(msg)
+								}
+								.onFailure { err ->
+									showRenameDialog = false
+									val msg = err.message ?: "重命名歌单失败"
+									detailNotice = msg to true
+									onShowNotice(msg)
+								}
 						}
 					},
 					enabled = name.trim().isNotEmpty(),

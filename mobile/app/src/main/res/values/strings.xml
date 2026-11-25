@@ -445,6 +445,9 @@
 	<string name="notice_deleted_download">Download deleted.</string>
 	<string name="notice_deleted_downloads">Deleted downloads.</string>
 	<string name="notice_removed_from_playlist">Removed from playlist.</string>
+	<string name="notice_removed_songs_from_playlist">Removed %1$d songs from playlist.</string>
+	<string name="notice_renamed_playlist">Playlist renamed to %1$s.</string>
+	<string name="notice_error_message">%1$s</string>
 	<string name="notice_created_radio">Radio %1$s added.</string>
 	<string name="notice_added_to_queue">Added to end of queue.</string>
 	<string name="notice_play_next">Set to play next.</string>

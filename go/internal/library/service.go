@@ -571,6 +571,26 @@ func (s *Service) SaveSettings(ctx context.Context, actor auth.Actor, next Setti
 	if err != nil {
 		return Settings{}, err
 	}
+	if len(roots) > 0 {
+		libCand := resolveDirAgainstRoots(validated.LibraryDir, roots)
+		libVal, vErr := files.ValidatePath(roots, libCand, files.ValidateOptions{MustExist: false, AudioOnly: false})
+		if vErr != nil {
+			return Settings{}, vErr
+		}
+		resolvedLibDir := libVal.AbsPath
+		matchedRoot := libVal.Root
+		if _, statErr := os.Stat(resolvedLibDir); statErr == nil {
+			if wErr := files.CheckDirWritable(resolvedLibDir); wErr != nil {
+				return Settings{}, wErr
+			}
+		} else if errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, os.ErrPermission) {
+			if wErr := files.CheckNearestWritableAncestor(matchedRoot.CanonicalPath, resolvedLibDir); wErr != nil {
+				return Settings{}, wErr
+			}
+		} else {
+			return Settings{}, model.WrapError(model.ErrUnavailable, http.StatusServiceUnavailable, fmt.Sprintf("检查整理目录状态失败（%s）: %v", resolvedLibDir, statErr), statErr)
+		}
+	}
 	raw, err := json.Marshal(validated)
 	if err != nil {
 		return Settings{}, err

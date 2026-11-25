@@ -1,4 +1,4 @@
-import type { SelfUpdateStatus } from "./types";
+import type { DeleteDownloadResult, SelfUpdateStatus } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -69,6 +69,23 @@ export async function api<T>(
     );
   }
   return data as T;
+}
+
+export function downloadDeletePath(
+  id: string,
+  options?: { deleteFile?: boolean; hasFile?: boolean },
+): string {
+  const base = `/downloads/${encodeURIComponent(id)}`;
+  return options?.deleteFile && options?.hasFile
+    ? `${base}?delete_file=1`
+    : base;
+}
+
+export function deleteDownloadJob(
+  id: string,
+  options?: { deleteFile?: boolean; hasFile?: boolean },
+): Promise<DeleteDownloadResult> {
+  return api<DeleteDownloadResult>(downloadDeletePath(id, options), "DELETE");
 }
 
 export interface NavidromeArchiveRequest {

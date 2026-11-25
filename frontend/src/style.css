@@ -3600,6 +3600,50 @@ tr.current {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+.confirm-dialog-option {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--subtle);
+}
+.confirm-dialog-option.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+.confirm-dialog-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.confirm-dialog-check input[type="checkbox"] {
+  margin-top: 2px;
+  flex: none;
+}
+.confirm-dialog-check input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.confirm-dialog-option.is-danger .confirm-dialog-check {
+  color: var(--danger);
+}
+.confirm-dialog-option.is-danger .confirm-dialog-check input[type="checkbox"] {
+  accent-color: var(--danger);
+}
+.confirm-dialog-option-warn {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .login-dialog {
   width: min(408px, 100%);
   padding: 36px 32px 32px;

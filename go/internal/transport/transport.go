@@ -435,11 +435,19 @@ func (p *Pool) Do(ctx context.Context, req *http.Request, opts RequestOptions) (
 		}
 	}
 
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
+	var (
+		reqCtx context.Context
+		cancel context.CancelFunc
+	)
+	if opts.Timeout < 0 {
+		reqCtx, cancel = context.WithCancel(ctx)
+	} else {
+		timeout := opts.Timeout
+		if timeout == 0 {
+			timeout = DefaultTimeout
+		}
+		reqCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	cloneReq := req.Clone(reqCtx)
 
 	initialOrigin := originKey(cloneReq.URL)

@@ -171,6 +171,11 @@ export interface DownloadJob {
   file: string | null;
   processing?: { id: string; status: string; detail: string };
 }
+export interface DeleteDownloadResult {
+  removed?: boolean;
+  file_deleted?: boolean;
+  track_ids?: string[];
+}
 export interface LibraryFile {
   path: string;
   name: string;

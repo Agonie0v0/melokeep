@@ -10,6 +10,7 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import paige.navic.database.dao.AlbumDao
@@ -85,6 +86,37 @@ class CollectionRepository(
 			id = playlistId,
 			songIndicesToRemove = listOf(position)
 		)
+	}
+
+	suspend fun removeSongsFromPlaylist(playlistId: String, positions: List<Int>) {
+		val sorted = positions
+			.filter { it >= 0 }
+			.distinct()
+			.sortedDescending()
+		if (sorted.isEmpty()) return
+		sessionManager.api.updatePlaylist(
+			id = playlistId,
+			songIndicesToRemove = sorted
+		)
+	}
+
+	suspend fun renamePlaylist(playlistId: String, name: String) {
+		val cleanName = name.trim()
+		require(cleanName.isNotEmpty()) { "歌单名称不能为空" }
+		sessionManager.api.updatePlaylist(
+			id = playlistId,
+			name = cleanName
+		)
+	}
+
+	suspend fun deletePlaylist(playlistId: String) {
+		sessionManager.api.deletePlaylist(playlistId)
+		try {
+			playlistDao.deletePlaylistWithSongs(playlistId)
+		} catch (e: CancellationException) {
+			throw e
+		} catch (_: Exception) {
+		}
 	}
 
 	fun getPagedPlaylistSongs(playlistId: String): Flow<PagingData<DomainSong>> {

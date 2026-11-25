@@ -774,6 +774,11 @@ func (s *Service) ToDTO(ctx context.Context, dl model.Download) (model.DownloadJ
 	}, nil
 }
 
+// AuthorizeControl verifies actor permission and ownership for controlling a download task.
+func (s *Service) AuthorizeControl(ctx context.Context, actor auth.Actor, downloadID string) (model.Download, error) {
+	return s.authorizeControl(ctx, actor, downloadID)
+}
+
 func (s *Service) authorizeControl(ctx context.Context, actor auth.Actor, downloadID string) (model.Download, error) {
 	if !actor.Authenticated {
 		return model.Download{}, model.NewError(model.ErrUnauthorized, http.StatusUnauthorized, "登录已失效，请重新登录")

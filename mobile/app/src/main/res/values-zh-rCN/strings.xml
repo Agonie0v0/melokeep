@@ -513,6 +513,9 @@
 	<string name="action_edit_discord_app_id">编辑 Discord 应用 ID</string>
 	<string name="notice_deleted_radio">已删除电台。</string>
 	<string name="notice_deleted_downloads">已删除下载内容。</string>
+	<string name="notice_removed_songs_from_playlist">已从歌单移除 %1$d 首歌曲。</string>
+	<string name="notice_renamed_playlist">歌单已重命名为「%1$s」。</string>
+	<string name="notice_error_message">%1$s</string>
 	<string name="info_delete_download_single">确定要删除 %1$s 的下载文件吗？</string>
 	<string name="info_delete_download_collection">确定要删除 %1$s 中已下载的歌曲吗？</string>
 	<string name="info_delete_download_library">确定要删除此设备上所有已下载的歌曲吗？</string>

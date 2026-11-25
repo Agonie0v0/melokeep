@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agonie0v0/melokeep/internal/auth"
 	"github.com/agonie0v0/melokeep/internal/download"
 	"github.com/agonie0v0/melokeep/internal/files"
 	"github.com/agonie0v0/melokeep/internal/helper"
@@ -184,6 +185,28 @@ func (s *Server) handleDownloadControl(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
+func parseBoolQueryParam(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNotFoundFileErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if de, ok := model.AsDomainError(err); ok && de.Code == model.ErrNotFound {
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleDownloadDelete(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Download == nil {
 		writeError(w, http.StatusServiceUnavailable, "下载服务未初始化")
@@ -191,12 +214,76 @@ func (s *Server) handleDownloadDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	ident := r.PathValue("ident")
 	actor := actorFromRequest(r)
+	deleteFile := parseBoolQueryParam(r.URL.Query().Get("delete_file"))
+	fileDeleted := false
+	trackIDs := []string{}
+
+	if deleteFile {
+		if !actor.Authenticated {
+			writeError(w, http.StatusUnauthorized, "登录已失效，请重新登录")
+			return
+		}
+		if actor.ReadOnlyAI || !actor.Has(auth.PermLocalWrite) {
+			writeError(w, http.StatusForbidden, "缺少删除本地音乐文件的权限")
+			return
+		}
+		dl, err := s.deps.Download.AuthorizeControl(r.Context(), actor, ident)
+		if err != nil {
+			writeDomainError(w, err)
+			return
+		}
+		if dl.File != nil && strings.TrimSpace(*dl.File) != "" && s.deps.Files != nil {
+			vp, asset, rErr := s.resolveLibraryTarget(r.Context(), strings.TrimSpace(*dl.File), false)
+			if rErr != nil {
+				if !isNotFoundFileErr(rErr) {
+					writeDomainError(w, rErr)
+					return
+				}
+			} else {
+				assetID := ""
+				var expectedRev int64
+				if asset != nil {
+					assetID = asset.ID
+					expectedRev = asset.Revision
+				}
+				if _, opErr := s.deps.Files.Execute(r.Context(), files.OperationRequest{
+					Kind:             "delete",
+					AssetID:          assetID,
+					ExpectedRevision: expectedRev,
+					SourcePath:       vp.AbsPath,
+				}); opErr != nil {
+					if !isNotFoundFileErr(opErr) {
+						writeDomainError(w, opErr)
+						return
+					}
+				} else {
+					fileDeleted = true
+					if assetID != "" {
+						if cleaned := s.cleanupDeletedAssetRefs(r.Context(), []string{assetID}); cleaned != nil {
+							trackIDs = cleaned
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if err := s.deps.Download.Delete(r.Context(), actor, ident); err != nil {
 		writeDomainError(w, err)
 		return
 	}
-	s.pushLog("info", "已移除下载任务记录", "download", ident)
-	writeJSON(w, http.StatusOK, map[string]any{"removed": true})
+	if fileDeleted {
+		s.pushLog("info", "已移除下载任务记录并同步删除本地音频文件", "download", ident)
+	} else if deleteFile {
+		s.pushLog("info", "已移除下载任务记录（未发现可删除的本地文件）", "download", ident)
+	} else {
+		s.pushLog("info", "已移除下载任务记录", "download", ident)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"removed":      true,
+		"file_deleted": fileDeleted,
+		"track_ids":    trackIDs,
+	})
 }
 
 func (s *Server) queryLibraryFilesPage(ctx context.Context, q store.LibraryFilesQuery) (model.LibraryFilesPageDTO, error) {

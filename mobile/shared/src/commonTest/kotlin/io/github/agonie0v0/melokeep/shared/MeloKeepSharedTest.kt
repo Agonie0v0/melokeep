@@ -3458,6 +3458,270 @@ class MeloKeepSharedTest {
 		scope.cancel()
 		client.close()
 	}
+
+	@Test
+	fun deleteDownloadSupportsDeleteFileParamLegacyResponsesAndLibraryRefresh() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-dl",
+			tokenId = "tid-dl",
+			mediaToken = "",
+			mediaTokenExpiresAt = 0L,
+			authEnabled = true,
+		)
+
+		val recordedUrls = mutableListOf<String>()
+		var libraryFetchCount = 0
+		var jobsOnServer = listOf(
+			MeloDownloadJob(
+				id = "dl-1",
+				track = MeloTrack(id = "trk-1", title = "Track A", artist = "Artist A"),
+				status = "complete",
+				file = "/music/Track A.flac",
+			),
+			MeloDownloadJob(
+				id = "dl-2",
+				track = MeloTrack(id = "trk-2", title = "Track B", artist = "Artist B"),
+				status = "complete",
+				file = "/music/Track B.flac",
+			),
+			MeloDownloadJob(
+				id = "dl-3",
+				track = MeloTrack(id = "trk-3", title = "Track C", artist = "Artist C"),
+				status = "complete",
+				file = null,
+			),
+			MeloDownloadJob(
+				id = "dl-4",
+				track = MeloTrack(id = "trk-4", title = "Track D", artist = "Artist D"),
+				status = "downloading",
+				file = null,
+			),
+		)
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			recordedUrls += "${request.method.value} ${request.url}"
+			when {
+				request.method == HttpMethod.Get && path == "/api/downloads" -> respond(
+					content = """
+						[
+						  {"id":"dl-1","track":{"id":"trk-1","title":"Track A","artist":"Artist A"},"status":"complete","file":"/music/Track A.flac"},
+						  {"id":"dl-2","track":{"id":"trk-2","title":"Track B","artist":"Artist B"},"status":"complete","file":"/music/Track B.flac"},
+						  {"id":"dl-3","track":{"id":"trk-3","title":"Track C","artist":"Artist C"},"status":"complete","file":null},
+						  {"id":"dl-4","track":{"id":"trk-4","title":"Track D","artist":"Artist D"},"status":"downloading","file":null}
+						]
+					""".trimIndent(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Get && path == "/api/library/files" -> {
+					libraryFetchCount++
+					val itemsJson = if (libraryFetchCount == 1) {
+						"""[{"path":"asset:a1","name":"sample.flac","size":1234,"root":"/music","folder":""}]"""
+					} else {
+						"[]"
+					}
+					respond(
+						content = """{"items":$itemsJson,"next_cursor":null,"index_revision":$libraryFetchCount,"indexing":false,"folders":[]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Delete && path == "/api/downloads/dl-keep" -> {
+					assertNull(request.url.parameters["delete_file"])
+					respond("""{"removed":true}""", HttpStatusCode.OK, jsonHeaders)
+				}
+				request.method == HttpMethod.Delete && path == "/api/downloads/dl-empty" -> {
+					assertEquals("1", request.url.parameters["delete_file"])
+					respond("", HttpStatusCode.NoContent)
+				}
+				request.method == HttpMethod.Delete && path == "/api/downloads/dl-1" -> {
+					assertEquals("1", request.url.parameters["delete_file"])
+					jobsOnServer = jobsOnServer.filterNot { it.id == "dl-1" }
+					respond(
+						content = """{"removed":true,"file_deleted":true,"track_ids":["asset:a1"]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Delete && path == "/api/downloads/dl-2" -> {
+					assertEquals("1", request.url.parameters["delete_file"])
+					jobsOnServer = jobsOnServer.filterNot { it.id == "dl-2" }
+					respond(
+						content = """{"removed":true,"file_deleted":false,"track_ids":[]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				request.method == HttpMethod.Delete && path == "/api/downloads/dl-3" -> {
+					assertNull(request.url.parameters["delete_file"])
+					jobsOnServer = jobsOnServer.filterNot { it.id == "dl-3" }
+					respond(
+						content = """{"removed":true,"file_deleted":false,"track_ids":[]}""",
+						status = HttpStatusCode.OK,
+						headers = jsonHeaders,
+					)
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+
+		// 1. Direct ApiClient tests for deleteFile=false, empty 204 body, and deleteFile=true
+		val keepRes = client.deleteDownload("dl-keep", deleteFile = false)
+		assertTrue(keepRes.removed)
+		assertFalse(keepRes.fileDeleted)
+		assertTrue(keepRes.trackIds.isEmpty())
+
+		val emptyRes = client.deleteDownload("dl-empty", deleteFile = true)
+		assertTrue(emptyRes.removed)
+		assertFalse(emptyRes.fileDeleted)
+		assertTrue(emptyRes.trackIds.isEmpty())
+
+		// 2. Controller tests: delete single with file_deleted=true refreshes cached libraryFiles
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloStudioController(client, controllerScope)
+		controller.loadLibraryFiles(reset = true)
+		controller.refreshDownloads()
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { it.libraryFiles.size == 1 && it.downloads.size == 4 }
+			}
+		}
+
+		controller.deleteDownload("dl-1", deleteFile = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { s ->
+					s.downloads.none { it.id == "dl-1" } &&
+						s.noticeMessage == "已删除下载记录，并删除本地文件" &&
+						s.libraryFiles.isEmpty()
+				}
+			}
+		}
+		assertEquals(2, libraryFetchCount)
+
+		// 3. clearCompletedDownloads(deleteFiles=true) passes delete_file=1 only when job.file is non-blank
+		controller.clearNotice()
+		controller.clearCompletedDownloads(deleteFiles = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { s ->
+					s.downloads.map { it.id } == listOf("dl-4") &&
+						s.noticeMessage?.contains("已清理 2 条") == true
+				}
+			}
+		}
+		assertTrue(recordedUrls.any { it == "DELETE https://melo.example.com/api/downloads/dl-2?delete_file=1" })
+		assertTrue(recordedUrls.any { it == "DELETE https://melo.example.com/api/downloads/dl-3" })
+
+		controllerScope.cancel()
+		client.close()
+	}
+
+	@Test
+	fun removeTracksFromLocalPlaylistSupportsBatchEndpointAnd404Fallback() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-pl",
+			tokenId = "tid-pl",
+			mediaToken = "",
+			mediaTokenExpiresAt = 0L,
+			authEnabled = true,
+		)
+
+		var serverMode = "batch"
+		var playlistTracks = listOf(
+			MeloTrack(id = "trk-1", source = "local", title = "Track A", artist = "Artist A"),
+			MeloTrack(id = "trk-2", source = "local", title = "Track B", artist = "Artist B"),
+			MeloTrack(id = "trk-3", source = "local", title = "Track C", artist = "Artist C"),
+		)
+		val legacyDeletedIds = mutableListOf<String>()
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+			fun playlistJson(): String {
+				val tracksJson = playlistTracks.joinToString(prefix = "[", postfix = "]") { t ->
+					"""{"id":"${t.id}","source":"local","title":"${t.title}","artist":"${t.artist}","qualities":[],"playback":{"state":"ready"}}"""
+				}
+				return """{"id":"pl-1","name":"Test Playlist","source":"custom","tracks":$tracksJson,"detail":"","task_id":"pl-1"}"""
+			}
+			when {
+				request.method == HttpMethod.Get && path == "/api/playlists" -> respond(
+					content = """[{"id":"pl-1","name":"Test Playlist","source":"custom","track_count":${playlistTracks.size},"issue_count":0}]""",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Get && path == "/api/playlists/pl-1" -> respond(
+					content = playlistJson(),
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Post && path == "/api/playlists/pl-1/tracks/remove" -> {
+					if (serverMode == "legacy_404") {
+						respond("""{"detail":"Not Found"}""", HttpStatusCode.NotFound, jsonHeaders)
+					} else {
+						val body = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+						val ids = body["track_ids"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+						assertEquals(listOf("trk-1", "trk-2"), ids)
+						playlistTracks = playlistTracks.filterNot { it.id in ids }
+						respond(playlistJson(), HttpStatusCode.OK, jsonHeaders)
+					}
+				}
+				request.method == HttpMethod.Delete && path.startsWith("/api/playlists/pl-1/tracks/") -> {
+					val tid = path.substringAfterLast('/')
+					legacyDeletedIds += tid
+					playlistTracks = playlistTracks.filterNot { it.id == tid }
+					respond(playlistJson(), HttpStatusCode.OK, jsonHeaders)
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloLocalLibraryController(client, controllerScope)
+
+		controller.refreshPlaylists()
+		controller.loadPlaylistDetail("pl-1")
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { it.playlists.size == 1 && it.activePlaylist?.tracks?.size == 3 }
+			}
+		}
+
+		// 1. New server batch endpoint deduplicates and filters blank IDs
+		controller.removeTracksFromPlaylist("pl-1", listOf("trk-1", "", "   ", "trk-2", "trk-1"))
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.mutating && it.activePlaylist?.tracks?.map { t -> t.id } == listOf("trk-3") }
+			}
+		}
+		assertEquals(1, controller.state.value.playlists.first { it.id == "pl-1" }.trackCount)
+		assertEquals("已从歌单移除 2 首歌曲", controller.state.value.noticeMessage)
+
+		// 2. Legacy server 404 triggers fallback loop to single-item DELETE
+		serverMode = "legacy_404"
+		playlistTracks = listOf(
+			MeloTrack(id = "trk-1", source = "local", title = "Track A", artist = "Artist A"),
+			MeloTrack(id = "trk-2", source = "local", title = "Track B", artist = "Artist B"),
+			MeloTrack(id = "trk-3", source = "local", title = "Track C", artist = "Artist C"),
+		)
+		val fallbackResult = client.removeTracksFromLocalPlaylist("pl-1", listOf("trk-1", "trk-3", "trk-1", ""))
+		assertEquals(listOf("trk-1", "trk-3"), legacyDeletedIds)
+		assertEquals(listOf("trk-2"), fallbackResult.tracks.map { it.id })
+
+		controllerScope.cancel()
+		client.close()
+	}
 }
 
 class MeloSourceLabelRegistryTest {

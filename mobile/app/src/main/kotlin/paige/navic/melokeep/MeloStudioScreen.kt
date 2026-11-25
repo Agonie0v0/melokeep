@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -29,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +74,7 @@ import paige.navic.domain.repository.DbRepository
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.component.layout.NestedTopBarDefaults
 import paige.navic.ui.icons.Icons
+import paige.navic.ui.icons.outlined.Delete
 import paige.navic.ui.icons.outlined.Refresh
 import paige.navic.ui.theme.MeloBottomChromeClearance
 import paige.navic.ui.theme.defaultFont
@@ -194,6 +200,10 @@ fun MeloStudioScreen(
 	var diffSheetVisible by remember { mutableStateOf(false) }
 	var autoOpenNextJobDetail by remember { mutableStateOf(false) }
 	var recentlyDeletedJobIds by remember { mutableStateOf(emptySet<String>()) }
+	var pendingDeleteDownloadJob by remember { mutableStateOf<MeloDownloadJob?>(null) }
+	var deleteDownloadFileChecked by remember { mutableStateOf(false) }
+	var pendingClearCompletedConfirm by remember { mutableStateOf(false) }
+	var clearCompletedDeleteFilesChecked by remember { mutableStateOf(false) }
 
 	val selectWorkspaceTab: (MeloStudioWorkspaceTab) -> Unit = { target ->
 		workspaceTab = target
@@ -355,9 +365,15 @@ fun MeloStudioScreen(
 							onPauseAll = controller::pauseAllDownloads,
 							onResumeAll = controller::resumeAllDownloads,
 							onRetryFailed = controller::retryFailedDownloads,
-							onClearCompleted = controller::clearCompletedDownloads,
+							onClearCompleted = {
+								clearCompletedDeleteFilesChecked = false
+								pendingClearCompletedConfirm = true
+							},
 							onControl = controller::controlDownload,
-							onDelete = controller::deleteDownload,
+							onDelete = { job ->
+								deleteDownloadFileChecked = false
+								pendingDeleteDownloadJob = job
+							},
 							onPreviewPlay = { job ->
 								val song = MeloTrackMapper.toDomainSong(job.track)
 								if (currentSongId == song.id) {
@@ -582,6 +598,156 @@ fun MeloStudioScreen(
 			},
 			onCancelJob = controller::cancelLibraryJob,
 			onRetryJob = controller::retryLibraryJob
+		)
+	}
+
+	pendingDeleteDownloadJob?.let { targetJob ->
+		val hasLocalFile = !targetJob.file.isNullOrBlank()
+		val taskTitle = targetJob.track.title.ifBlank { "未知曲目" }
+		AlertDialog(
+			onDismissRequest = { pendingDeleteDownloadJob = null },
+			icon = {
+				Icon(
+					imageVector = Icons.Outlined.Delete,
+					contentDescription = null,
+					tint = MaterialTheme.colorScheme.error
+				)
+			},
+			title = { Text("删除下载任务") },
+			text = {
+				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+					Text("确认删除「$taskTitle」的下载记录吗？")
+					if (hasLocalFile) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { deleteDownloadFileChecked = !deleteDownloadFileChecked }
+								.padding(vertical = 4.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp)
+						) {
+							Checkbox(
+								checked = deleteDownloadFileChecked,
+								onCheckedChange = { deleteDownloadFileChecked = it }
+							)
+							Text(
+								text = "同时删除已下载的本地音频文件（不可恢复）",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurface
+							)
+						}
+						if (deleteDownloadFileChecked) {
+							Text(
+								text = "将同步从服务器磁盘永久移除该音频文件，操作不可撤销。",
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.error
+							)
+						}
+					}
+				}
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						val shouldDeleteFile = deleteDownloadFileChecked && hasLocalFile
+						pendingDeleteDownloadJob = null
+						controller.deleteDownload(targetJob.id, shouldDeleteFile)
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = MaterialTheme.colorScheme.error,
+						contentColor = MaterialTheme.colorScheme.onError
+					)
+				) {
+					Text("确认删除")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingDeleteDownloadJob = null }) {
+					Text("取消")
+				}
+			}
+		)
+	}
+
+	if (pendingClearCompletedConfirm) {
+		val clearTargets = state.downloads.filter {
+			val status = it.status.trim().lowercase()
+			status == "complete" || status == "completed" || status == "cancelled"
+		}
+		val totalClearCount = clearTargets.size
+		val deletableFileCount = clearTargets.count { !it.file.isNullOrBlank() }
+		AlertDialog(
+			onDismissRequest = { pendingClearCompletedConfirm = false },
+			icon = {
+				Icon(
+					imageVector = MeloIcons.CleaningServices,
+					contentDescription = null,
+					tint = if (clearCompletedDeleteFilesChecked && deletableFileCount > 0) {
+						MaterialTheme.colorScheme.error
+					} else {
+						MaterialTheme.colorScheme.primary
+					}
+				)
+			},
+			title = { Text("清理已完成任务") },
+			text = {
+				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+					Text("将清理 $totalClearCount 条已结束的下载任务记录。")
+					if (deletableFileCount > 0) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { clearCompletedDeleteFilesChecked = !clearCompletedDeleteFilesChecked }
+								.padding(vertical = 4.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp)
+						) {
+							Checkbox(
+								checked = clearCompletedDeleteFilesChecked,
+								onCheckedChange = { clearCompletedDeleteFilesChecked = it }
+							)
+							Text(
+								text = "同时删除对应的 $deletableFileCount 个本地音频文件（不可恢复）",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurface
+							)
+						}
+						if (clearCompletedDeleteFilesChecked) {
+							Text(
+								text = "勾选后将同步从服务器磁盘永久移除这 $deletableFileCount 个音频文件，操作不可撤销。",
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.error
+							)
+						}
+					}
+				}
+			},
+			confirmButton = {
+				Button(
+					onClick = {
+						val shouldDeleteFiles = clearCompletedDeleteFilesChecked && deletableFileCount > 0
+						pendingClearCompletedConfirm = false
+						controller.clearCompletedDownloads(shouldDeleteFiles)
+					},
+					colors = if (clearCompletedDeleteFilesChecked && deletableFileCount > 0) {
+						ButtonDefaults.buttonColors(
+							containerColor = MaterialTheme.colorScheme.error,
+							contentColor = MaterialTheme.colorScheme.onError
+						)
+					} else {
+						ButtonDefaults.buttonColors()
+					}
+				) {
+					Text("确认清理")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { pendingClearCompletedConfirm = false }) {
+					Text("取消")
+				}
+			}
 		)
 	}
 }

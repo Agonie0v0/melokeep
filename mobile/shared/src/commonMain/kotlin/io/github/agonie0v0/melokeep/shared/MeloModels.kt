@@ -311,6 +311,15 @@ data class MeloDownloadEnqueueItem(
 )
 
 @Serializable
+data class MeloDeleteDownloadResponse(
+	val removed: Boolean = true,
+	@SerialName("file_deleted")
+	val fileDeleted: Boolean = false,
+	@SerialName("track_ids")
+	val trackIds: List<String> = emptyList(),
+)
+
+@Serializable
 data class MeloLibraryFile(
 	val path: String = "",
 	val name: String = "",

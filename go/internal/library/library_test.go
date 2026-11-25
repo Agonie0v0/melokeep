@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -3584,5 +3585,97 @@ func TestLibrarySettingsLegacyFallbackAndPartialJSONDefaults(t *testing.T) {
 	}
 	if loaded2.LibraryDir != "modern_lib" || loaded2.WatchApply {
 		t.Fatalf("expected modern library_settings to take precedence, got %+v", loaded2)
+	}
+}
+
+func TestSaveSettingsChecksLibraryDirWritability(t *testing.T) {
+	ctx := context.Background()
+	admin := auth.WebAdminActor("admin")
+	_, _, svc, root := setupLibraryTestEnv(t, newMemTagger(), ScraperOptions{}, nil, nil)
+
+	// 1. Non-existent library_dir inside a writable root succeeds without creating the folder.
+	nonExist := DefaultSettings()
+	nonExist.LibraryDir = "future_library_dir"
+	saved, err := svc.SaveSettings(ctx, admin, nonExist)
+	if err != nil {
+		t.Fatalf("expected SaveSettings with non-existent subdir under writable root to succeed, got %v", err)
+	}
+	if saved.LibraryDir != "future_library_dir" {
+		t.Fatalf("unexpected LibraryDir: %q", saved.LibraryDir)
+	}
+	if _, statErr := os.Stat(filepath.Join(root.CanonicalPath, "future_library_dir")); !os.IsNotExist(statErr) {
+		t.Fatalf("SaveSettings must not eagerly create library_dir, statErr=%v", statErr)
+	}
+
+	// 2. Existing regular file at library_dir is rejected cleanly.
+	fileTarget := filepath.Join(root.CanonicalPath, "not_a_dir")
+	if err := os.WriteFile(fileTarget, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	badFile := DefaultSettings()
+	badFile.LibraryDir = "not_a_dir"
+	if _, err := svc.SaveSettings(ctx, admin, badFile); err == nil {
+		t.Fatal("expected SaveSettings to reject regular file as library_dir")
+	}
+
+	// 3. Outside-root path is rejected.
+	outside := DefaultSettings()
+	outside.LibraryDir = t.TempDir()
+	if _, err := svc.SaveSettings(ctx, admin, outside); err == nil {
+		t.Fatal("expected SaveSettings to reject library_dir outside root")
+	}
+
+	// 4. Read-only / inaccessible directories on Unix (non-root) are rejected with 403.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		roDir := filepath.Join(root.CanonicalPath, "ro_lib")
+		if err := os.MkdirAll(roDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(roDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roDir, 0o755) })
+
+		roSettings := DefaultSettings()
+		roSettings.LibraryDir = "ro_lib"
+		if _, err := svc.SaveSettings(ctx, admin, roSettings); err == nil {
+			t.Fatal("expected SaveSettings to reject 0o500 library_dir")
+		} else if de, ok := model.AsDomainError(err); !ok || de.HTTPStatus() != http.StatusForbidden {
+			t.Fatalf("expected 403 for 0o500 library_dir, got %v", err)
+		}
+
+		roChild := DefaultSettings()
+		roChild.LibraryDir = "ro_lib/nested"
+		if _, err := svc.SaveSettings(ctx, admin, roChild); err == nil {
+			t.Fatal("expected SaveSettings to reject nested subdir under 0o500 ancestor")
+		} else if de, ok := model.AsDomainError(err); !ok || de.HTTPStatus() != http.StatusForbidden {
+			t.Fatalf("expected 403 for nested subdir under 0o500 ancestor, got %v", err)
+		}
+
+		lockedDir := filepath.Join(root.CanonicalPath, "locked_lib")
+		if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(lockedDir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+		lockedSettings := DefaultSettings()
+		lockedSettings.LibraryDir = "locked_lib"
+		if _, err := svc.SaveSettings(ctx, admin, lockedSettings); err == nil {
+			t.Fatal("expected SaveSettings to reject 0o000 library_dir")
+		} else if de, ok := model.AsDomainError(err); !ok || de.HTTPStatus() != http.StatusForbidden {
+			t.Fatalf("expected 403 for 0o000 library_dir, got %v", err)
+		}
+	}
+
+	// 5. Empty roots (e.g., virtual/no-coordinator test service) still works without disk errors.
+	noCoordSvc := NewService(svc.store, nil, nil, nil, nil, ServiceOptions{})
+	t.Cleanup(func() { _ = noCoordSvc.Close() })
+	virtual := DefaultSettings()
+	virtual.LibraryDir = "virtual_lib"
+	if _, err := noCoordSvc.SaveSettings(ctx, admin, virtual); err != nil {
+		t.Fatalf("expected SaveSettings without roots to succeed, got %v", err)
 	}
 }

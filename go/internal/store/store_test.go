@@ -464,3 +464,69 @@ func TestUpsertMediaVariantCollisionSafety(t *testing.T) {
 		t.Fatalf("expected reassigned unique variant ID for track2, got %+v err=%v", vars2, err)
 	}
 }
+
+func TestRemoveCollectionItemsCompactsAndChecksRevision(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"t1", "t2", "t3", "t4"} {
+		trID, err := st.UpsertProviderTrack(ctx, store.ProviderTrackRecord{
+			Source: "audius", Locator: id, RootSource: "AudiusMusicClient", Title: "Track " + id, Artist: "Artist A",
+		}, nil)
+		if err != nil {
+			t.Fatalf("UpsertProviderTrack %s: %v", id, err)
+		}
+		if err := st.PutPublicRef(ctx, model.PublicRef{
+			PublicID: id, Kind: "candidate", TargetID: trID, Source: "audius", SourceID: id,
+		}, ""); err != nil {
+			t.Fatalf("PutPublicRef %s: %v", id, err)
+		}
+	}
+
+	col, err := st.CreateCollection(ctx, store.CreateCollectionParams{
+		Name:     "Batch Remove Playlist",
+		Kind:     "playlist",
+		OwnerKey: "web_admin:admin",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	rev1, err := st.AddCollectionItems(ctx, col.ID, []string{"t1", "t2", "t3", "t4"}, 1)
+	if err != nil || rev1 != 2 {
+		t.Fatalf("AddCollectionItems: rev=%d err=%v", rev1, err)
+	}
+
+	// Missing collection -> 404.
+	if _, _, err := st.RemoveCollectionItems(ctx, "missing-col", []string{"t1"}, 0); err == nil {
+		t.Fatal("expected 404 for missing collection")
+	} else if de, ok := model.AsDomainError(err); !ok || de.HTTPStatus() != http.StatusNotFound {
+		t.Fatalf("expected 404, got %v", err)
+	}
+
+	// Stale revision -> 409.
+	if _, _, err := st.RemoveCollectionItems(ctx, col.ID, []string{"t1"}, 1); err == nil {
+		t.Fatal("expected 409 for stale revision")
+	} else if de, ok := model.AsDomainError(err); !ok || de.HTTPStatus() != http.StatusConflict {
+		t.Fatalf("expected 409, got %v", err)
+	}
+
+	// Batch remove with duplicates, blanks, and non-existent refs.
+	newRev, removedCount, err := st.RemoveCollectionItems(ctx, col.ID, []string{"", " t2 ", "t2", "t4", "absent"}, rev1)
+	if err != nil {
+		t.Fatalf("RemoveCollectionItems: %v", err)
+	}
+	if removedCount != 2 || newRev != rev1+1 {
+		t.Fatalf("expected removedCount=2 newRev=%d, got removed=%d newRev=%d", rev1+1, removedCount, newRev)
+	}
+
+	gotCol, items, ok, err := st.GetCollection(ctx, col.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetCollection: ok=%v err=%v", ok, err)
+	}
+	if len(items) != 2 || items[0].PublicID != "t1" || items[0].Position != 0 || items[1].PublicID != "t3" || items[1].Position != 1 {
+		t.Fatalf("unexpected compacted items: %+v", items)
+	}
+	if gotCol.Revision != fmt.Sprintf("%d", newRev) {
+		t.Fatalf("revision mismatch: got=%s want=%d", gotCol.Revision, newRev)
+	}
+}

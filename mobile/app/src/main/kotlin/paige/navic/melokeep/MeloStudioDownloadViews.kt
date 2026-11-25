@@ -72,7 +72,7 @@ internal fun StudioDownloadsTabContent(
 	onRetryFailed: () -> Unit,
 	onClearCompleted: () -> Unit,
 	onControl: (id: String, action: String) -> Unit,
-	onDelete: (id: String) -> Unit,
+	onDelete: (MeloDownloadJob) -> Unit,
 	onPreviewPlay: (MeloDownloadJob) -> Unit,
 	onGoScrape: (filePath: String, downloadId: String) -> Unit,
 	onRescrape: (filePath: String, downloadId: String) -> Unit
@@ -233,7 +233,7 @@ internal fun StudioDownloadsTabContent(
 				onPause = { onControl(job.id, "pause") },
 				onResume = { onControl(job.id, "resume") },
 				onRetry = { onControl(job.id, "retry") },
-				onDelete = { onDelete(job.id) },
+				onDelete = { onDelete(job) },
 				onPreviewPlay = { onPreviewPlay(job) },
 				onGoScrape = {
 					job.file?.takeIf { it.isNotBlank() }?.let { filePath ->

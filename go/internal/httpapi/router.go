@@ -393,6 +393,7 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodPost, "/api/playlists", "engine_api.collection_create", s.handleCollectionCreate)
 	s.addRoute(http.MethodGet, "/api/playlists/{ident}", "engine_api.collection_read", s.handleCollectionRead)
 	s.addRoute(http.MethodPost, "/api/playlists/{ident}/tracks", "engine_api.collection_add_tracks", s.handleCollectionAddTracks)
+	s.addRoute(http.MethodPost, "/api/playlists/{ident}/tracks/remove", "engine_api.collection_remove_tracks", s.handleCollectionRemoveTracks)
 	s.addRoute(http.MethodPatch, "/api/playlists/{ident}", "engine_api.collection_rename", s.handleCollectionRename)
 	s.addRoute(http.MethodDelete, "/api/playlists/{ident}", "engine_api.collection_delete", s.handleCollectionDelete)
 	s.addRoute(http.MethodDelete, "/api/playlists/{ident}/tracks/{sid}", "engine_api.collection_remove_track", s.handleCollectionRemoveTrack)

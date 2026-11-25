@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -904,6 +905,33 @@ func isRejectedStreamContentType(ct string) bool {
 	}
 }
 
+const streamRangeChunkBytes int64 = 4 << 20
+
+var errInvalidStreamURL = errors.New("invalid stream url")
+
+func capOpenEndedRangeHeader(raw string, chunkBytes int64) (string, bool) {
+	if chunkBytes <= 0 {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || len(trimmed) < len("bytes=") || !strings.EqualFold(trimmed[:len("bytes=")], "bytes=") {
+		return "", false
+	}
+	spec := strings.TrimSpace(trimmed[len("bytes="):])
+	if spec == "" || strings.Contains(spec, ",") {
+		return "", false
+	}
+	startStr, endStr, ok := strings.Cut(spec, "-")
+	if !ok || strings.TrimSpace(endStr) != "" {
+		return "", false
+	}
+	start, ok := parseNonNegDecimal(strings.TrimSpace(startStr))
+	if !ok || start < 0 || start > math.MaxInt64-(chunkBytes-1) {
+		return "", false
+	}
+	return fmt.Sprintf("bytes=%d-%d", start, start+chunkBytes-1), true
+}
+
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("sid")
 	tr, asset, found, err := s.loadDomainTrack(r.Context(), sid)
@@ -934,6 +962,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snap := s.currentSnapshot()
+	origRange := r.Header.Get("Range")
+	ifRange := r.Header.Get("If-Range")
 	for attempt := 0; attempt < 2; attempt++ {
 		refresh := attempt > 0
 		resolved, rErr := s.resolveMediaCached(r.Context(), sid, tr, refresh, !actorFromRequest(r).ReadOnlyAI)
@@ -952,43 +982,64 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "该曲目暂不支持在线流式试听")
 			return
 		}
-		upReq, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, target.URL, nil)
-		if reqErr != nil {
-			writeError(w, http.StatusBadGateway, "无效的音频流地址")
-			return
+
+		sendRange := origRange
+		rangeCapped := false
+		if cappedRange, ok := capOpenEndedRangeHeader(origRange, streamRangeChunkBytes); ok {
+			sendRange = cappedRange
+			rangeCapped = true
 		}
-		for k, v := range target.Headers {
-			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
-				continue
-			}
-			upReq.Header.Set(k, v)
-		}
-		if upReq.Header.Get("User-Agent") == "" {
-			upReq.Header.Set("User-Agent", provider.DefaultUserAgent)
-		}
-		if len(target.Cookies) > 0 {
-			upReq.Header.Set("Cookie", provider.FormatCookieHeader(target.Cookies))
-		}
-		if rng := r.Header.Get("Range"); rng != "" {
-			upReq.Header.Set("Range", rng)
-		}
-		if ifRng := r.Header.Get("If-Range"); ifRng != "" {
-			upReq.Header.Set("If-Range", ifRng)
-		}
-		upReq.Header.Set("Accept-Encoding", "identity")
 
 		rc := provider.RequestContext{Config: snap}
 		proxyURL, _, account := provider.SourceRequestOptions(rc, firstNonEmpty(tr.RootSource, tr.Source))
-		resp, doErr := s.deps.Transport.Do(r.Context(), upReq, transport.RequestOptions{
-			Domain:              transport.DomainPublicMedia,
-			ConfigRevision:      snap.Revision,
-			ProxyURL:            proxyURL,
-			Account:             account,
-			MaxResponseBytes:    -1,
-			Idempotent:          true,
-			AllowHTTPSDowngrade: true,
-		})
+		trOpts := transport.RequestOptions{
+			Domain:                transport.DomainPublicMedia,
+			ConfigRevision:        snap.Revision,
+			ProxyURL:              proxyURL,
+			Account:               account,
+			Timeout:               -1,
+			ResponseHeaderTimeout: 20 * time.Second,
+			MaxResponseBytes:      -1,
+			Idempotent:            true,
+			AllowHTTPSDowngrade:   true,
+		}
+		sendUpstream := func(rangeHeader string) (*http.Response, error) {
+			upReq, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, target.URL, nil)
+			if reqErr != nil {
+				return nil, errInvalidStreamURL
+			}
+			for k, v := range target.Headers {
+				if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+					continue
+				}
+				upReq.Header.Set(k, v)
+			}
+			if upReq.Header.Get("User-Agent") == "" {
+				upReq.Header.Set("User-Agent", provider.DefaultUserAgent)
+			}
+			if len(target.Cookies) > 0 {
+				upReq.Header.Set("Cookie", provider.FormatCookieHeader(target.Cookies))
+			}
+			if rangeHeader != "" {
+				upReq.Header.Set("Range", rangeHeader)
+			}
+			if ifRange != "" {
+				upReq.Header.Set("If-Range", ifRange)
+			}
+			upReq.Header.Set("Accept-Encoding", "identity")
+			return s.deps.Transport.Do(r.Context(), upReq, trOpts)
+		}
+
+		resp, doErr := sendUpstream(sendRange)
+		if doErr == nil && rangeCapped && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestedRangeNotSatisfiable) {
+			_ = resp.Body.Close()
+			resp, doErr = sendUpstream(origRange)
+		}
 		if doErr != nil {
+			if errors.Is(doErr, errInvalidStreamURL) {
+				writeError(w, http.StatusBadGateway, "无效的音频流地址")
+				return
+			}
 			if attempt == 0 {
 				continue
 			}
@@ -996,7 +1047,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusBadGateway) && attempt == 0 {
+		if (resp.StatusCode == http.StatusUnauthorized ||
+			resp.StatusCode == http.StatusForbidden ||
+			resp.StatusCode == http.StatusGone ||
+			resp.StatusCode == http.StatusBadGateway) && attempt == 0 {
 			_ = resp.Body.Close()
 			continue
 		}
@@ -1642,6 +1696,64 @@ func (s *Server) handleCollectionRemoveTrack(w http.ResponseWriter, r *http.Requ
 	}
 	s.pushLog("info", fmt.Sprintf("已从歌单“%s”移除 1 首曲目", col.Name), "playlist", ident)
 	writeJSON(w, http.StatusOK, s.buildSavedPlaylistDTO(r.Context(), col, items))
+}
+
+func (s *Server) handleCollectionRemoveTracks(w http.ResponseWriter, r *http.Request) {
+	ident := r.PathValue("ident")
+	var req playlistTracksRequest
+	if !decodeJSON(w, r, s.defaultJSONLimit(), &req) {
+		return
+	}
+	cleanIDs := make([]string, 0, len(req.TrackIDs))
+	seen := make(map[string]bool, len(req.TrackIDs))
+	for _, tid := range req.TrackIDs {
+		trimmed := strings.TrimSpace(tid)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		cleanIDs = append(cleanIDs, trimmed)
+	}
+	if len(cleanIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "请选择要移出的曲目")
+		return
+	}
+	if s.deps.Store == nil {
+		writeError(w, http.StatusServiceUnavailable, "存储服务未初始化")
+		return
+	}
+	col, _, ok, err := s.deps.Store.GetCollection(r.Context(), ident)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "歌单不存在")
+		return
+	}
+	rev, _ := strconv.ParseInt(col.Revision, 10, 64)
+	_, removedCount, err := s.deps.Store.RemoveCollectionItems(r.Context(), ident, cleanIDs, rev)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	col, items, ok, err := s.deps.Store.GetCollection(r.Context(), ident)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "歌单不存在")
+		return
+	}
+	dto := s.buildSavedPlaylistDTO(r.Context(), col, items)
+	if removedCount > 0 {
+		dto.Detail = fmt.Sprintf("已从歌单“%s”移出 %d 首曲目，共 %d 首。", col.Name, removedCount, len(dto.Tracks))
+	} else {
+		dto.Detail = fmt.Sprintf("所选曲目不在歌单“%s”中，共 %d 首。", col.Name, len(dto.Tracks))
+	}
+	s.pushLog("info", dto.Detail, "playlist", ident)
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // Legacy search/resolve/validate/tasks endpoints.

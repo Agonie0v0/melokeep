@@ -496,3 +496,97 @@ func TestPoolResponseHeaderTimeoutOverride(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
+
+func TestPoolNegativeTimeoutAllowsSlowStreamAndRespectsHeaderAndCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slow-body":
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			for i := 0; i < 3; i++ {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(45 * time.Millisecond):
+				}
+				_, _ = io.WriteString(w, "chunk-")
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+		case "/slow-header":
+			time.Sleep(100 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	pool := NewPool(WithAllowTestLoopback(true))
+	defer pool.CloseAll()
+
+	// Positive short timeout cuts off slow response body reading.
+	shortReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/slow-body", nil)
+	shortResp, err := pool.Do(context.Background(), shortReq, RequestOptions{
+		Domain:                DomainPublicMedia,
+		Timeout:               50 * time.Millisecond,
+		ResponseHeaderTimeout: 200 * time.Millisecond,
+		MaxResponseBytes:      -1,
+	})
+	if err == nil {
+		_, readErr := io.ReadAll(shortResp.Body)
+		_ = shortResp.Body.Close()
+		if readErr == nil {
+			t.Fatal("expected positive timeout to cut off slow stream body")
+		}
+	}
+
+	// Timeout < 0 disables total request/body deadline while still protecting headers and cleanup.
+	infReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/slow-body", nil)
+	infResp, err := pool.Do(context.Background(), infReq, RequestOptions{
+		Domain:                DomainPublicMedia,
+		Timeout:               -1,
+		ResponseHeaderTimeout: 200 * time.Millisecond,
+		MaxResponseBytes:      -1,
+	})
+	if err != nil {
+		t.Fatalf("Timeout < 0 slow-body open failed: %v", err)
+	}
+	raw, readErr := io.ReadAll(infResp.Body)
+	_ = infResp.Body.Close()
+	if readErr != nil || string(raw) != "chunk-chunk-chunk-" {
+		t.Fatalf("expected full slow stream with Timeout < 0, got %q err=%v", string(raw), readErr)
+	}
+
+	// Timeout < 0 still enforces ResponseHeaderTimeout.
+	hdrReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/slow-header", nil)
+	if _, err := pool.Do(context.Background(), hdrReq, RequestOptions{
+		Domain:                DomainPublicMedia,
+		Timeout:               -1,
+		ResponseHeaderTimeout: 25 * time.Millisecond,
+		MaxResponseBytes:      -1,
+	}); err == nil {
+		t.Fatal("expected Timeout < 0 to still enforce ResponseHeaderTimeout")
+	}
+
+	// Timeout < 0 still propagates parent context cancellation.
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	cancelReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/slow-body", nil)
+	cancelResp, err := pool.Do(parentCtx, cancelReq, RequestOptions{
+		Domain:                DomainPublicMedia,
+		Timeout:               -1,
+		ResponseHeaderTimeout: 200 * time.Millisecond,
+		MaxResponseBytes:      -1,
+	})
+	if err != nil {
+		parentCancel()
+		t.Fatalf("open slow-body for cancel check failed: %v", err)
+	}
+	parentCancel()
+	_, cReadErr := io.ReadAll(cancelResp.Body)
+	_ = cancelResp.Body.Close()
+	if cReadErr == nil {
+		t.Fatal("expected parent context cancellation to abort Timeout < 0 stream")
+	}
+}

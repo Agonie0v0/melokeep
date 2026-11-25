@@ -671,9 +671,9 @@ fun IosStudioRoute(
 							onPauseAll = { studioController.pauseAllDownloads() },
 							onResumeAll = { studioController.resumeAllDownloads() },
 							onRetryFailed = { studioController.retryFailedDownloads() },
-							onClearCompleted = { studioController.clearCompletedDownloads() },
+							onClearCompleted = { deleteFiles -> studioController.clearCompletedDownloads(deleteFiles) },
 							onControl = { id, action -> studioController.controlDownload(id, action) },
-							onDelete = { id -> studioController.deleteDownload(id) },
+							onDelete = { id, deleteFile -> studioController.deleteDownload(id, deleteFile) },
 							onPreviewPlay = { job ->
 								if (audioPlayer != null && subsonicManager != null && job.track.id.isNotBlank()) {
 									val targetId = "mk:${job.track.id}"

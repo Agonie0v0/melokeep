@@ -494,6 +494,10 @@ fun IosLibraryRoute(
 					onShowNotice = { inlineNotice = it },
 					onBack = { navDetailRoute = null },
 					bottomPadding = bottomPadding,
+					onDeleted = {
+						navMutationSeq += 1
+						navDetailRoute = null
+					},
 				)
 
 				IosLibNavDetailRoute.Favorites -> IosLibNavFavoritesScreen(
@@ -1943,6 +1947,7 @@ internal fun IosLibHeaderCircleButton(
 	contentDescription: String,
 	onClick: () -> Unit,
 	active: Boolean = false,
+	tint: Color? = null,
 ) {
 	Surface(
 		shape = CircleShape,
@@ -1968,7 +1973,7 @@ internal fun IosLibHeaderCircleButton(
 			Icon(
 				imageVector = icon,
 				contentDescription = contentDescription,
-				tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+				tint = tint ?: if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
 				modifier = Modifier.size(17.dp),
 			)
 		}
@@ -2027,12 +2032,28 @@ internal fun IosLibDockPill(
 	icon: ImageVector,
 	onClick: () -> Unit,
 	emphasized: Boolean = false,
+	destructive: Boolean = false,
 ) {
+	val containerColor = when {
+		destructive -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)
+		emphasized -> MaterialTheme.colorScheme.primaryContainer
+		else -> MaterialTheme.colorScheme.surfaceContainer
+	}
+	val contentColor = when {
+		destructive -> MaterialTheme.colorScheme.error
+		emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+		else -> MaterialTheme.colorScheme.onSurface
+	}
+	val border = if (destructive) {
+		BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+	} else {
+		iosLibHairlineBorder()
+	}
 	Surface(
 		shape = CircleShape,
-		color = if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-		contentColor = if (emphasized) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-		border = iosLibHairlineBorder(),
+		color = containerColor,
+		contentColor = contentColor,
+		border = border,
 		modifier = Modifier
 			.clip(CircleShape)
 			.clickable(onClick = onClick),
@@ -2488,6 +2509,7 @@ internal fun IosLibBatchSelectionDock(
 	onDownloadSelected: () -> Unit,
 	onAddToPlaylist: (() -> Unit)? = null,
 	onDeleteOfflineSelected: (() -> Unit)? = null,
+	onRemoveFromPlaylistSelected: (() -> Unit)? = null,
 ) {
 	val isAllSelected = totalCount > 0 && selectedCount >= totalCount
 	Surface(
@@ -2586,6 +2608,14 @@ internal fun IosLibBatchSelectionDock(
 						label = "删离线",
 						icon = Icons.Rounded.Delete,
 						onClick = { if (selectedCount > 0) onDeleteOfflineSelected() },
+					)
+				}
+				if (onRemoveFromPlaylistSelected != null) {
+					IosLibDockPill(
+						label = "移出歌单",
+						icon = Icons.Rounded.Delete,
+						destructive = true,
+						onClick = { if (selectedCount > 0) onRemoveFromPlaylistSelected() },
 					)
 				}
 			}
