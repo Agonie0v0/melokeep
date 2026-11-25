@@ -2,10 +2,12 @@ package paige.navic.statusbar
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
@@ -15,9 +17,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.DrawableRes
 import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -29,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import paige.navic.R
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.model.lyrics.LyricsLine
 import paige.navic.domain.model.lyrics.LyricsResult
@@ -72,7 +77,7 @@ class DesktopLyricsController(
 	private var lyricTextView: TextView? = null
 	private var subTextView: TextView? = null
 	private var controlsBar: LinearLayout? = null
-	private var playPauseButton: TextView? = null
+	private var playPauseButton: ImageView? = null
 	private var layoutParams: WindowManager.LayoutParams? = null
 	private var controlsVisible = false
 
@@ -329,7 +334,7 @@ class DesktopLyricsController(
 			orientation = LinearLayout.VERTICAL
 			gravity = Gravity.CENTER_HORIZONTAL
 			background = bg
-			setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
+			setPadding(dpToPx(10), dpToPx(8), dpToPx(10), dpToPx(8))
 			addView(
 				mainText,
 				LinearLayout.LayoutParams(
@@ -416,6 +421,25 @@ class DesktopLyricsController(
 		updatePlayPauseLabel()
 	}
 
+	private fun createActionButtonBackground(isPrimary: Boolean = false): StateListDrawable {
+		val corner = dpToPx(16).toFloat()
+		val strokeWidth = dpToPx(1).coerceAtLeast(1)
+		val normalDrawable = GradientDrawable().apply {
+			cornerRadius = corner
+			setColor(if (isPrimary) 0xEB2A3140.toInt() else 0xCC1E222B.toInt())
+			setStroke(strokeWidth, if (isPrimary) 0x66FFFFFF else 0x42FFFFFF)
+		}
+		val pressedDrawable = GradientDrawable().apply {
+			cornerRadius = corner
+			setColor(0xE63B4354.toInt())
+			setStroke(strokeWidth, 0x7AFFFFFF)
+		}
+		return StateListDrawable().apply {
+			addState(intArrayOf(android.R.attr.state_pressed), pressedDrawable)
+			addState(intArrayOf(), normalDrawable)
+		}
+	}
+
 	private fun createControlsBar(): LinearLayout {
 		val bar = LinearLayout(context).apply {
 			orientation = LinearLayout.HORIZONTAL
@@ -423,20 +447,57 @@ class DesktopLyricsController(
 			visibility = View.GONE
 		}
 
-		fun addActionButton(label: String, onClick: () -> Unit): TextView {
-			val btnBg = GradientDrawable().apply {
-				cornerRadius = dpToPx(12).toFloat()
-				setColor(0x2EFFFFFF)
+		fun buttonLayoutParams(): LinearLayout.LayoutParams {
+			return LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.WRAP_CONTENT,
+				dpToPx(32)
+			).apply {
+				marginStart = dpToPx(2)
+				marginEnd = dpToPx(2)
 			}
+		}
+
+		fun addTextButton(label: String, description: String, onClick: () -> Unit): TextView {
 			val btn = TextView(context).apply {
 				text = label
+				contentDescription = description
 				setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
 				setTextColor(Color.WHITE)
 				typeface = Typeface.DEFAULT_BOLD
+				includeFontPadding = false
 				gravity = Gravity.CENTER
-				background = btnBg
-				minWidth = dpToPx(32)
-				setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
+				background = createActionButtonBackground()
+				minWidth = dpToPx(34)
+				minimumWidth = dpToPx(34)
+				setPadding(dpToPx(8), 0, dpToPx(8), 0)
+				isClickable = true
+				isFocusable = true
+				setOnClickListener {
+					onClick()
+					if (controlsVisible) scheduleHideControls()
+				}
+			}
+			bar.addView(btn, buttonLayoutParams())
+			return btn
+		}
+
+		fun addIconButton(
+			@DrawableRes iconRes: Int,
+			description: String,
+			isPrimary: Boolean = false,
+			onClick: () -> Unit
+		): ImageView {
+			val widthPx = if (isPrimary) dpToPx(36) else dpToPx(32)
+			val heightPx = dpToPx(32)
+			val btn = ImageView(context).apply {
+				setImageResource(iconRes)
+				contentDescription = description
+				scaleType = ImageView.ScaleType.CENTER_INSIDE
+				imageTintList = ColorStateList.valueOf(Color.WHITE)
+				background = createActionButtonBackground(isPrimary = isPrimary)
+				setPadding(dpToPx(7), dpToPx(7), dpToPx(7), dpToPx(7))
+				isClickable = true
+				isFocusable = true
 				setOnClickListener {
 					onClick()
 					if (controlsVisible) scheduleHideControls()
@@ -444,49 +505,50 @@ class DesktopLyricsController(
 			}
 			bar.addView(
 				btn,
-				LinearLayout.LayoutParams(
-					LinearLayout.LayoutParams.WRAP_CONTENT,
-					LinearLayout.LayoutParams.WRAP_CONTENT
-				).apply {
-					marginStart = dpToPx(4)
-					marginEnd = dpToPx(4)
+				LinearLayout.LayoutParams(widthPx, heightPx).apply {
+					marginStart = dpToPx(2)
+					marginEnd = dpToPx(2)
 				}
 			)
 			return btn
 		}
 
-		addActionButton("A-") {
+		addTextButton("A-", "减小桌面歌词字号") {
 			preferenceManager.desktopLyricsFontSizeSp =
 				(preferenceManager.desktopLyricsFontSizeSp - 2f).coerceIn(12f, 32f)
 		}
-		addActionButton("A+") {
+		addTextButton("A+", "增大桌面歌词字号") {
 			preferenceManager.desktopLyricsFontSizeSp =
 				(preferenceManager.desktopLyricsFontSizeSp + 2f).coerceIn(12f, 32f)
 		}
-		addActionButton("⏮") {
+		addIconButton(R.drawable.ic_desktop_lyrics_prev, "上一首") {
 			player?.let { p ->
 				if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem()
 			}
 		}
-		playPauseButton = addActionButton("⏸") {
+		playPauseButton = addIconButton(
+			iconRes = R.drawable.ic_desktop_lyrics_pause,
+			description = "播放或暂停",
+			isPrimary = true
+		) {
 			player?.let { p ->
 				if (p.isPlaying) p.pause() else p.play()
 			}
 		}
-		addActionButton("⏭") {
+		addIconButton(R.drawable.ic_desktop_lyrics_next, "下一首") {
 			player?.let { p ->
 				if (p.hasNextMediaItem()) p.seekToNextMediaItem()
 			}
 		}
-		addActionButton("🔒") {
+		addIconButton(R.drawable.ic_desktop_lyrics_lock, "锁定桌面歌词") {
 			preferenceManager.desktopLyricsLocked = true
 			setControlsVisible(false)
 			Toast.makeText(context, "桌面歌词已锁定（触摸穿透），可在设置中解锁", Toast.LENGTH_SHORT).show()
 		}
-		addActionButton("⌂") {
+		addIconButton(R.drawable.ic_desktop_lyrics_home, "返回应用") {
 			openApp()
 		}
-		addActionButton("✕") {
+		addIconButton(R.drawable.ic_desktop_lyrics_close, "关闭桌面歌词") {
 			preferenceManager.desktopLyricsEnabled = false
 		}
 
@@ -502,6 +564,7 @@ class DesktopLyricsController(
 	private fun setControlsVisible(visible: Boolean) {
 		controlsVisible = visible
 		controlsBar?.visibility = if (visible) View.VISIBLE else View.GONE
+		updateCardBackground()
 		if (visible) {
 			scheduleHideControls()
 		} else {
@@ -513,21 +576,33 @@ class DesktopLyricsController(
 		hideControlsJob?.cancel()
 		hideControlsJob = scope.launch {
 			delay(4000)
-			controlsVisible = false
-			controlsBar?.visibility = View.GONE
+			setControlsVisible(false)
+		}
+	}
+
+	private fun updateCardBackground() {
+		val userBgAlpha = preferenceManager.desktopLyricsBgAlpha.coerceIn(0f, 0.9f)
+		val effectiveAlpha = if (controlsVisible) maxOf(userBgAlpha, 0.78f) else userBgAlpha
+		val alphaInt = (effectiveAlpha * 255f).toInt().coerceIn(0, 230)
+		cardBackground?.apply {
+			setColor(Color.argb(alphaInt, 18, 20, 26))
+			if (controlsVisible) {
+				setStroke(dpToPx(1).coerceAtLeast(1), 0x33FFFFFF)
+			} else {
+				setStroke(0, Color.TRANSPARENT)
+			}
 		}
 	}
 
 	private fun applyOverlayAppearance() {
 		val fontSizeSp = preferenceManager.desktopLyricsFontSizeSp.coerceIn(12f, 32f)
-		val bgAlpha = preferenceManager.desktopLyricsBgAlpha.coerceIn(0f, 0.9f)
 		val color = parseColorOrDefault(preferenceManager.desktopLyricsColorHex, Color.WHITE)
 
 		lyricTextView?.apply {
 			setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
 			setTextColor(color)
 		}
-		cardBackground?.setColor(Color.argb((bgAlpha * 255f).toInt().coerceIn(0, 230), 16, 18, 24))
+		updateCardBackground()
 	}
 
 	private fun updateLyricDisplay() {
@@ -570,7 +645,13 @@ class DesktopLyricsController(
 	}
 
 	private fun updatePlayPauseLabel() {
-		playPauseButton?.text = if (player?.isPlaying == true) "⏸" else "▶"
+		val isPlaying = player?.isPlaying == true
+		playPauseButton?.apply {
+			setImageResource(
+				if (isPlaying) R.drawable.ic_desktop_lyrics_pause else R.drawable.ic_desktop_lyrics_play
+			)
+			contentDescription = if (isPlaying) "暂停" else "播放"
+		}
 	}
 
 	private fun parseColorOrDefault(rawHex: String, fallback: Int): Int {
