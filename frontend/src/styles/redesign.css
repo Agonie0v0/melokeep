@@ -48,12 +48,16 @@
   box-shadow: var(--header-shadow);
   border-radius: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(
+      max-content,
+      1fr
+    );
   align-items: center;
   gap: 16px;
 }
 
 .sidebar .brand {
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -104,6 +108,12 @@
 
 .sidebar .brand-name {
   line-height: 1;
+}
+
+.sidebar .sidebar-capsules,
+.sidebar .navigation-group {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sidebar nav,
@@ -203,6 +213,7 @@
 }
 
 .sidebar .sidebar-bottom {
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 4px;
