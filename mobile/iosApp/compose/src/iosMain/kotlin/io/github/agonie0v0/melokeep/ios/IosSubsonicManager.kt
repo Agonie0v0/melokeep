@@ -11,6 +11,7 @@ import dev.zt64.subsonic.api.model.Song
 import dev.zt64.subsonic.client.SubsonicAuth
 import dev.zt64.subsonic.client.SubsonicClient
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
+import io.github.agonie0v0.melokeep.shared.MeloListeningHistoryRequest
 import io.github.agonie0v0.melokeep.shared.MeloTrack
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
@@ -1482,11 +1483,47 @@ class IosSubsonicManager(
 		}
 	}
 
-	suspend fun scrobble(track: IosTrackItem, submission: Boolean) {
-		if (track.sourceType != IosTrackSource.NAVIDROME) return
-		val activeClient = client ?: return
-		runCatching {
-			activeClient.scrobble(id = track.rawId, submission = submission)
+	suspend fun scrobble(
+		track: IosTrackItem,
+		submission: Boolean,
+		playedMs: Long = 0L,
+		durationMsOverride: Long = 0L,
+	) {
+		if (track.sourceType == IosTrackSource.NAVIDROME) {
+			val activeClient = client
+			if (activeClient != null) {
+				runCatching {
+					activeClient.scrobble(id = track.rawId, submission = submission)
+				}
+			}
+		}
+		if (submission && meloApiClient.settingsStore.currentConfig().isAuthenticated && track.title.isNotBlank()) {
+			val sourceName = when (track.sourceType) {
+				IosTrackSource.NAVIDROME -> "navidrome"
+				IosTrackSource.MELOKEEP -> "melokeep"
+				IosTrackSource.DEVICE -> "device"
+			}
+			val effectiveDurationMs = if (track.durationMs > 0L) {
+				track.durationMs
+			} else {
+				durationMsOverride.coerceAtLeast(0L)
+			}
+			scope.launch {
+				runCatching {
+					meloApiClient.reportListeningHistory(
+						MeloListeningHistoryRequest(
+							trackId = track.rawId,
+							title = track.title,
+							artist = track.artist,
+							album = track.album,
+							genre = track.genre.orEmpty(),
+							source = sourceName,
+							durationMs = effectiveDurationMs,
+							playedMs = playedMs.coerceAtLeast(0L),
+						)
+					)
+				}
+			}
 		}
 	}
 

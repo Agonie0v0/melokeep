@@ -55,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -491,10 +490,6 @@ internal fun LibraryLocalDetailView(
 	val albums = catalog.albums
 	val artists = catalog.artists
 	val favoriteItems = remember(localState.favorites) { localState.favorites.map { it.toLocalItem() } }
-	var dailyMixSeed by remember { mutableIntStateOf(0) }
-	val dailyMixItems = remember(allItems, dailyMixSeed) {
-		allItems.shuffled(kotlin.random.Random(dailyMixSeed * 31 + allItems.size)).take(30)
-	}
 
 	var renameTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
 	var deleteTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
@@ -539,34 +534,10 @@ internal fun LibraryLocalDetailView(
 				)
 			}
 
-			LibraryLocalDetailRoute.DailyMix -> Column(Modifier.fillMaxSize()) {
-				LocalDetailHeader(
-					title = "猜你喜欢",
-					subtitle = "${dailyMixItems.size} 首",
-					cover = null,
-					onBack = onBack,
-					actions = {
-						IconButton(onClick = { dailyMixSeed += 1 }) {
-							Icon(Icons.Outlined.Refresh, contentDescription = "换一批")
-						}
-					}
-				)
-				LocalTrackListView(
-					modifier = Modifier.weight(1f),
-					items = dailyMixItems,
-					downloadsMap = downloadsMap,
-					favoriteIds = localState.favoriteIds,
-					currentPlayingSongId = currentPlayingSongId,
-					hostNavBottom = hostNavBottom,
-					emptyLabel = "暂无推荐曲目",
-					loading = studioState.filesLoading,
-					onToggleFavorite = toggleFavorite,
-					onDownloadSong = downloadOne,
-					onCancelSong = cancelOne,
-					onDeleteOffline = deleteOne,
-					onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist
-				)
-			}
+			LibraryLocalDetailRoute.DailyMix -> MeloDailyMixContent(
+				onBack = onBack,
+				nestedInSheet = false
+			)
 
 			is LibraryLocalDetailRoute.Playlist -> {
 				val summary = remember(localState.playlists, route.id) {

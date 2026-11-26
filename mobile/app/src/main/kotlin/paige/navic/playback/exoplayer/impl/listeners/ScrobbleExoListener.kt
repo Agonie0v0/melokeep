@@ -2,6 +2,8 @@ package paige.navic.playback.exoplayer.impl.listeners
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
+import io.github.agonie0v0.melokeep.shared.MeloListeningHistoryRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,11 +23,13 @@ class ScrobbleExoListener(
     val reachability: ReachabilityFlow,
     val syncManager: SyncManager,
     val sessionManager: SessionManager,
-    val preferenceManager: PreferenceManager
+    val preferenceManager: PreferenceManager,
+    private val dailyRecommendController: MeloDailyRecommendController
 ) : Player.Listener {
 	private var currentMediaId: String? = null
 	private var hasScrobbledCurrent = false
 	private var hasSentNowPlaying = false
+	private var hasReportedHistory = false
 	private var progressJob: Job? = null
 	private var accumulatedPlayTime: Long = 0
 	private val scope = CoroutineScope(Dispatchers.IO)
@@ -81,6 +85,7 @@ class ScrobbleExoListener(
 		currentMediaId = mediaItem?.mediaId
 		hasScrobbledCurrent = false
 		hasSentNowPlaying = false
+		hasReportedHistory = false
 		accumulatedPlayTime = 0
 		progressJob?.cancel()
 		if (player.isPlaying) {
@@ -112,19 +117,66 @@ class ScrobbleExoListener(
 	}
 
 	private fun checkProgress() {
-		if (hasScrobbledCurrent) return
-
-		val duration = player.duration
-		if (duration <= 0) return
-
-		val percent = accumulatedPlayTime.toFloat() / duration.toFloat()
-		val playedEnoughPercent = percent >= preferenceManager.scrobblePercentage
-		val isValidSong = duration >= preferenceManager.minDurationToScrobble * 1000
-
-		if (isValidSong && playedEnoughPercent) {
-			scrobbleSubmission(currentMediaId)
-			hasScrobbledCurrent = true
+		val rawDuration = player.duration
+		val duration = if (rawDuration > 0L) rawDuration else 0L
+		val percent = if (duration > 0L) {
+			accumulatedPlayTime.toFloat() / duration.toFloat()
+		} else {
+			0f
 		}
+
+		if (!hasScrobbledCurrent && duration > 0L) {
+			val playedEnoughPercent = percent >= preferenceManager.scrobblePercentage
+			val isValidSong = duration >= preferenceManager.minDurationToScrobble * 1000
+
+			if (isValidSong && playedEnoughPercent) {
+				scrobbleSubmission(currentMediaId)
+				hasScrobbledCurrent = true
+			}
+		}
+
+		if (!hasReportedHistory && (accumulatedPlayTime >= 30_000L || (duration > 0L && percent >= 0.5f))) {
+			reportListeningHistory(duration)
+		}
+	}
+
+	private fun reportListeningHistory(playerDuration: Long) {
+		val mediaItem = player.currentMediaItem
+		val mediaId = currentMediaId ?: mediaItem?.mediaId
+		if (mediaId?.startsWith("radio_") == true) {
+			hasReportedHistory = true
+			return
+		}
+
+		val metadata = mediaItem?.mediaMetadata ?: return
+		val title = metadata.title?.toString()?.trim().orEmpty()
+		if (title.isBlank()) return
+
+		val artist = (metadata.artist ?: metadata.albumArtist ?: metadata.subtitle)
+			?.toString()
+			?.trim()
+			.orEmpty()
+		val album = metadata.albumTitle?.toString()?.trim().orEmpty()
+		val durationMs = (if (playerDuration > 0L) playerDuration else metadata.durationMs ?: 0L)
+			.coerceAtLeast(0L)
+		val source = when {
+			mediaId?.startsWith("mk:") == true -> "melokeep"
+			mediaId?.startsWith("device:") == true -> "device"
+			else -> "navidrome"
+		}
+
+		hasReportedHistory = true
+		dailyRecommendController.reportListeningHistory(
+			MeloListeningHistoryRequest(
+				trackId = mediaId.orEmpty(),
+				title = title,
+				artist = artist,
+				album = album,
+				source = source,
+				durationMs = durationMs,
+				playedMs = accumulatedPlayTime.coerceAtLeast(0L)
+			)
+		)
 	}
 
 	override fun onPositionDiscontinuity(
@@ -156,6 +208,7 @@ class ScrobbleExoListener(
 	}
 
 	fun release() {
+		progressJob?.cancel()
 		player.removeListener(this)
 	}
 }

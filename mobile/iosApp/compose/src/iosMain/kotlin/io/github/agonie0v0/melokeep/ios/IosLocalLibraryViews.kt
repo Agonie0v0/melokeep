@@ -95,6 +95,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -115,6 +116,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloLibraryFile
 import io.github.agonie0v0.melokeep.shared.MeloLibraryFolder
@@ -426,7 +428,9 @@ internal fun IosLibLocalDetailScreen(
 	onShowNotice: (String) -> Unit,
 	onBack: () -> Unit,
 	bottomPadding: PaddingValues,
+	dailyRecommendController: MeloDailyRecommendController? = null,
 ) {
+	val libState by subsonicManager.state.collectAsState()
 	val allItems = remember(studioState.libraryFiles) {
 		buildIosLibLocalEntries(studioState.libraryFiles, subsonicManager, apiClient)
 	}
@@ -443,6 +447,10 @@ internal fun IosLibLocalDetailScreen(
 	var dailyMixSeed by remember { mutableIntStateOf(0) }
 	val dailyMixItems = remember(allItems, dailyMixSeed) {
 		allItems.shuffled(Random(dailyMixSeed * 31 + allItems.size)).take(30)
+	}
+	val dailyMixFallbackTracks = remember(dailyMixItems) { dailyMixItems.map { it.iosTrack } }
+	val dailyMixFallbackMeloById = remember(dailyMixItems) {
+		dailyMixItems.associate { it.iosTrack.id to it.track }
 	}
 
 	var renameTarget by remember { mutableStateOf<MeloLocalPlaylistSummary?>(null) }
@@ -485,34 +493,24 @@ internal fun IosLibLocalDetailScreen(
 				)
 			}
 
-			IosLibLocalDetailRoute.DailyMix -> Column(Modifier.fillMaxSize()) {
-				IosCleanTopBar(
-					title = "猜你喜欢",
-					onBack = onBack,
-					trailing = {
-						IosLibHeaderCircleButton(
-							icon = Icons.Rounded.Refresh,
-							contentDescription = "换一批",
-							onClick = { dailyMixSeed += 1 },
-						)
-					},
-				)
-				LocalTrackListView(
-					items = dailyMixItems,
-					favoriteIds = localState.favoriteIds,
-					audioPlayer = audioPlayer,
-					currentTrackId = currentTrackId,
-					offlineIds = offlineIds,
-					downloadingProgress = downloadingProgress,
-					emptyLabel = "暂无推荐曲目",
-					loading = studioState.filesLoading,
-					onToggleFavorite = toggleFavorite,
-					onRequestAddToLocalPlaylist = onRequestAddToLocalPlaylist,
-					onShowNotice = onShowNotice,
-					bottomPadding = bottomPadding,
-					modifier = Modifier.weight(1f),
-				)
-			}
+			IosLibLocalDetailRoute.DailyMix -> IosDailyRecommendContent(
+				libState = libState,
+				audioPlayer = audioPlayer,
+				subsonicManager = subsonicManager,
+				dailyRecommendController = dailyRecommendController,
+				nestedInSheet = false,
+				onBackOrDismiss = onBack,
+				bottomPadding = bottomPadding,
+				localFavorites = localState.favorites,
+				localFavoriteIds = localState.favoriteIds,
+				onToggleLocalFavorite = toggleFavorite,
+				onAddToLocalPlaylist = onRequestAddToLocalPlaylist,
+				fallbackTracks = dailyMixFallbackTracks,
+				fallbackMeloTracksById = dailyMixFallbackMeloById,
+				fallbackLoading = studioState.filesLoading,
+				onFallbackRefresh = { dailyMixSeed += 1 },
+				onShowNotice = onShowNotice,
+			)
 
 			is IosLibLocalDetailRoute.Playlist -> key(route.id) {
 				val summary = remember(localState.playlists, route.id) {

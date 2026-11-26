@@ -1302,7 +1302,8 @@ class IosAudioPlayer(
 		val track = current.currentTrack ?: return
 		if (!activeScrobbleReported && activeScrobbleTrackId == track.id) {
 			activeScrobbleReported = true
-			scope.launch { subsonicManager.scrobble(track, submission = true) }
+			val playedMs = accumulatedPlayedMs
+			scope.launch { subsonicManager.scrobble(track, submission = true, playedMs = playedMs) }
 		}
 
 		if (current.sleepTimer.active && current.sleepTimer.stopAfterCurrent) {
@@ -1350,7 +1351,6 @@ class IosAudioPlayer(
 	private fun checkAndSubmitScrobble(durationMs: Long) {
 		val track = _state.value.currentTrack ?: return
 		if (activeScrobbleReported || activeScrobbleTrackId != track.id) return
-		if (track.sourceType != IosTrackSource.NAVIDROME) return
 		val thresholdMs = if (durationMs > 10_000L) {
 			min(durationMs / 2L, 240_000L)
 		} else {
@@ -1358,7 +1358,15 @@ class IosAudioPlayer(
 		}
 		if (accumulatedPlayedMs >= thresholdMs) {
 			activeScrobbleReported = true
-			scope.launch { subsonicManager.scrobble(track, submission = true) }
+			val playedMs = accumulatedPlayedMs
+			scope.launch {
+				subsonicManager.scrobble(
+					track = track,
+					submission = true,
+					playedMs = playedMs,
+					durationMsOverride = durationMs,
+				)
+			}
 		}
 	}
 
@@ -1366,7 +1374,8 @@ class IosAudioPlayer(
 		val track = _state.value.currentTrack ?: return
 		if (!activeScrobbleReported && activeScrobbleTrackId == track.id && accumulatedPlayedMs >= 30_000L) {
 			activeScrobbleReported = true
-			scope.launch { subsonicManager.scrobble(track, submission = true) }
+			val playedMs = accumulatedPlayedMs
+			scope.launch { subsonicManager.scrobble(track, submission = true, playedMs = playedMs) }
 		}
 	}
 

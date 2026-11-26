@@ -904,3 +904,105 @@ internal data class MeloSystemUpdateSettingsRequest(
 	@SerialName("clear_github_token")
 	val clearGitHubToken: Boolean = false,
 )
+
+@Serializable
+data class MeloListeningHistoryRequest(
+	@SerialName("track_id")
+	val trackId: String = "",
+	val title: String,
+	val artist: String = "",
+	val album: String = "",
+	val genre: String = "",
+	val source: String = "",
+	@SerialName("duration_ms")
+	val durationMs: Long = 0L,
+	@SerialName("played_ms")
+	val playedMs: Long = 0L,
+)
+
+@Serializable
+data class MeloRecommendSeed(
+	val title: String,
+	val artist: String = "",
+	val album: String = "",
+	val genre: String = "",
+	val weight: Double = 1.0,
+)
+
+@Serializable
+data class MeloDailyRecommendStartRequest(
+	val force: Boolean = false,
+	val seeds: List<MeloRecommendSeed> = emptyList(),
+)
+
+@Serializable
+data class MeloDailyRecommendItem(
+	val track: MeloTrack,
+	val reason: String = "",
+	val category: String = "discover",
+	@SerialName("in_library")
+	val inLibrary: Boolean = false,
+)
+
+@Serializable
+data class MeloDailyRecommendation(
+	val date: String = "",
+	@SerialName("refresh_seq")
+	val refreshSeq: Int = 0,
+	@SerialName("target_count")
+	val targetCount: Int = 30,
+	val status: String = "empty",
+	@SerialName("job_id")
+	val jobId: String = "",
+	val mode: String = "",
+	@SerialName("curator_note")
+	val curatorNote: String = "",
+	@SerialName("style_tags")
+	val styleTags: List<String> = emptyList(),
+	val items: List<MeloDailyRecommendItem> = emptyList(),
+	@SerialName("generated_at")
+	val generatedAt: Long = 0L,
+	val error: String = "",
+)
+
+@Serializable
+data class MeloDailyRecommendStatusPayload(
+	val stage: String = "",
+	val message: String = "",
+	val matched: Int = 0,
+	val target: Int = 30,
+)
+
+@Serializable
+data class MeloDailyRecommendMetaPayload(
+	val date: String = "",
+	@SerialName("refresh_seq")
+	val refreshSeq: Int = 0,
+	val mode: String = "",
+	@SerialName("curator_note")
+	val curatorNote: String = "",
+	@SerialName("style_tags")
+	val styleTags: List<String> = emptyList(),
+	@SerialName("target_count")
+	val targetCount: Int = 30,
+)
+
+@Serializable
+data class MeloDailyRecommendItemPayload(
+	val index: Int = 0,
+	val item: MeloDailyRecommendItem,
+)
+
+@Serializable
+data class MeloDailyRecommendDonePayload(
+	val daily: MeloDailyRecommendation = MeloDailyRecommendation(),
+	val cancelled: Boolean = false,
+)
+
+sealed interface MeloDailyRecommendEvent {
+	data class Status(val payload: MeloDailyRecommendStatusPayload) : MeloDailyRecommendEvent
+	data class Meta(val payload: MeloDailyRecommendMetaPayload) : MeloDailyRecommendEvent
+	data class Item(val payload: MeloDailyRecommendItemPayload) : MeloDailyRecommendEvent
+	data class Done(val payload: MeloDailyRecommendDonePayload) : MeloDailyRecommendEvent
+	data class Error(val detail: String) : MeloDailyRecommendEvent
+}

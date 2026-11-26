@@ -20,6 +20,7 @@ import (
 	"github.com/agonie0v0/melokeep/internal/operations"
 	"github.com/agonie0v0/melokeep/internal/provider"
 	"github.com/agonie0v0/melokeep/internal/provider/plugin"
+	"github.com/agonie0v0/melokeep/internal/recommend"
 	"github.com/agonie0v0/melokeep/internal/search"
 	"github.com/agonie0v0/melokeep/internal/store"
 	"github.com/agonie0v0/melokeep/internal/transport"
@@ -197,6 +198,7 @@ type Dependencies struct {
 	Indexer         *index.Indexer
 	Library         *library.Service
 	Agent           *agent.Service
+	Recommend       *recommend.Service
 	Operations      *operations.Registry
 
 	Bot       BotGateway

@@ -156,6 +156,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import io.github.agonie0v0.melokeep.shared.MeloAiController
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloLocalLibraryController
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
@@ -192,6 +193,7 @@ fun MeloKeepIosApp(
 	settingsController: MeloSettingsController,
 	settingsStore: MeloSettingsStore,
 	apiClient: MeloKeepApiClient,
+	dailyRecommendController: MeloDailyRecommendController? = null,
 ) {
 	val scope = rememberCoroutineScope()
 	val localLibraryController = remember(apiClient, scope) {
@@ -397,6 +399,7 @@ fun MeloKeepIosApp(
 												studioJumpRequest = IosStudioWorkspaceTab.SCRAPE_JOBS
 												currentTab = IosRootTab.STUDIO
 											},
+											dailyRecommendController = dailyRecommendController,
 										)
 
 										IosRootTab.DISCOVER -> IosDiscoverRoute(

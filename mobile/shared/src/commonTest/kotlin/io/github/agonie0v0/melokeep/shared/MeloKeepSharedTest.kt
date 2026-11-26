@@ -3964,6 +3964,411 @@ class MeloKeepSharedTest {
 		fallbackHttpClient.close()
 		client.close()
 	}
+
+	@Test
+	fun dailyRecommendModelsDeserializeWithDefaultsAndNullCoercion() {
+		val dailyJson = """
+			{
+			  "date": "2026-11-26",
+			  "refresh_seq": 2,
+			  "target_count": 30,
+			  "status": "ready",
+			  "job_id": "",
+			  "mode": "ai",
+			  "curator_note": "晚风与城市霓虹的交界处",
+			  "style_tags": ["Dream Pop", "Synthwave"],
+			  "generated_at": 1764120000000,
+			  "items": [
+			    {
+			      "track": {
+			        "id": "rec-1",
+			        "source": "AudiusMusicClient",
+			        "source_id": "a1",
+			        "title": "Neon Drift",
+			        "artist": "City Echo",
+			        "album": "Night Drive",
+			        "duration": 215.0,
+			        "cover": "/api/files/cover?path=rec1",
+			        "qualities": [],
+			        "playback": {"state": "ready", "url": "/api/stream/rec-1"}
+			      },
+			      "reason": "贴合你近期常听的复古合成器氛围",
+			      "category": "discover",
+			      "in_library": false
+			    }
+			  ]
+			}
+		""".trimIndent()
+		val daily = meloJson.decodeFromString<MeloDailyRecommendation>(dailyJson)
+		assertEquals("2026-11-26", daily.date)
+		assertEquals(2, daily.refreshSeq)
+		assertEquals(30, daily.targetCount)
+		assertEquals("ready", daily.status)
+		assertEquals("ai", daily.mode)
+		assertEquals("晚风与城市霓虹的交界处", daily.curatorNote)
+		assertEquals(listOf("Dream Pop", "Synthwave"), daily.styleTags)
+		assertEquals(1764120000000L, daily.generatedAt)
+		assertEquals(1, daily.items.size)
+		assertEquals("rec-1", daily.items[0].track.id)
+		assertEquals("discover", daily.items[0].category)
+		assertFalse(daily.items[0].inLibrary)
+
+		val nullArraysJson = """
+			{
+			  "date": "2026-11-26",
+			  "status": "empty",
+			  "style_tags": null,
+			  "items": null
+			}
+		""".trimIndent()
+		val emptyDaily = meloJson.decodeFromString<MeloDailyRecommendation>(nullArraysJson)
+		assertEquals("empty", emptyDaily.status)
+		assertTrue(emptyDaily.styleTags.isEmpty())
+		assertTrue(emptyDaily.items.isEmpty())
+
+		val statusPayload = meloJson.decodeFromString<MeloDailyRecommendStatusPayload>(
+			"""{"stage":"matching","message":"正在匹配 12/30","matched":12,"target":30}"""
+		)
+		assertEquals("matching", statusPayload.stage)
+		assertEquals(12, statusPayload.matched)
+
+		val metaPayload = meloJson.decodeFromString<MeloDailyRecommendMetaPayload>(
+			"""{"date":"2026-11-26","refresh_seq":1,"mode":"rule","curator_note":"规则精选","style_tags":["City Pop"],"target_count":30}"""
+		)
+		assertEquals("rule", metaPayload.mode)
+		assertEquals(listOf("City Pop"), metaPayload.styleTags)
+
+		val donePayload = meloJson.decodeFromString<MeloDailyRecommendDonePayload>(
+			"""{"daily":$dailyJson,"cancelled":false}"""
+		)
+		assertFalse(donePayload.cancelled)
+		assertEquals(1, donePayload.daily.items.size)
+	}
+
+	@Test
+	fun apiClientDailyRecommendationCachedAndSseStreamWithUrlResolutionWork() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-rec",
+			tokenId = "tid-rec",
+			mediaToken = "1800000000.recsig",
+			mediaTokenExpiresAt = 1800000000L,
+			authEnabled = true,
+		)
+
+		val cancelledJobIds = mutableListOf<String>()
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			when {
+				request.method == HttpMethod.Get && path == "/api/recommendations/daily" -> respond(
+					content = """{"date":"2026-11-26","refresh_seq":1,"target_count":30,"status":"ready","mode":"ai","curator_note":"今日私藏","style_tags":["Indie"],"items":[{"track":{"id":"t-cached","source":"local","title":"Cached Song","artist":"Artist","cover":"/api/files/cover?path=c1","qualities":[],"playback":{"state":"ready","url":"/api/files/audio?path=c1"}},"reason":"曲库私藏","category":"familiar","in_library":true}]}""",
+					status = HttpStatusCode.OK,
+					headers = jsonHeaders,
+				)
+				request.method == HttpMethod.Post && path == "/api/recommendations/daily/start" -> {
+					val body = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					val force = body["force"]?.jsonPrimitive?.contentOrNull == "true"
+					if (!force) {
+						respond(
+							content = """{"date":"2026-11-26","refresh_seq":1,"target_count":30,"status":"ready","job_id":"","mode":"ai","curator_note":"缓存推荐","style_tags":["Lo-Fi"],"items":[{"track":{"id":"t-ready","source":"AudiusMusicClient","title":"Ready Track","artist":"Artist R","cover":"/api/files/cover?path=r1","qualities":[],"playback":{"state":"ready","url":"/api/stream/t-ready"}},"reason":"昨日余韵","category":"discover","in_library":false}]}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					} else {
+						respond(
+							content = """{"date":"2026-11-26","refresh_seq":2,"target_count":30,"status":"generating","job_id":"rec-job-9"}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					}
+				}
+				request.method == HttpMethod.Get && path == "/api/recommendations/daily/jobs/rec-job-9/events" -> {
+					val sse = buildString {
+						append(": keepalive\r\n\r\n")
+						append("id: 1\nevent: status\ndata: {\"stage\":\"profiling\",\"message\":\"正在分析听歌品味\",\"matched\":0,\"target\":30}\n\n")
+						append("id: 2\nevent: meta\ndata: {\"date\":\"2026-11-26\",\"refresh_seq\":2,\"mode\":\"ai\",\"curator_note\":\"晨间律动\",\"style_tags\":[\"Jazz\",\"Funk\"],\"target_count\":30}\n\n")
+						append("id: 3\nevent: item\ndata: {\"index\":0,\"item\":{\"track\":{\"id\":\"t-sse-1\",\"source\":\"AudiusMusicClient\",\"title\":\"Sunrise Groove\",\"artist\":\"Brass Lab\",\"cover\":\"/api/files/cover?path=s1\",\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/t-sse-1\"}},\"reason\":\"晨间唤醒\",\"category\":\"discover\",\"in_library\":false}}\n\n")
+						append("id: 4\nevent: error\ndata: {\"detail\":\"部分源超时\"}\n\n")
+						append("id: 5\nevent: done\ndata: {\"cancelled\":false,\"daily\":{\"date\":\"2026-11-26\",\"refresh_seq\":2,\"target_count\":30,\"status\":\"ready\",\"mode\":\"ai\",\"curator_note\":\"晨间律动\",\"style_tags\":[\"Jazz\",\"Funk\"],\"items\":[{\"track\":{\"id\":\"t-sse-1\",\"source\":\"AudiusMusicClient\",\"title\":\"Sunrise Groove\",\"artist\":\"Brass Lab\",\"cover\":\"/api/files/cover?path=s1\",\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/t-sse-1\"}},\"reason\":\"晨间唤醒\",\"category\":\"discover\",\"in_library\":false}]}}\n\n")
+					}
+					respond(
+						content = sse,
+						status = HttpStatusCode.OK,
+						headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+					)
+				}
+				request.method == HttpMethod.Delete && path == "/api/recommendations/daily/jobs/rec-job-9" -> {
+					cancelledJobIds += "rec-job-9"
+					respond("""{"cancelled":true}""", HttpStatusCode.OK, jsonHeaders)
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+
+		val snapshot = client.getDailyRecommendation()
+		assertEquals("ready", snapshot.status)
+		assertEquals(
+			"https://melo.example.com/api/files/cover?path=c1&media_token=1800000000.recsig",
+			snapshot.items.single().track.cover,
+		)
+		assertEquals(
+			"https://melo.example.com/api/files/audio?path=c1&media_token=1800000000.recsig",
+			snapshot.items.single().track.playback.url,
+		)
+
+		val cached = client.startDailyRecommendation(force = false)
+		assertEquals("ready", cached.status)
+		assertEquals("", cached.jobId)
+		assertEquals(
+			"https://melo.example.com/api/stream/t-ready?media_token=1800000000.recsig",
+			cached.items.single().track.playback.url,
+		)
+
+		val started = client.startDailyRecommendation(
+			force = true,
+			seeds = listOf(MeloRecommendSeed(title = "Blue Train", artist = "John Coltrane", weight = 1.5)),
+		)
+		assertEquals("generating", started.status)
+		assertEquals("rec-job-9", started.jobId)
+
+		val events = client.streamDailyRecommendationEvents(started.jobId).toList()
+		assertEquals(5, events.size)
+		assertEquals("正在分析听歌品味", assertIs<MeloDailyRecommendEvent.Status>(events[0]).payload.message)
+		assertEquals(listOf("Jazz", "Funk"), assertIs<MeloDailyRecommendEvent.Meta>(events[1]).payload.styleTags)
+		val itemEv = assertIs<MeloDailyRecommendEvent.Item>(events[2])
+		assertEquals(
+			"https://melo.example.com/api/stream/t-sse-1?media_token=1800000000.recsig",
+			itemEv.payload.item.track.playback.url,
+		)
+		assertEquals("部分源超时", assertIs<MeloDailyRecommendEvent.Error>(events[3]).detail)
+		val doneEv = assertIs<MeloDailyRecommendEvent.Done>(events[4])
+		assertEquals(
+			"https://melo.example.com/api/files/cover?path=s1&media_token=1800000000.recsig",
+			doneEv.payload.daily.items.single().track.cover,
+		)
+
+		client.cancelDailyRecommendationJob("rec-job-9")
+		assertEquals(listOf("rec-job-9"), cancelledJobIds)
+		client.close()
+	}
+
+	@Test
+	fun dailyRecommendControllerHandlesCacheStreamForceStopDownloadAndHistory() = runTest {
+		val store = MeloSettingsStore(InMemorySettings())
+		store.saveSession(
+			baseUrl = "https://melo.example.com",
+			username = "admin",
+			bearerToken = "tok-ctrl",
+			tokenId = "tid-ctrl",
+			mediaToken = "1800000000.sig",
+			mediaTokenExpiresAt = 1800000000L,
+			authEnabled = true,
+		)
+
+		val recordedHistoryTitles = mutableListOf<String>()
+		val recordedDownloadIds = mutableListOf<String>()
+		val cancelledJobs = mutableListOf<String>()
+		val startForces = mutableListOf<Boolean>()
+		val startSeedsCount = mutableListOf<Int>()
+		var historyShouldFail = false
+		val firstHistoryDone = CompletableDeferred<Unit>()
+		val failedHistoryDone = CompletableDeferred<Unit>()
+		val slowStreamGate = CompletableDeferred<Unit>()
+		val slowStreamStarted = CompletableDeferred<Unit>()
+		val stopDeleteDone = CompletableDeferred<Unit>()
+		val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+
+		val engine = MockEngine { request ->
+			val path = request.url.encodedPath
+			when {
+				request.method == HttpMethod.Post && path == "/api/recommendations/daily/start" -> {
+					val body = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+					val force = body["force"]?.jsonPrimitive?.contentOrNull == "true"
+					val seedsCount = body["seeds"]?.jsonArray?.size ?: 0
+					startForces += force
+					startSeedsCount += seedsCount
+					if (!force) {
+						respond(
+							content = """{"date":"2026-11-26","refresh_seq":1,"target_count":30,"status":"ready","job_id":"","mode":"rule","curator_note":"今日缓存歌单","style_tags":["Acoustic"],"items":[{"track":{"id":"tr-cached","source":"AudiusMusicClient","title":"Warm Morning","artist":"Folk Trio","qualities":[],"playback":{"state":"ready","url":"/api/stream/tr-cached"}},"reason":"规则推荐","category":"discover","in_library":false},{"track":{"id":"tr-local","source":"local","title":"Local Song","artist":"Local Artist","qualities":[],"playback":{"state":"ready","url":"/api/files/audio?path=l1"}},"reason":"曲库熟悉","category":"familiar","in_library":true}]}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					} else {
+						val jobId = if (startForces.count { it } == 1) "job-stream-1" else "job-stop-2"
+						respond(
+							content = """{"date":"2026-11-26","refresh_seq":2,"target_count":30,"status":"generating","job_id":"$jobId"}""",
+							status = HttpStatusCode.OK,
+							headers = jsonHeaders,
+						)
+					}
+				}
+				request.method == HttpMethod.Get && path == "/api/recommendations/daily/jobs/job-stream-1/events" -> {
+					val sse = buildString {
+						append("event: status\ndata: {\"stage\":\"matching\",\"message\":\"已匹配 1/30\",\"matched\":1,\"target\":30}\n\n")
+						append("event: meta\ndata: {\"date\":\"2026-11-26\",\"refresh_seq\":2,\"mode\":\"ai\",\"curator_note\":\"夜色与电子节拍\",\"style_tags\":[\"Electronic\",\"Chill\"],\"target_count\":30}\n\n")
+						append("event: item\ndata: {\"index\":0,\"item\":{\"track\":{\"id\":\"tr-new-1\",\"source\":\"AudiusMusicClient\",\"title\":\"Night Pulse\",\"artist\":\"Synth Duo\",\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/tr-new-1\"}},\"reason\":\"夜听偏爱\",\"category\":\"discover\",\"in_library\":false}}\n\n")
+						append("event: item\ndata: {\"index\":0,\"item\":{\"track\":{\"id\":\"tr-new-1\",\"source\":\"AudiusMusicClient\",\"title\":\"Night Pulse\",\"artist\":\"Synth Duo\",\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/tr-new-1\"}},\"reason\":\"夜听偏爱\",\"category\":\"discover\",\"in_library\":false}}\n\n")
+						append("event: done\ndata: {\"cancelled\":false,\"daily\":{\"date\":\"2026-11-26\",\"refresh_seq\":2,\"target_count\":30,\"status\":\"ready\",\"mode\":\"ai\",\"curator_note\":\"夜色与电子节拍\",\"style_tags\":[\"Electronic\",\"Chill\"],\"items\":[{\"track\":{\"id\":\"tr-new-1\",\"source\":\"AudiusMusicClient\",\"title\":\"Night Pulse\",\"artist\":\"Synth Duo\",\"qualities\":[],\"playback\":{\"state\":\"ready\",\"url\":\"/api/stream/tr-new-1\"}},\"reason\":\"夜听偏爱\",\"category\":\"discover\",\"in_library\":false}]}}\n\n")
+					}
+					respond(
+						content = sse,
+						status = HttpStatusCode.OK,
+						headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+					)
+				}
+				request.method == HttpMethod.Get && path == "/api/recommendations/daily/jobs/job-stop-2/events" -> {
+					val channel = ByteChannel(autoFlush = true)
+					slowStreamStarted.complete(Unit)
+					val sseWriterScope = CoroutineScope(Dispatchers.IO)
+					sseWriterScope.launch {
+						channel.writeStringUtf8("event: status\ndata: {\"stage\":\"ai\",\"message\":\"正在生成灵感\",\"matched\":0,\"target\":30}\n\n")
+						slowStreamGate.await()
+						channel.close()
+					}
+					respond(
+						content = channel,
+						status = HttpStatusCode.OK,
+						headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+					)
+				}
+				request.method == HttpMethod.Delete && path.startsWith("/api/recommendations/daily/jobs/") -> {
+					cancelledJobs += path.substringAfterLast('/')
+					slowStreamGate.complete(Unit)
+					stopDeleteDone.complete(Unit)
+					respond("""{"cancelled":true}""", HttpStatusCode.OK, jsonHeaders)
+				}
+				request.method == HttpMethod.Post && path == "/api/downloads" -> {
+					val arr = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonArray
+					val ids = arr.mapNotNull { it.jsonObject["track_id"]?.jsonPrimitive?.contentOrNull }
+					recordedDownloadIds += ids
+					val respJson = ids.joinToString(prefix = "[", postfix = "]") { tid ->
+						"""{"id":"dl-$tid","track":{"id":"$tid","title":"Downloaded"},"status":"queued"}"""
+					}
+					respond(respJson, HttpStatusCode.OK, jsonHeaders)
+				}
+				request.method == HttpMethod.Post && path == "/api/recommendations/history" -> {
+					if (historyShouldFail) {
+						failedHistoryDone.complete(Unit)
+						respond("""{"detail":"server error"}""", HttpStatusCode.InternalServerError, jsonHeaders)
+					} else {
+						val body = meloJson.parseToJsonElement(request.body.toByteArray().decodeToString()).jsonObject
+						recordedHistoryTitles += body["title"]?.jsonPrimitive?.contentOrNull.orEmpty()
+						firstHistoryDone.complete(Unit)
+						respond("""{"ok":true,"count":${recordedHistoryTitles.size}}""", HttpStatusCode.OK, jsonHeaders)
+					}
+				}
+				else -> respond("{}", HttpStatusCode.NotFound, jsonHeaders)
+			}
+		}
+
+		val client = MeloKeepApiClient(store, engine)
+		val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+		val controller = MeloDailyRecommendController(client, controllerScope)
+
+		// 1. Cached ready path (force = false)
+		controller.loadOrGenerate(force = false)
+		val cachedState = withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.loading && it.items.size == 2 }
+			}
+		}
+		assertEquals("rule", cachedState.mode)
+		assertEquals("今日缓存歌单", cachedState.curatorNote)
+		assertEquals(listOf("Acoustic"), cachedState.styleTags)
+		assertFalse(cachedState.streaming)
+
+		// 2. Force refresh path with seedsProvider & SSE deduplication
+		controller.loadOrGenerate(force = true) {
+			listOf(MeloRecommendSeed(title = "Seed Track", artist = "Seed Artist", weight = 2.0))
+		}
+		val streamedState = withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.loading && !it.streaming && it.refreshSeq == 2 && it.items.size == 1 }
+			}
+		}
+		assertEquals("ai", streamedState.mode)
+		assertEquals("夜色与电子节拍", streamedState.curatorNote)
+		assertEquals(listOf("Electronic", "Chill"), streamedState.styleTags)
+		assertEquals("tr-new-1", streamedState.items.single().track.id)
+		assertEquals(listOf(false, true), startForces)
+		assertEquals(listOf(0, 1), startSeedsCount)
+
+		// 3. enqueueDownloadToLibrary filters out local/navidrome/blank tracks
+		controller.enqueueDownloadToLibrary(
+			listOf(
+				MeloTrack(id = "", source = "AudiusMusicClient", title = "Blank"),
+				MeloTrack(id = "loc-1", source = "local", title = "Local"),
+				MeloTrack(id = "nd-1", source = "navidrome", title = "Navidrome"),
+				streamedState.items.single().track,
+			)
+		)
+		val enqueuedState = withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { "tr-new-1" in it.enqueuedTrackIds && it.noticeMessage != null }
+			}
+		}
+		assertEquals(listOf("tr-new-1"), recordedDownloadIds)
+		assertTrue(enqueuedState.noticeMessage!!.contains("Night Pulse"))
+		controller.clearNotice()
+		assertNull(controller.state.value.noticeMessage)
+
+		// 4. reportListeningHistory succeeds and silently ignores blank title / server failures
+		controller.reportListeningHistory(MeloListeningHistoryRequest(title = "   "))
+		controller.reportListeningHistory(
+			MeloListeningHistoryRequest(
+				trackId = "tr-new-1",
+				title = "Night Pulse",
+				artist = "Synth Duo",
+				source = "melokeep",
+				durationMs = 200_000L,
+				playedMs = 95_000L,
+			)
+		)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				firstHistoryDone.await()
+			}
+		}
+		historyShouldFail = true
+		controller.reportListeningHistory(
+			MeloListeningHistoryRequest(title = "Failure Ignored", artist = "Tester")
+		)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				failedHistoryDone.await()
+			}
+		}
+		assertEquals(listOf("Night Pulse"), recordedHistoryTitles)
+		assertNull(controller.state.value.errorMessage)
+
+		// 5. stopGeneration cancels active coroutine and calls DELETE /api/recommendations/daily/jobs/{jobId}
+		controller.loadOrGenerate(force = true)
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				slowStreamStarted.await()
+				controller.state.first {
+					it.streaming && it.activeJobId == "job-stop-2" && it.stageMessage == "正在生成灵感"
+				}
+			}
+		}
+		controller.stopGeneration()
+		withContext(Dispatchers.Default) {
+			withTimeout(5_000L) {
+				controller.state.first { !it.streaming && it.activeJobId == null }
+				stopDeleteDone.await()
+			}
+		}
+		assertEquals(listOf("job-stop-2"), cancelledJobs)
+
+		controllerScope.cancel()
+		client.close()
+	}
 }
 
 class MeloSourceLabelRegistryTest {

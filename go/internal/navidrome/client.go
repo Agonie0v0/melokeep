@@ -192,6 +192,7 @@ type subsonicBody struct {
 	Album         json.RawMessage `json:"album"`
 	Artists       json.RawMessage `json:"artists"`
 	Artist        json.RawMessage `json:"artist"`
+	Starred2      json.RawMessage `json:"starred2"`
 	LyricsList    json.RawMessage `json:"lyricsList"`
 	Lyrics        json.RawMessage `json:"lyrics"`
 }
@@ -1011,6 +1012,33 @@ func (c *Client) Search(ctx context.Context, query string, offset int) (SearchRe
 		Albums:  albums,
 		HasMore: len(tracks) == 50 || len(albums) == 50,
 	}, nil
+}
+
+// GetStarredSongs fetches starred songs from Navidrome via getStarred2.
+func (c *Client) GetStarredSongs(ctx context.Context, limit int) ([]model.TrackDTO, error) {
+	if !c.Settings().Enabled {
+		return []model.TrackDTO{}, nil
+	}
+	body, err := c.requestJSON(ctx, http.MethodGet, "getStarred2", nil)
+	if err != nil {
+		return nil, err
+	}
+	var st struct {
+		Song []rawSong `json:"song"`
+	}
+	if len(body.Starred2) > 0 {
+		_ = json.Unmarshal(body.Starred2, &st)
+	}
+	items := st.Song
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	tracks := make([]model.TrackDTO, 0, len(items))
+	for _, s := range items {
+		tracks = append(tracks, projectSong(s))
+	}
+	c.rememberTracks(ctx, tracks)
+	return tracks, nil
 }
 
 func (c *Client) GetLyrics(ctx context.Context, id, artist, title string) string {

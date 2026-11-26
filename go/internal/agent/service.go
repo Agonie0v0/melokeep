@@ -229,6 +229,33 @@ func (s *Service) TestConnection(ctx context.Context, override *Settings) (map[s
 	return map[string]any{"detail": "基础连接成功。图片识别和工具调用能力请在对话中验证。"}, nil
 }
 
+// DirectComplete executes a single stateless LLM completion using saved AI settings
+// without creating or mutating any user chat session.
+// Returns (content, configured, err). If BaseURL or Model is empty, configured=false and err=nil.
+func (s *Service) DirectComplete(ctx context.Context, systemPromptText, userPromptText string) (string, bool, error) {
+	if s == nil || s.store == nil || s.client == nil {
+		return "", false, nil
+	}
+	settings, proxy, err := s.connectionSettings(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	if settings.BaseURL == "" || settings.Model == "" {
+		return "", false, nil
+	}
+	settings.Stream = false
+	msgs := make([]LLMMessage, 0, 2)
+	if strings.TrimSpace(systemPromptText) != "" {
+		msgs = append(msgs, LLMMessage{Role: "system", Content: systemPromptText})
+	}
+	msgs = append(msgs, LLMMessage{Role: "user", Content: userPromptText})
+	msg, err := s.client.Complete(ctx, settings, proxy, s.currentConfigRev(), msgs, nil, "", nil)
+	if err != nil {
+		return "", true, err
+	}
+	return strings.TrimSpace(msg.Content), true, nil
+}
+
 func (s *Service) TestCapability(ctx context.Context, capability string, override *Settings) (map[string]any, error) {
 	settings, proxy, err := s.connectionSettings(ctx, override)
 	if err != nil {

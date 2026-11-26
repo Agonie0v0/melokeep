@@ -647,6 +647,93 @@ class MeloKeepApiClient(
 		}
 	}
 
+	suspend fun reportListeningHistory(request: MeloListeningHistoryRequest) {
+		val response = httpClient.post(buildUrl("/api/recommendations/history")) {
+			applyMeloHeaders()
+			contentType(ContentType.Application.Json)
+			setBody(request)
+		}
+		ensureSuccess(response)
+	}
+
+	suspend fun getDailyRecommendation(): MeloDailyRecommendation {
+		val response = httpClient.get(buildUrl("/api/recommendations/daily")) {
+			applyMeloHeaders()
+		}
+		return decodeResponse<MeloDailyRecommendation>(response).withResolvedUrls()
+	}
+
+	suspend fun startDailyRecommendation(
+		force: Boolean = false,
+		seeds: List<MeloRecommendSeed> = emptyList(),
+	): MeloDailyRecommendation {
+		val response = httpClient.post(buildUrl("/api/recommendations/daily/start")) {
+			applyMeloHeaders()
+			contentType(ContentType.Application.Json)
+			setBody(MeloDailyRecommendStartRequest(force = force, seeds = seeds))
+		}
+		return decodeResponse<MeloDailyRecommendation>(response).withResolvedUrls()
+	}
+
+	fun streamDailyRecommendationEvents(jobId: String): Flow<MeloDailyRecommendEvent> = channelFlow {
+		val trimmedJobId = jobId.trim()
+		if (trimmedJobId.isEmpty()) {
+			return@channelFlow
+		}
+		val url = buildUrl("/api/recommendations/daily/jobs/${trimmedJobId.encodeURLPathPart()}/events")
+		httpClient.prepareGet(url) {
+			applyMeloHeaders()
+			header(HttpHeaders.Accept, "text/event-stream")
+			timeout {
+				requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+				socketTimeoutMillis = 120_000L
+			}
+		}.execute { response ->
+			if (!response.status.isSuccess()) {
+				val errBody = runCatching { response.bodyAsText() }.getOrDefault("")
+				throw MeloApiException(
+					response.status.value,
+					parseApiErrorMessage(errBody, response.status.value, response.headers[HttpHeaders.Location]),
+				)
+			}
+			val channel = response.bodyAsChannel()
+			var shouldStop = false
+			parseDailyRecommendSseChannel(channel) { rawEvent ->
+				if (shouldStop) return@parseDailyRecommendSseChannel
+				val resolvedEvent = when (rawEvent) {
+					is MeloDailyRecommendEvent.Item -> rawEvent.copy(
+						payload = rawEvent.payload.copy(
+							item = rawEvent.payload.item.withResolvedUrls(),
+						)
+					)
+					is MeloDailyRecommendEvent.Done -> rawEvent.copy(
+						payload = rawEvent.payload.copy(
+							daily = rawEvent.payload.daily.withResolvedUrls(),
+						)
+					)
+					else -> rawEvent
+				}
+				send(resolvedEvent)
+				if (resolvedEvent is MeloDailyRecommendEvent.Done) {
+					shouldStop = true
+				}
+			}
+		}
+	}.flowOn(Dispatchers.IO)
+
+	suspend fun cancelDailyRecommendationJob(jobId: String) {
+		val trimmedJobId = jobId.trim()
+		if (trimmedJobId.isEmpty()) return
+		val base = settingsStore.currentConfig().baseUrl.trimEnd('/')
+		if (base.isBlank()) return
+		val response = httpClient.delete("$base/api/recommendations/daily/jobs/${trimmedJobId.encodeURLPathPart()}") {
+			applyMeloHeaders()
+		}
+		if (response.status.isSuccess()) {
+			response.bodyAsText()
+		}
+	}
+
 	suspend fun resolveTrackPlayback(sid: String): MeloTrack {
 		runCatching { refreshMediaTokenIfNeeded() }
 		val response = httpClient.post(buildUrl("/api/tracks/${sid.encodeURLPathPart()}/playback")) {
@@ -1364,6 +1451,12 @@ class MeloKeepApiClient(
 	private fun MeloLocalPlaylistDetail.withResolvedUrls(): MeloLocalPlaylistDetail =
 		copy(tracks = tracks.map { it.withResolvedUrls() })
 
+	private fun MeloDailyRecommendItem.withResolvedUrls(): MeloDailyRecommendItem =
+		copy(track = track.withResolvedUrls())
+
+	private fun MeloDailyRecommendation.withResolvedUrls(): MeloDailyRecommendation =
+		copy(items = items.map { it.withResolvedUrls() })
+
 	private fun requireBaseUrl(overrideBaseUrl: String? = null): String {
 		val candidate = if (overrideBaseUrl != null) {
 			MeloSettingsStore.normalizeBaseUrl(overrideBaseUrl)
@@ -1639,9 +1732,9 @@ class MeloKeepApiClient(
 				?: el["message"]?.let { extractDetailText(it) }.orEmpty()
 		}
 
-		internal suspend fun parseSseChannel(
+		internal suspend fun readSseFrames(
 			channel: ByteReadChannel,
-			emitEvent: suspend (MeloSearchEvent) -> Unit,
+			onFrame: suspend (eventName: String, data: String, eventId: String?) -> Unit,
 		) {
 			var eventType = ""
 			var eventId: String? = null
@@ -1652,14 +1745,13 @@ class MeloKeepApiClient(
 					eventId = null
 					return
 				}
+				val type = eventType
+				val id = eventId
 				val data = dataLines.joinToString("\n")
-				val parsed = parseSseEvent(eventType, data, eventId)
 				eventType = ""
 				eventId = null
 				dataLines.clear()
-				if (parsed != null) {
-					emitEvent(parsed)
-				}
+				onFrame(type, data, id)
 			}
 
 			while (true) {
@@ -1682,6 +1774,80 @@ class MeloKeepApiClient(
 				}
 			}
 			flushFrame()
+		}
+
+		internal suspend fun parseSseChannel(
+			channel: ByteReadChannel,
+			emitEvent: suspend (MeloSearchEvent) -> Unit,
+		) {
+			readSseFrames(channel) { eventType, data, eventId ->
+				val parsed = parseSseEvent(eventType, data, eventId)
+				if (parsed != null) {
+					emitEvent(parsed)
+				}
+			}
+		}
+
+		internal suspend fun parseDailyRecommendSseChannel(
+			channel: ByteReadChannel,
+			emitEvent: suspend (MeloDailyRecommendEvent) -> Unit,
+		) {
+			readSseFrames(channel) { eventType, data, _ ->
+				val parsed = parseDailyRecommendSseEvent(eventType, data)
+				if (parsed != null) {
+					emitEvent(parsed)
+				}
+			}
+		}
+
+		internal fun parseDailyRecommendSseEvent(
+			eventName: String,
+			data: String,
+		): MeloDailyRecommendEvent? {
+			val normalizedName = eventName.trim().lowercase()
+			if (normalizedName == "keepalive") return null
+			return when (normalizedName) {
+				"status" -> {
+					if (data.isBlank()) return null
+					runCatching {
+						MeloDailyRecommendEvent.Status(
+							meloJson.decodeFromString<MeloDailyRecommendStatusPayload>(data)
+						)
+					}.getOrNull()
+				}
+				"meta" -> {
+					if (data.isBlank()) return null
+					runCatching {
+						MeloDailyRecommendEvent.Meta(
+							meloJson.decodeFromString<MeloDailyRecommendMetaPayload>(data)
+						)
+					}.getOrNull()
+				}
+				"item" -> {
+					if (data.isBlank()) return null
+					runCatching {
+						MeloDailyRecommendEvent.Item(
+							meloJson.decodeFromString<MeloDailyRecommendItemPayload>(data)
+						)
+					}.getOrNull()
+				}
+				"done" -> {
+					val payload = if (data.isBlank()) {
+						MeloDailyRecommendDonePayload()
+					} else {
+						runCatching { meloJson.decodeFromString<MeloDailyRecommendDonePayload>(data) }
+							.getOrDefault(MeloDailyRecommendDonePayload())
+					}
+					MeloDailyRecommendEvent.Done(payload)
+				}
+				"error" -> {
+					val detail = parseApiErrorMessage(data, 500)
+					MeloDailyRecommendEvent.Error(
+						detail = detail.ifBlank { "每日推荐生成失败" },
+					)
+				}
+				else -> null
+			}
 		}
 
 		internal fun parseSseEvent(

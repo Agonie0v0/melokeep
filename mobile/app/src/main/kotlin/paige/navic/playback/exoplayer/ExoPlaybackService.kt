@@ -14,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
@@ -53,6 +54,7 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 	private val preferenceManager: PreferenceManager by inject()
 	private val equalizerManager: EqualizerManager by inject()
 	private val lyricsRepository: LyricsRepository by inject()
+	private val dailyRecommendController: MeloDailyRecommendController by inject()
 	private var statusBarLyricsController: StatusBarLyricsController? = null
 	private var desktopLyricsController: DesktopLyricsController? = null
 	private var statusBarLyricsProvider: StatusBarLyricsNotificationProvider? = null
@@ -103,7 +105,8 @@ class ExoPlaybackService : MediaSessionService(), KoinComponent {
 				reachability,
 				syncManager,
 				sessionManager,
-				preferenceManager
+				preferenceManager,
+				dailyRecommendController
 			)
 
 			player.addListener(exoEqualizerManager)

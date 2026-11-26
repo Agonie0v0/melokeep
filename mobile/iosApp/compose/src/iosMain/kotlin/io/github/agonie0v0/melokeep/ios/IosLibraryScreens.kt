@@ -120,6 +120,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloLibraryFile
 import io.github.agonie0v0.melokeep.shared.MeloLibraryFolder
@@ -227,6 +228,7 @@ fun IosLibraryRoute(
 	bottomPadding: PaddingValues,
 	localLibraryController: MeloLocalLibraryController? = null,
 	onNavigateToStudioScrape: (() -> Unit)? = null,
+	dailyRecommendController: MeloDailyRecommendController? = null,
 ) {
 	val scope = rememberCoroutineScope()
 	val fallbackLocalController = remember(apiClient, localLibraryController, scope) {
@@ -532,6 +534,7 @@ fun IosLibraryRoute(
 				onShowNotice = { inlineNotice = it },
 				onBack = { localDetailRoute = null },
 				bottomPadding = bottomPadding,
+				dailyRecommendController = dailyRecommendController,
 			)
 
 			IosLibPageState.Root -> Box(
@@ -911,6 +914,7 @@ fun IosLibraryRoute(
 			audioPlayer = audioPlayer,
 			subsonicManager = subsonicManager,
 			onDismiss = { showDailyMixSheet = false },
+			dailyRecommendController = dailyRecommendController,
 		)
 	}
 
@@ -2510,6 +2514,7 @@ internal fun IosLibBatchSelectionDock(
 	onAddToPlaylist: (() -> Unit)? = null,
 	onDeleteOfflineSelected: (() -> Unit)? = null,
 	onRemoveFromPlaylistSelected: (() -> Unit)? = null,
+	onDownloadToLibrarySelected: (() -> Unit)? = null,
 ) {
 	val isAllSelected = totalCount > 0 && selectedCount >= totalCount
 	Surface(
@@ -2596,6 +2601,13 @@ internal fun IosLibBatchSelectionDock(
 					icon = Icons.Rounded.CloudDownload,
 					onClick = { if (selectedCount > 0) onDownloadSelected() },
 				)
+				if (onDownloadToLibrarySelected != null) {
+					IosLibDockPill(
+						label = "入库",
+						icon = Icons.Rounded.LibraryMusic,
+						onClick = { if (selectedCount > 0) onDownloadToLibrarySelected() },
+					)
+				}
 				if (onAddToPlaylist != null) {
 					IosLibDockPill(
 						label = "加歌单",

@@ -34,6 +34,7 @@ import (
 	"github.com/agonie0v0/melokeep/internal/provider"
 	"github.com/agonie0v0/melokeep/internal/provider/catalog"
 	"github.com/agonie0v0/melokeep/internal/provider/plugin"
+	"github.com/agonie0v0/melokeep/internal/recommend"
 	"github.com/agonie0v0/melokeep/internal/search"
 	"github.com/agonie0v0/melokeep/internal/store"
 	"github.com/agonie0v0/melokeep/internal/transport"
@@ -65,6 +66,7 @@ type App struct {
 	Download    *download.Service
 	Library     *library.Service
 	Agent       *agent.Service
+	Recommend   *recommend.Service
 	Navidrome   *navidrome.Client
 	Bot         *bot.Service
 	Operations  *operations.Registry
@@ -361,6 +363,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, err
 	}
 
+	a.Recommend = recommend.NewService(recommend.Options{
+		Store:            a.Store,
+		Providers:        a.Providers,
+		Transport:        a.Transport,
+		AI:               a.Agent,
+		Navidrome:        a.Navidrome,
+		SnapshotProvider: a.Snapshot,
+		Logger:           a.Logs.Push,
+	})
+
 	// 13. Bot & notification service.
 	botCfg := bot.DefaultConfig()
 	if rec, ok, err := a.Store.GetDurableRecord(ctx, "bot_setting", "config"); err == nil && ok {
@@ -466,6 +478,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		Indexer:         a.Indexer,
 		Library:         a.Library,
 		Agent:           a.Agent,
+		Recommend:       a.Recommend,
 		Operations:      a.Operations,
 		Bot:             &botGatewayAdapter{svc: a.Bot, allowTestLoopback: cfg.AllowTestLoopback},
 		Navidrome:       &navidromeGatewayAdapter{client: a.Navidrome, app: a},
@@ -647,6 +660,9 @@ func (a *App) Close() error {
 	a.closeOnce.Do(func() {
 		if a.Bot != nil {
 			a.Bot.Close()
+		}
+		if a.Recommend != nil {
+			_ = a.Recommend.Close()
 		}
 		if a.Agent != nil {
 			_ = a.Agent.Close()

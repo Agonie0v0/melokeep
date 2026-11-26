@@ -2812,3 +2812,329 @@ class MeloLocalLibraryController(
 			cover = detail.tracks.firstOrNull { !it.cover.isNullOrBlank() }?.cover,
 		)
 }
+
+data class MeloDailyRecommendUiState(
+	val date: String = "",
+	val refreshSeq: Int = 0,
+	val targetCount: Int = 30,
+	val mode: String = "",
+	val curatorNote: String = "",
+	val styleTags: List<String> = emptyList(),
+	val items: List<MeloDailyRecommendItem> = emptyList(),
+	val loading: Boolean = false,
+	val streaming: Boolean = false,
+	val stageMessage: String = "",
+	val matchedCount: Int = 0,
+	val activeJobId: String? = null,
+	val enqueuedTrackIds: Set<String> = emptySet(),
+	val errorMessage: String? = null,
+	val noticeMessage: String? = null,
+)
+
+class MeloDailyRecommendController(
+	private val apiClient: MeloKeepApiClient,
+	private val scope: CoroutineScope,
+) {
+	private val _state = MutableStateFlow(MeloDailyRecommendUiState())
+	val state: StateFlow<MeloDailyRecommendUiState> = _state.asStateFlow()
+
+	private var generateJob: Job? = null
+
+	fun loadOrGenerate(
+		force: Boolean = false,
+		seedsProvider: (suspend () -> List<MeloRecommendSeed>)? = null,
+	) {
+		if (!apiClient.settingsStore.currentConfig().isAuthenticated) return
+		if (!force && (_state.value.loading || _state.value.streaming)) return
+
+		generateJob?.cancel()
+		_state.update { current ->
+			current.copy(
+				loading = true,
+				streaming = false,
+				stageMessage = if (force) "正在准备新一轮每日推荐…" else current.stageMessage,
+				matchedCount = if (force) 0 else current.matchedCount,
+				activeJobId = null,
+				items = if (force) emptyList() else current.items,
+				curatorNote = if (force) "" else current.curatorNote,
+				styleTags = if (force) emptyList() else current.styleTags,
+				mode = if (force) "" else current.mode,
+				errorMessage = null,
+				noticeMessage = null,
+			)
+		}
+
+		generateJob = scope.launch {
+			try {
+				val seeds = if (seedsProvider != null) {
+					try {
+						seedsProvider()
+					} catch (e: CancellationException) {
+						throw e
+					} catch (_: Throwable) {
+						emptyList()
+					}
+				} else {
+					emptyList()
+				}
+
+				val resp = apiClient.startDailyRecommendation(force = force, seeds = seeds)
+				if (resp.status == "ready" || resp.jobId.isBlank()) {
+					val deduped = deduplicateItems(resp.items)
+					_state.update { current ->
+						current.copy(
+							date = resp.date.ifBlank { current.date },
+							refreshSeq = if (resp.refreshSeq > 0) resp.refreshSeq else current.refreshSeq,
+							targetCount = if (resp.targetCount > 0) resp.targetCount else current.targetCount,
+							mode = resp.mode.ifBlank { current.mode },
+							curatorNote = resp.curatorNote,
+							styleTags = resp.styleTags,
+							items = deduped,
+							matchedCount = deduped.size,
+							loading = false,
+							streaming = false,
+							stageMessage = "",
+							activeJobId = null,
+							errorMessage = resp.error.takeIf { it.isNotBlank() },
+						)
+					}
+					return@launch
+				}
+
+				val jobId = resp.jobId
+				val initialItems = deduplicateItems(resp.items)
+				_state.update { current ->
+					current.copy(
+						date = resp.date.ifBlank { current.date },
+						refreshSeq = if (resp.refreshSeq > 0) resp.refreshSeq else current.refreshSeq,
+						targetCount = if (resp.targetCount > 0) resp.targetCount else current.targetCount,
+						mode = resp.mode.ifBlank { current.mode },
+						curatorNote = resp.curatorNote.ifBlank { current.curatorNote },
+						styleTags = if (resp.styleTags.isNotEmpty()) resp.styleTags else current.styleTags,
+						items = initialItems,
+						matchedCount = initialItems.size,
+						loading = false,
+						streaming = true,
+						stageMessage = current.stageMessage.ifBlank { "正在分析听歌品味…" },
+						activeJobId = jobId,
+					)
+				}
+
+				var receivedDone = false
+				apiClient.streamDailyRecommendationEvents(jobId).collect { event ->
+					when (event) {
+						is MeloDailyRecommendEvent.Status -> {
+							_state.update { current ->
+								current.copy(
+									stageMessage = event.payload.message,
+									matchedCount = maxOf(event.payload.matched, current.items.size),
+									targetCount = if (event.payload.target > 0) event.payload.target else current.targetCount,
+								)
+							}
+						}
+						is MeloDailyRecommendEvent.Meta -> {
+							_state.update { current ->
+								current.copy(
+									date = event.payload.date.ifBlank { current.date },
+									refreshSeq = if (event.payload.refreshSeq > 0) event.payload.refreshSeq else current.refreshSeq,
+									mode = event.payload.mode.ifBlank { current.mode },
+									curatorNote = event.payload.curatorNote,
+									styleTags = event.payload.styleTags,
+									targetCount = if (event.payload.targetCount > 0) event.payload.targetCount else current.targetCount,
+								)
+							}
+						}
+						is MeloDailyRecommendEvent.Item -> {
+							_state.update { current ->
+								val merged = mergeItem(current.items, event.payload.item)
+								current.copy(
+									items = merged,
+									matchedCount = maxOf(current.matchedCount, merged.size),
+								)
+							}
+						}
+						is MeloDailyRecommendEvent.Error -> {
+							_state.update { current ->
+								current.copy(
+									errorMessage = event.detail.ifBlank { "每日推荐生成失败" },
+								)
+							}
+						}
+						is MeloDailyRecommendEvent.Done -> {
+							receivedDone = true
+							val daily = event.payload.daily
+							_state.update { current ->
+								val finalItems = if (daily.items.isNotEmpty()) {
+									deduplicateItems(daily.items)
+								} else {
+									current.items
+								}
+								val finalError = daily.error.takeIf { it.isNotBlank() } ?: current.errorMessage
+								current.copy(
+									date = daily.date.ifBlank { current.date },
+									refreshSeq = if (daily.refreshSeq > 0) daily.refreshSeq else current.refreshSeq,
+									targetCount = if (daily.targetCount > 0) daily.targetCount else current.targetCount,
+									mode = daily.mode.ifBlank { current.mode },
+									curatorNote = daily.curatorNote.ifBlank { current.curatorNote },
+									styleTags = if (daily.styleTags.isNotEmpty()) daily.styleTags else current.styleTags,
+									items = finalItems,
+									matchedCount = finalItems.size,
+									loading = false,
+									streaming = false,
+									stageMessage = "",
+									activeJobId = null,
+									errorMessage = finalError,
+									noticeMessage = if (event.payload.cancelled && finalItems.isEmpty()) {
+										"已停止生成每日推荐"
+									} else {
+										current.noticeMessage
+									},
+								)
+							}
+						}
+					}
+				}
+
+				if (!receivedDone) {
+					_state.update { current ->
+						current.copy(
+							loading = false,
+							streaming = false,
+							stageMessage = "",
+							activeJobId = null,
+						)
+					}
+				}
+			} catch (e: CancellationException) {
+				_state.update { current ->
+					current.copy(
+						loading = false,
+						streaming = false,
+						stageMessage = "",
+						activeJobId = null,
+					)
+				}
+				throw e
+			} catch (e: Throwable) {
+				_state.update { current ->
+					current.copy(
+						loading = false,
+						streaming = false,
+						stageMessage = "",
+						activeJobId = null,
+						errorMessage = e.message ?: "加载每日推荐失败",
+					)
+				}
+			}
+		}
+	}
+
+	fun stopGeneration() {
+		val jobId = _state.value.activeJobId
+		generateJob?.cancel()
+		generateJob = null
+		_state.update {
+			it.copy(
+				loading = false,
+				streaming = false,
+				stageMessage = "",
+				activeJobId = null,
+			)
+		}
+		if (!jobId.isNullOrBlank()) {
+			scope.launch {
+				try {
+					apiClient.cancelDailyRecommendationJob(jobId)
+				} catch (e: CancellationException) {
+					throw e
+				} catch (_: Throwable) {
+				}
+			}
+		}
+	}
+
+	fun enqueueDownloadToLibrary(tracks: List<MeloTrack>) {
+		val targets = tracks
+			.filter { track ->
+				val id = track.id.trim()
+				val source = track.source.trim().lowercase()
+				id.isNotEmpty() && source != "local" && source != "navidrome" && source != "device"
+			}
+			.distinctBy { it.id }
+		if (targets.isEmpty()) {
+			_state.update { it.copy(noticeMessage = "当前没有可下载入库的在线曲目") }
+			return
+		}
+		scope.launch {
+			try {
+				val created = apiClient.enqueueDownloads(targets)
+				val addedIds = buildSet {
+					targets.forEach { t -> if (t.id.isNotBlank()) add(t.id) }
+					created.forEach { job ->
+						if (job.track.id.isNotBlank()) add(job.track.id)
+					}
+				}
+				val count = if (created.isNotEmpty()) created.size else targets.size
+				val notice = if (targets.size == 1) {
+					"已加入下载入库：${targets.first().title.ifBlank { "曲目" }}"
+				} else {
+					"已提交 $count 首歌曲下载入库"
+				}
+				_state.update { current ->
+					current.copy(
+						enqueuedTrackIds = current.enqueuedTrackIds + addedIds,
+						noticeMessage = notice,
+					)
+				}
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Throwable) {
+				_state.update { it.copy(errorMessage = e.message ?: "提交下载入库失败") }
+			}
+		}
+	}
+
+	fun reportListeningHistory(request: MeloListeningHistoryRequest) {
+		if (!apiClient.settingsStore.currentConfig().isAuthenticated) return
+		if (request.title.isBlank()) return
+		scope.launch {
+			try {
+				apiClient.reportListeningHistory(request)
+			} catch (e: CancellationException) {
+				throw e
+			} catch (_: Throwable) {
+				// Ignore silent playback telemetry failures.
+			}
+		}
+	}
+
+	fun clearError() {
+		_state.update { it.copy(errorMessage = null) }
+	}
+
+	fun clearNotice() {
+		_state.update { it.copy(noticeMessage = null) }
+	}
+
+	private fun itemDedupKey(item: MeloDailyRecommendItem): String {
+		val id = item.track.id.trim()
+		if (id.isNotEmpty()) return "id:$id"
+		return "ta:${item.track.title.trim().lowercase()}|${item.track.artist.trim().lowercase()}"
+	}
+
+	private fun deduplicateItems(items: List<MeloDailyRecommendItem>): List<MeloDailyRecommendItem> {
+		if (items.size <= 1) return items
+		val seen = HashSet<String>(items.size)
+		return items.filter { item -> seen.add(itemDedupKey(item)) }
+	}
+
+	private fun mergeItem(
+		existing: List<MeloDailyRecommendItem>,
+		incoming: MeloDailyRecommendItem,
+	): List<MeloDailyRecommendItem> {
+		val key = itemDedupKey(incoming)
+		val idx = existing.indexOfFirst { itemDedupKey(it) == key }
+		if (idx < 0) return existing + incoming
+		return existing.toMutableList().apply { set(idx, incoming) }
+	}
+}

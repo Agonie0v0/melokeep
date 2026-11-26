@@ -8,6 +8,7 @@ import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.request.crossfade
 import com.russhwolf.settings.Settings
 import io.github.agonie0v0.melokeep.shared.MeloAiController
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
 import io.github.agonie0v0.melokeep.shared.MeloSettingsController
@@ -29,6 +30,7 @@ private object IosAppContainer {
 	val studioController = MeloStudioController(meloApiClient, appScope)
 	val aiController = MeloAiController(meloApiClient, appScope)
 	val settingsController = MeloSettingsController(meloApiClient, appScope)
+	val dailyRecommendController = MeloDailyRecommendController(meloApiClient, appScope)
 }
 
 @OptIn(ExperimentalCoilApi::class)
@@ -52,6 +54,7 @@ fun MainViewController(): UIViewController {
 			settingsController = IosAppContainer.settingsController,
 			settingsStore = IosAppContainer.meloSettingsStore,
 			apiClient = IosAppContainer.meloApiClient,
+			dailyRecommendController = IosAppContainer.dailyRecommendController,
 		)
 	}
 	IosImagePicker.rootHostViewController = vc

@@ -17,6 +17,7 @@ import paige.navic.util.network.createOkHttpClient
 import paige.navic.util.network.getProxyUrlOrNull
 
 import io.github.agonie0v0.melokeep.shared.MeloAiController
+import io.github.agonie0v0.melokeep.shared.MeloDailyRecommendController
 import io.github.agonie0v0.melokeep.shared.MeloKeepApiClient
 import io.github.agonie0v0.melokeep.shared.MeloLocalLibraryController
 import io.github.agonie0v0.melokeep.shared.MeloSearchController
@@ -55,6 +56,7 @@ val appModule = module {
 	single { MeloAiController(get(), get(named("meloScope"))) }
 	single { MeloSettingsController(get(), get(named("meloScope"))) }
 	single { MeloLocalLibraryController(get(), get(named("meloScope"))) }
+	single { MeloDailyRecommendController(get(), get(named("meloScope"))) }
 	singleOf(::CoilSingleton)
 	single { get<CoilSingleton>().coilImageLoader }
 	single(named("static")) { get<CoilSingleton>().staticCoilImageLoader }

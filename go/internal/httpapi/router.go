@@ -524,4 +524,12 @@ func (s *Server) registerRoutes() {
 	s.addRoute(http.MethodPatch, "/api/plugins/{ident}", "engine_api.plugins_update", s.handlePluginsUpdate)
 	s.addRoute(http.MethodDelete, "/api/plugins/{ident}", "engine_api.plugins_delete", s.handlePluginsDelete)
 	s.addRoute(http.MethodPost, "/api/plugins/{ident}/test", "engine_api.plugins_test", s.handlePluginsTest)
+
+	// Daily recommendation & listening history endpoints.
+	s.addRoute(http.MethodPost, "/api/recommendations/history", "recommend.record_history", s.handleRecommendRecordHistory)
+	s.addRoute(http.MethodGet, "/api/recommendations/history", "recommend.list_history", s.handleRecommendListHistory)
+	s.addRoute(http.MethodGet, "/api/recommendations/daily", "recommend.daily_get", s.handleRecommendDailyGet)
+	s.addRoute(http.MethodPost, "/api/recommendations/daily/start", "recommend.daily_start", s.handleRecommendDailyStart)
+	s.addRoute(http.MethodGet, "/api/recommendations/daily/jobs/{ident}/events", "recommend.daily_events", s.handleRecommendDailyEvents)
+	s.addRoute(http.MethodDelete, "/api/recommendations/daily/jobs/{ident}", "recommend.daily_stop", s.handleRecommendDailyStop)
 }
