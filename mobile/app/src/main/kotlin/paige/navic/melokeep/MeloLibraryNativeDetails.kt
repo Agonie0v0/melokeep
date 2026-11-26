@@ -2612,7 +2612,7 @@ private fun MeloOnlineDailyRecommendContent(
 	val snackBarState = LocalSnackBarState.current
 	val scope = rememberCoroutineScope()
 
-	val dailyState by dailyController.state.collectAsStateWithLifecycle()
+	val state = dailyController.state.collectAsStateWithLifecycle().value
 	val allDownloads by downloadManager.allDownloads.collectAsStateWithLifecycle(emptyList())
 	val downloadsMap = remember(allDownloads) { allDownloads.associateBy { it.songId } }
 	val currentPlayingSongId by remember(player) {
@@ -2626,18 +2626,21 @@ private fun MeloOnlineDailyRecommendContent(
 	var activeMenuEntry by remember { mutableStateOf<Pair<MeloDailyRecommendItem, DomainSong>?>(null) }
 	var playlistDialogSongIds by remember { mutableStateOf<List<String>?>(null) }
 
-	val mappedSongs = remember(dailyState.items) {
-		dailyState.items.map { MeloTrackMapper.toDomainSong(it.track) }
+	val dailyEntries = remember(state.items) {
+		state.items.map { it to MeloTrackMapper.toDomainSong(it.track) }
 	}
-	val enqueueableTracks = remember(dailyState.items, dailyState.enqueuedTrackIds) {
-		dailyState.items
-			.filter { isTrackEnqueueableToLibrary(it, dailyState.enqueuedTrackIds) }
+	val mappedSongs = remember(dailyEntries) {
+		dailyEntries.map { it.second }
+	}
+	val enqueueableTracks = remember(state.items, state.enqueuedTrackIds) {
+		state.items
+			.filter { isTrackEnqueueableToLibrary(it, state.enqueuedTrackIds) }
 			.map { it.track }
 	}
 
 	MeloFeedbackObserver(
-		errorMessage = dailyState.errorMessage,
-		noticeMessage = dailyState.noticeMessage,
+		errorMessage = state.errorMessage,
+		noticeMessage = state.noticeMessage,
 		onClearError = dailyController::clearError,
 		onClearNotice = dailyController::clearNotice
 	)
@@ -2726,7 +2729,7 @@ private fun MeloOnlineDailyRecommendContent(
 							horizontalArrangement = Arrangement.spacedBy(2.dp),
 							verticalAlignment = Alignment.CenterVertically
 						) {
-							if (dailyState.streaming) {
+							if (state.streaming) {
 								IconButton(onClick = dailyController::stopGeneration) {
 									Icon(
 										imageVector = MeloIcons.Stop,
@@ -2751,7 +2754,7 @@ private fun MeloOnlineDailyRecommendContent(
 							}
 							IconButton(
 								onClick = triggerRefresh,
-								enabled = !dailyState.loading
+								enabled = !state.loading
 							) {
 								Icon(Icons.Outlined.Refresh, contentDescription = "换一批")
 							}
@@ -2759,13 +2762,13 @@ private fun MeloOnlineDailyRecommendContent(
 					}
 
 					MeloDailyCalendarHeroCard(
-						state = dailyState,
+						state = state,
 						nestedInSheet = nestedInSheet
 					)
 
 					MeloDailyActionBar(
 						hasSongs = mappedSongs.isNotEmpty(),
-						isLoading = dailyState.loading,
+						isLoading = state.loading,
 						isMultiSelecting = isMultiSelecting,
 						enqueueableCount = enqueueableTracks.size,
 						nestedInSheet = nestedInSheet,
@@ -2791,7 +2794,7 @@ private fun MeloOnlineDailyRecommendContent(
 				}
 			}
 
-			if (dailyState.loading && dailyState.items.isEmpty()) {
+			if ((state.loading || state.streaming) && dailyEntries.isEmpty()) {
 				item(key = "loading-daily-songs", contentType = "loading") {
 					Column(
 						modifier = Modifier
@@ -2802,13 +2805,13 @@ private fun MeloOnlineDailyRecommendContent(
 					) {
 						CircularProgressIndicator()
 						Text(
-							text = dailyState.stageMessage.ifBlank { "正在为你生成今日推荐歌单…" },
+							text = state.stageMessage.ifBlank { "正在为你生成今日推荐歌单…" },
 							style = MaterialTheme.typography.bodySmall,
 							color = MaterialTheme.colorScheme.onSurfaceVariant
 						)
 					}
 				}
-			} else if (dailyState.items.isEmpty() && !dailyState.streaming) {
+			} else if (dailyEntries.isEmpty()) {
 				item(key = "empty-daily-songs", contentType = "empty") {
 					MeloQuietEmptyState(
 						message = "暂无推荐曲目",
@@ -2819,15 +2822,14 @@ private fun MeloOnlineDailyRecommendContent(
 				}
 			} else {
 				itemsIndexed(
-					items = dailyState.items,
-					key = { idx, item -> "daily-online-$idx-${item.track.id}" },
+					items = dailyEntries,
+					key = { idx, (item, song) -> "daily-online-$idx-${item.track.id.ifBlank { song.id }}" },
 					contentType = { _, _ -> "track" }
-				) { idx, item ->
-					val song = mappedSongs[idx]
+				) { idx, (item, song) ->
 					val isSelected = selectedSongIds[song.id] == true
 					val dlStatus = downloadsMap[song.id]?.status
 					val isFirst = idx == 0
-					val isLast = idx == dailyState.items.lastIndex
+					val isLast = idx == dailyEntries.lastIndex
 					val isPlaying = currentPlayingSongId == song.id
 					val rowShape = libraryGroupedItemShape(isFirst, isLast)
 
@@ -2839,15 +2841,15 @@ private fun MeloOnlineDailyRecommendContent(
 						isPlaying = isPlaying,
 						isMultiSelecting = isMultiSelecting,
 						isSelected = isSelected,
-						isEnqueued = item.track.id in dailyState.enqueuedTrackIds,
-						canEnqueueToLibrary = isTrackEnqueueableToLibrary(item, dailyState.enqueuedTrackIds),
+						isEnqueued = item.track.id in state.enqueuedTrackIds,
+						canEnqueueToLibrary = isTrackEnqueueableToLibrary(item, state.enqueuedTrackIds),
 						isLast = isLast,
 						rowShape = rowShape,
 						nestedInSheet = nestedInSheet,
 						onClick = {
 							if (isMultiSelecting) {
 								selectedSongIds[song.id] = !isSelected
-							} else {
+							} else if (idx in mappedSongs.indices) {
 								player.playNow(mappedSongs, idx)
 							}
 						},
@@ -2882,18 +2884,18 @@ private fun MeloOnlineDailyRecommendContent(
 					end = 16.dp
 				)
 		) {
-			val pickedEntries by remember(dailyState.items, mappedSongs) {
+			val pickedEntries by remember(dailyEntries) {
 				derivedStateOf {
-					dailyState.items.zip(mappedSongs).filter { (_, song) ->
+					dailyEntries.filter { (_, song) ->
 						selectedSongIds[song.id] == true
 					}
 				}
 			}
 			val pickedSongs = remember(pickedEntries) { pickedEntries.map { it.second } }
-			val pickedEnqueueableTracks = remember(pickedEntries, dailyState.enqueuedTrackIds) {
+			val pickedEnqueueableTracks = remember(pickedEntries, state.enqueuedTrackIds) {
 				pickedEntries
 					.map { it.first }
-					.filter { isTrackEnqueueableToLibrary(it, dailyState.enqueuedTrackIds) }
+					.filter { isTrackEnqueueableToLibrary(it, state.enqueuedTrackIds) }
 					.map { it.track }
 			}
 			val hasRemovableOffline = remember(pickedSongs, downloadsMap) {
@@ -2970,7 +2972,7 @@ private fun MeloOnlineDailyRecommendContent(
 		}
 
 		activeMenuEntry?.let { (item, song) ->
-			val canEnqueue = isTrackEnqueueableToLibrary(item, dailyState.enqueuedTrackIds)
+			val canEnqueue = isTrackEnqueueableToLibrary(item, state.enqueuedTrackIds)
 			NativeDetailSongActionSheet(
 				song = song,
 				downloadStatus = downloadsMap[song.id]?.status,

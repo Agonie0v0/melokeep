@@ -1302,12 +1302,12 @@ try {
   await page.locator('#navigation-order li[data-nav-id="files"]').focus();
   await page.keyboard.press("ArrowUp");
   await expect(
-    page.locator('nav[aria-label="主导航"] .nav-item').nth(4),
+    page.locator('nav[aria-label="主导航"] .nav-item').nth(5),
   ).toHaveText("音乐库");
   await page.getByRole("button", { name: "关闭导航排序", exact: true }).click();
   await page.reload();
   await expect(
-    page.locator('nav[aria-label="主导航"] .nav-item').nth(4),
+    page.locator('nav[aria-label="主导航"] .nav-item').nth(5),
   ).toHaveText("音乐库");
   await page
     .getByRole("button", { name: "音乐库", exact: true })
@@ -3788,7 +3788,7 @@ try {
     await expect(projectLink).toHaveAttribute("target", "_blank");
     await expect(page.locator(".project-link")).toHaveCount(1);
     const navButtons = page.locator(".sidebar-capsules .nav-item");
-    await expect(navButtons).toHaveCount(8);
+    await expect(navButtons).toHaveCount(9);
     const themeButton = await page
       .getByRole("button", { name: "切换主题", exact: true })
       .boundingBox();

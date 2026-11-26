@@ -1,5 +1,8 @@
 import type {
+  DailyRecommendation,
+  DailyRecommendSeed,
   DeleteDownloadResult,
+  ListeningHistoryPayload,
   SelfUpdateStatus,
   SystemUpdateSettings,
 } from "./types";
@@ -229,4 +232,50 @@ export async function checkSystemHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export function fetchDailyRecommendation(
+  signal?: AbortSignal,
+): Promise<DailyRecommendation> {
+  return api<DailyRecommendation>(
+    "/recommendations/daily",
+    "GET",
+    undefined,
+    signal,
+  );
+}
+
+export function startDailyRecommendation(
+  payload: { force?: boolean; seeds?: DailyRecommendSeed[] } = {},
+  signal?: AbortSignal,
+): Promise<DailyRecommendation> {
+  return api<DailyRecommendation>(
+    "/recommendations/daily/start",
+    "POST",
+    payload,
+    signal,
+  );
+}
+
+export function cancelDailyRecommendationJob(
+  jobId: string,
+): Promise<{ cancelled: boolean }> {
+  return api<{ cancelled: boolean }>(
+    `/recommendations/daily/jobs/${encodeURIComponent(jobId)}`,
+    "DELETE",
+  );
+}
+
+export function dailyRecommendationEventsUrl(jobId: string): string {
+  return `/api/recommendations/daily/jobs/${encodeURIComponent(jobId)}/events`;
+}
+
+export function reportListeningHistory(
+  payload: ListeningHistoryPayload,
+): Promise<{ ok: boolean; count: number }> {
+  return api<{ ok: boolean; count: number }>(
+    "/recommendations/history",
+    "POST",
+    payload,
+  );
 }

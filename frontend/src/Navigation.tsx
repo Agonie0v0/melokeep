@@ -15,11 +15,13 @@ import {
   Search,
   Settings,
   ScrollText,
+  Sparkles,
   X,
 } from "lucide-react";
 
 const items = [
   ["search", "搜索音乐", Search],
+  ["daily", "每日推荐", Sparkles],
   ["assistant", "AI 助手", MessageSquare],
   ["player", "正在播放", Music2],
   ["playlists", "歌单", ListMusic],

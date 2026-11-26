@@ -413,3 +413,74 @@ export interface SystemUpdateInfo {
   github_token_source?: "settings" | "env" | "" | string;
   github_token_saved?: boolean;
 }
+
+export interface DailyRecommendItem {
+  track: Track;
+  reason: string;
+  category: "discover" | "familiar" | string;
+  in_library: boolean;
+}
+
+export interface DailyRecommendation {
+  date: string;
+  refresh_seq: number;
+  target_count: number;
+  status: "ready" | "generating" | "empty" | "error" | string;
+  job_id?: string;
+  mode?: "ai" | "rule" | string;
+  curator_note?: string;
+  style_tags: string[];
+  items: DailyRecommendItem[];
+  generated_at?: number;
+  error?: string;
+}
+
+export interface DailyRecommendStatusEvent {
+  stage: string;
+  message: string;
+  matched: number;
+  target: number;
+}
+
+export interface DailyRecommendMetaEvent {
+  date: string;
+  refresh_seq: number;
+  mode: string;
+  curator_note: string;
+  style_tags: string[];
+  target_count: number;
+}
+
+export interface DailyRecommendItemEvent {
+  index: number;
+  item: DailyRecommendItem;
+}
+
+export interface DailyRecommendDoneEvent {
+  daily: DailyRecommendation;
+  cancelled?: boolean;
+}
+
+export interface DailyRecommendErrorEvent {
+  detail: string;
+}
+
+export interface DailyRecommendSeed {
+  title: string;
+  artist: string;
+  album?: string;
+  genre?: string;
+  weight?: number;
+}
+
+export interface ListeningHistoryPayload {
+  track_id?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  genre?: string;
+  source?: string;
+  duration_ms?: number;
+  played_ms?: number;
+  played_at?: number;
+}

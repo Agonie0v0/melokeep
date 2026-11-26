@@ -1,6 +1,7 @@
 import { Cover, Button, ConfirmDialog, Modal, SongTitle } from "./components";
 import { SettingsWorkspace, type SettingsTab } from "./SettingsWorkspace";
 import { Navigation } from "./Navigation";
+import { DailyRecommend } from "./DailyRecommend";
 import { AIAssistant } from "./AIAssistant";
 import { ThemePicker } from "./ThemePicker";
 import { RuntimeLogs } from "./RuntimeLogs";
@@ -43,7 +44,13 @@ import {
   AlertTriangle,
   Info,
 } from "lucide-react";
-import { ApiError, api, deleteDownloadJob } from "./api";
+import {
+  ApiError,
+  api,
+  deleteDownloadJob,
+  reportListeningHistory,
+} from "./api";
+import { shouldReportWebListeningHistory } from "./daily-utils";
 import {
   countDeletableDownloadFiles,
   formatDownloadRemovalError,
@@ -156,6 +163,7 @@ interface BatchDownloadState {
 
 const views = {
   search: "搜索音乐",
+  daily: "每日推荐",
   assistant: "AI 助手",
   player: "正在播放",
   import: "歌单导入",
@@ -658,6 +666,7 @@ export function App() {
       cursor: -1,
     }),
     bufferingRef = useRef(false),
+    historyReportedRef = useRef<string | null>(null),
     nextRef = useRef<() => void>(() => {}),
     draggedQueueIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1273,6 +1282,30 @@ export function App() {
       }
     }
   }
+  function maybeReportListeningHistory(
+    positionSec: number,
+    durationSec: number,
+  ) {
+    const track = currentRef.current;
+    if (!track) return;
+    const reportKey = `${playGeneration.current}:${track.id}`;
+    if (historyReportedRef.current === reportKey) return;
+    if (!shouldReportWebListeningHistory(positionSec, durationSec)) return;
+    historyReportedRef.current = reportKey;
+    void reportListeningHistory({
+      track_id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album || undefined,
+      source: track.source || undefined,
+      duration_ms:
+        Number.isFinite(durationSec) && durationSec > 0
+          ? Math.round(durationSec * 1000)
+          : undefined,
+      played_ms: Math.round(positionSec * 1000),
+      played_at: Math.floor(Date.now() / 1000),
+    }).catch(() => {});
+  }
   function reportPlayback(
     track: Track,
     event: "started" | "failed" | "stalled" | "recovered",
@@ -1314,6 +1347,7 @@ export function App() {
       shuffleOrderRef.current = { signature: "", tracks: [], cursor: -1 };
     }
     const generation = ++playGeneration.current;
+    historyReportedRef.current = null;
     audio.current?.pause();
     // load() can discard the queued pause event; keep failed preparation in sync.
     setPlaying(false);
@@ -3564,7 +3598,16 @@ export function App() {
       <audio
         ref={audio}
         preload="none"
-        onTimeUpdate={() => playbackClock.set(audio.current?.currentTime || 0)}
+        onTimeUpdate={() => {
+          const element = audio.current;
+          const pos = element?.currentTime || 0;
+          playbackClock.set(pos);
+          const dur =
+            Number.isFinite(element?.duration) && element!.duration > 0
+              ? element!.duration
+              : currentRef.current?.duration || 0;
+          maybeReportListeningHistory(pos, dur);
+        }}
         onDurationChange={() =>
           setDuration(
             Number.isFinite(audio.current?.duration)
@@ -3599,6 +3642,13 @@ export function App() {
         }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
+          const element = audio.current;
+          const dur =
+            Number.isFinite(element?.duration) && element!.duration > 0
+              ? element!.duration
+              : currentRef.current?.duration || 0;
+          const pos = Math.max(element?.currentTime || 0, dur);
+          maybeReportListeningHistory(pos, dur);
           if (sleepStopAfterCurrentRef.current) {
             sleepStopAfterCurrentRef.current = false;
             setSleepTimer(null);
@@ -4714,6 +4764,26 @@ export function App() {
             />
           )}
           {view === "logs" && <RuntimeLogs active={!loginRequired} />}
+          {view === "daily" && !loginRequired && (
+            <DailyRecommend
+              authenticated={!loginRequired}
+              current={current}
+              playing={playing}
+              favIds={favIds}
+              favorites={favorites}
+              jobs={jobs}
+              sourceName={(id) => sourceLabel(id)}
+              onPlay={(track, context) => void play(track, context)}
+              onPlayAll={(items) => void playCollection(items)}
+              onQueueAll={(items) => void addToPlaylist(items)}
+              onPlayNext={(track) => void playNextInQueue(track)}
+              onFavorite={(track) => void favorite(track)}
+              onAddToPlaylist={(items) => openAddToPlaylistModal(items)}
+              onDownload={(items) => void chooseDownload(items)}
+              onOpenSettings={(tab) => openSettings(tab)}
+              onNotice={setNotice}
+            />
+          )}
           {view === "assistant" && !loginRequired && (
             <AIAssistant
               openSettings={() => openSettings("ai")}

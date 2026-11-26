@@ -1419,7 +1419,7 @@ func TestUIPreferencesPersistenceAndMerge(t *testing.T) {
 			"ambient_glow": false,
 			"density": "compact"
 		},
-		"navigation_order": ["assistant", "search", "bad-id", "search", "settings"]
+		"navigation_order": ["assistant", "daily", "search", "bad-id", "search", "settings"]
 	}`))
 	put1.Header.Set("Content-Type", "application/json")
 	put1.Header.Set(auth.CSRFHeaderName, auth.CSRFHeaderValue)
@@ -1472,7 +1472,7 @@ func TestUIPreferencesPersistenceAndMerge(t *testing.T) {
 	if got.Appearance.CustomAccent == nil || *got.Appearance.CustomAccent != "" {
 		t.Fatalf("expected cleared custom_accent \"\", got %+v", got.Appearance.CustomAccent)
 	}
-	if len(got.NavigationOrder) != 3 || got.NavigationOrder[0] != "assistant" || got.NavigationOrder[1] != "search" || got.NavigationOrder[2] != "settings" {
+	if len(got.NavigationOrder) != 4 || got.NavigationOrder[0] != "assistant" || got.NavigationOrder[1] != "daily" || got.NavigationOrder[2] != "search" || got.NavigationOrder[3] != "settings" {
 		t.Fatalf("unexpected navigation_order: %v", got.NavigationOrder)
 	}
 	if got.Player == nil || got.Player.Volume == nil || *got.Player.Volume != 1 || got.Player.Shuffle == nil || !*got.Player.Shuffle {

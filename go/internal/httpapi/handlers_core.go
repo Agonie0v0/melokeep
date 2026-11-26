@@ -1144,7 +1144,7 @@ func sanitizeUIPreferencesPatch(dst *model.UIPreferencesDTO, req model.UIPrefere
 
 	if req.NavigationOrder != nil {
 		validNav := map[string]bool{
-			"search": true, "assistant": true, "player": true,
+			"search": true, "daily": true, "assistant": true, "player": true,
 			"playlists": true, "queue": true, "files": true,
 			"organize": true, "logs": true, "settings": true,
 		}
