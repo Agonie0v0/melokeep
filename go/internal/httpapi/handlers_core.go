@@ -1174,6 +1174,18 @@ func sanitizeUIPreferencesPatch(dst *model.UIPreferencesDTO, req model.UIPrefere
 			}
 			dst.Player.Volume = &v
 		}
+		if req.Player.PlaybackRate != nil {
+			v := *req.Player.PlaybackRate
+			if !math.IsNaN(v) && !math.IsInf(v, 0) {
+				if v < 0.5 {
+					v = 0.5
+				} else if v > 3.0 {
+					v = 3.0
+				}
+				v = math.Round(v*100) / 100
+				dst.Player.PlaybackRate = &v
+			}
+		}
 		if req.Player.Shuffle != nil {
 			v := *req.Player.Shuffle
 			dst.Player.Shuffle = &v

@@ -94,6 +94,7 @@ import {
   normalizePlayerPrefs,
   parsePlayerPreferences,
   sanitizeLyricsFontSize,
+  sanitizePlaybackRate,
   saveLocalPlayerPrefs,
   scheduleSavePreferences,
   subscribePreferencesPatch,
@@ -185,6 +186,33 @@ function loadInitialLyricsOffsetMs(): number {
     return 0;
   }
 }
+
+type PitchAudioElement = HTMLAudioElement & {
+  preservesPitch?: boolean;
+  mozPreservesPitch?: boolean;
+  webkitPreservesPitch?: boolean;
+};
+
+function applyAudioPlaybackRate(
+  element: HTMLAudioElement | null,
+  rate: number,
+) {
+  if (!element) return;
+  const clean = sanitizePlaybackRate(rate);
+  element.defaultPlaybackRate = clean;
+  element.playbackRate = clean;
+  const pitchElement = element as PitchAudioElement;
+  if ("preservesPitch" in pitchElement) {
+    pitchElement.preservesPitch = true;
+  }
+  if ("mozPreservesPitch" in pitchElement) {
+    pitchElement.mozPreservesPitch = true;
+  }
+  if ("webkitPreservesPitch" in pitchElement) {
+    pitchElement.webkitPreservesPitch = true;
+  }
+}
+
 export function App() {
   const appearanceCtrl = useAppearance();
   const [sleepTimer, setSleepTimer] = useState<SleepTimerState | null>(null);
@@ -510,7 +538,8 @@ export function App() {
     [duration, setDuration] = useState(0),
     [volume, setVolume] = useState(initialPlayer.volume),
     [shuffle, setShuffle] = useState(initialPlayer.shuffle),
-    [repeat, setRepeat] = useState(initialPlayer.repeat);
+    [repeat, setRepeat] = useState(initialPlayer.repeat),
+    [playbackRate, setPlaybackRate] = useState(initialPlayer.playbackRate);
   const [lyricText, setLyricText] = useState(""),
     [lines, setLines] = useState<LyricLine[]>([]),
     [follow, setFollow] = useState(initialPlayer.follow),
@@ -531,6 +560,7 @@ export function App() {
     volume,
     shuffle,
     repeat,
+    playbackRate,
     follow,
     largeLyrics,
     lyricsFontSize,
@@ -580,6 +610,7 @@ export function App() {
       if (patch.volume !== undefined) setVolume(next.volume);
       if (patch.shuffle !== undefined) setShuffle(next.shuffle);
       if (patch.repeat !== undefined) setRepeat(next.repeat);
+      if (patch.playbackRate !== undefined) setPlaybackRate(next.playbackRate);
       if (patch.follow !== undefined) setFollow(next.follow);
       if (
         patch.largeLyrics !== undefined ||
@@ -601,6 +632,7 @@ export function App() {
       lastLocalPrefAtRef.current = Date.now();
       const defaultDebounce =
         patch.volume !== undefined ||
+        patch.playbackRate !== undefined ||
         patch.lyricsFontSize !== undefined ||
         patch.lyricsInactiveOpacity !== undefined ||
         patch.lyricsActiveColor !== undefined
@@ -832,6 +864,7 @@ export function App() {
           setVolume(nextPlayer.volume);
           setShuffle(nextPlayer.shuffle);
           setRepeat(nextPlayer.repeat);
+          setPlaybackRate(nextPlayer.playbackRate);
           setFollow(nextPlayer.follow);
           setLargeLyrics(nextPlayer.largeLyrics);
           setLyricsFontSize(nextPlayer.lyricsFontSize);
@@ -920,6 +953,7 @@ export function App() {
           (curPlayer.volume !== DEFAULT_PLAYER_PREFS.volume ||
             curPlayer.shuffle !== DEFAULT_PLAYER_PREFS.shuffle ||
             curPlayer.repeat !== DEFAULT_PLAYER_PREFS.repeat ||
+            curPlayer.playbackRate !== DEFAULT_PLAYER_PREFS.playbackRate ||
             curPlayer.follow !== DEFAULT_PLAYER_PREFS.follow ||
             curPlayer.largeLyrics !== DEFAULT_PLAYER_PREFS.largeLyrics ||
             curPlayer.lyricsFontSize !== DEFAULT_PLAYER_PREFS.lyricsFontSize ||
@@ -1074,6 +1108,9 @@ export function App() {
     if (!element) return;
     element.volume = volume;
   }, [volume]);
+  useEffect(() => {
+    applyAudioPlaybackRate(audio.current, playbackRate);
+  }, [playbackRate]);
   currentRef.current = current;
   const favIds = useMemo(
     () => new Set(favorites.map((t) => t.id)),
@@ -1412,6 +1449,7 @@ export function App() {
         );
       element.src = prepared.playback.url;
       element.load();
+      applyAudioPlaybackRate(element, playerPrefsRef.current.playbackRate);
       stage = "play";
       await element.play();
       return true;
@@ -3615,7 +3653,19 @@ export function App() {
               : currentRef.current?.duration || 0,
           )
         }
-        onPlay={() => setPlaying(true)}
+        onLoadedMetadata={() =>
+          applyAudioPlaybackRate(
+            audio.current,
+            playerPrefsRef.current.playbackRate,
+          )
+        }
+        onPlay={() => {
+          applyAudioPlaybackRate(
+            audio.current,
+            playerPrefsRef.current.playbackRate,
+          );
+          setPlaying(true);
+        }}
         onPlaying={() => {
           if (currentRef.current)
             reportPlayback(
@@ -4138,6 +4188,7 @@ export function App() {
               queueManaging={queueManaging}
               queueSaving={queueSaving}
               volumeControl={volumeControl}
+              playbackRate={playbackRate}
               queueListContent={renderQueueList(false)}
               onBack={() => setView(returnView)}
               onTogglePlay={() => void toggle()}
@@ -4145,6 +4196,9 @@ export function App() {
               onStep={step}
               onToggleShuffle={() => updatePlayerPrefs({ shuffle: !shuffle })}
               onToggleRepeat={() => updatePlayerPrefs({ repeat: !repeat })}
+              onChangePlaybackRate={(next) =>
+                updatePlayerPrefs({ playbackRate: next })
+              }
               onFavorite={() => current && void favorite(current)}
               onDownload={() => current && void chooseDownload([current])}
               onAddToQueue={() => current && void addToPlaylist([current])}
@@ -4817,6 +4871,10 @@ export function App() {
             ambientGlow={appearanceCtrl.appearance.ambientGlow}
             volume={volume}
             volumeControl={volumeControl}
+            playbackRate={playbackRate}
+            onChangePlaybackRate={(next) =>
+              updatePlayerPrefs({ playbackRate: next })
+            }
             lines={lines}
             lyricText={lyricText}
             follow={follow}

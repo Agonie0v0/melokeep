@@ -674,7 +674,7 @@ class IosAudioPlayer(
 	}
 
 	fun setPlaybackSpeed(speed: Float) {
-		val clamped = speed.coerceIn(0.5f, 2.0f)
+		val clamped = speed.coerceIn(0.5f, 3.0f)
 		_state.update { it.copy(playbackSpeed = clamped) }
 		runOnMain {
 			if (queuePlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying) {

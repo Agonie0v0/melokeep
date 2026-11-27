@@ -739,6 +739,7 @@ type AppearancePreferencesDTO struct {
 // PlayerPreferencesDTO describes persisted player audio and lyric preferences.
 type PlayerPreferencesDTO struct {
 	Volume                *float64 `json:"volume,omitempty"`
+	PlaybackRate          *float64 `json:"playback_rate,omitempty"`
 	Shuffle               *bool    `json:"shuffle,omitempty"`
 	Repeat                *bool    `json:"repeat,omitempty"`
 	FollowLyrics          *bool    `json:"follow_lyrics,omitempty"`

@@ -1126,11 +1126,12 @@ class MediaPlayer(
 	}
 
 	fun setPlaybackSpeed(value: Float) = this@MediaPlayer.launch {
+		val clamped = value.coerceIn(0.5f, 3.0f)
 		controller?.playbackParameters = PlaybackParameters(
-			value,
-			if (uiState.value.preservePitch) 1f else value
+			clamped,
+			if (uiState.value.preservePitch) 1f else clamped
 		)
-		_uiState.update { it.copy(playbackSpeed = value) }
+		_uiState.update { it.copy(playbackSpeed = clamped) }
 	}
 
 	fun setPreservePitch(value: Boolean) = this@MediaPlayer.launch {

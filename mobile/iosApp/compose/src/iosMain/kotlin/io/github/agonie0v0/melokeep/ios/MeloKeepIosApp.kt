@@ -1891,10 +1891,10 @@ private fun IosSpeedModalSheet(
 								val snapped = (raw * 20f).roundToInt() / 20f
 								onSetSpeed(snapped)
 							},
-							valueRange = 0.5f..2.0f,
+							valueRange = 0.5f..3.0f,
 						)
 						FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-							listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
+							listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f).forEach { spd ->
 								FilterChip(
 									selected = abs(playbackSpeed - spd) < 0.01f,
 									onClick = { onSetSpeed(spd) },

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -2333,13 +2334,17 @@ func TestUIPreferencesLyricsCustomizationAndBounds(t *testing.T) {
 	// 1. Out-of-bounds low + invalid active color + invalid align.
 	got1 := putPrefs(`{
 		"player": {
+			"playback_rate": 0.1,
 			"lyrics_font_size": 8,
 			"lyrics_active_color": "red",
 			"lyrics_inactive_opacity": 0.05,
 			"lyrics_align": "right"
 		}
 	}`)
-	if got1.Player == nil || got1.Player.LyricsFontSize == nil || *got1.Player.LyricsFontSize != 14 {
+	if got1.Player == nil || got1.Player.PlaybackRate == nil || *got1.Player.PlaybackRate != 0.5 {
+		t.Fatalf("expected playback_rate clamped to 0.5, got %+v", got1.Player)
+	}
+	if got1.Player.LyricsFontSize == nil || *got1.Player.LyricsFontSize != 14 {
 		t.Fatalf("expected lyrics_font_size clamped to 14, got %+v", got1.Player)
 	}
 	if got1.Player.LyricsInactiveOpacity == nil || *got1.Player.LyricsInactiveOpacity != 0.2 {
@@ -2355,12 +2360,16 @@ func TestUIPreferencesLyricsCustomizationAndBounds(t *testing.T) {
 	// 2. Out-of-bounds high + whitespace-trimmed valid hex + valid align.
 	got2 := putPrefs(`{
 		"player": {
+			"playback_rate": 5.0,
 			"lyrics_font_size": 60,
 			"lyrics_active_color": "  #22c55e  ",
 			"lyrics_inactive_opacity": 1.8,
 			"lyrics_align": "left"
 		}
 	}`)
+	if got2.Player == nil || got2.Player.PlaybackRate == nil || *got2.Player.PlaybackRate != 3.0 {
+		t.Fatalf("expected playback_rate clamped to 3.0, got %+v", got2.Player)
+	}
 	if *got2.Player.LyricsFontSize != 32 {
 		t.Fatalf("expected lyrics_font_size clamped to 32, got %d", *got2.Player.LyricsFontSize)
 	}
@@ -2374,9 +2383,19 @@ func TestUIPreferencesLyricsCustomizationAndBounds(t *testing.T) {
 		t.Fatalf("expected lyrics_align=left, got %q", got2.Player.LyricsAlign)
 	}
 
-	// 3. Valid values + empty active color (theme default) + partial update preserves fields.
+	// 3. Rounding to 2 decimal places + valid values + empty active color + partial update preserves fields.
+	gotRounded := putPrefs(`{
+		"player": {
+			"playback_rate": 2.356
+		}
+	}`)
+	if gotRounded.Player == nil || gotRounded.Player.PlaybackRate == nil || *gotRounded.Player.PlaybackRate != 2.36 {
+		t.Fatalf("expected playback_rate rounded to 2.36, got %+v", gotRounded.Player)
+	}
+
 	_ = putPrefs(`{
 		"player": {
+			"playback_rate": 1.75,
 			"lyrics_font_size": 22,
 			"lyrics_active_color": "",
 			"lyrics_inactive_opacity": 0.55,
@@ -2401,11 +2420,25 @@ func TestUIPreferencesLyricsCustomizationAndBounds(t *testing.T) {
 		t.Fatalf("decode final prefs: %v", err)
 	}
 	if final.Player == nil || final.Player.Volume == nil || *final.Player.Volume != 0.65 ||
+		final.Player.PlaybackRate == nil || *final.Player.PlaybackRate != 1.75 ||
 		final.Player.LyricsFontSize == nil || *final.Player.LyricsFontSize != 22 ||
 		final.Player.LyricsActiveColor == nil || *final.Player.LyricsActiveColor != "" ||
 		final.Player.LyricsInactiveOpacity == nil || *final.Player.LyricsInactiveOpacity != 0.55 ||
 		final.Player.LyricsAlign != "center" {
 		t.Fatalf("unexpected persisted player preferences: %+v", final.Player)
+	}
+
+	// 4. Non-finite playback_rate values (NaN / +Inf / -Inf) are ignored.
+	baseRate := 1.5
+	dst := model.UIPreferencesDTO{Player: &model.PlayerPreferencesDTO{PlaybackRate: &baseRate}}
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		v := bad
+		sanitizeUIPreferencesPatch(&dst, model.UIPreferencesDTO{
+			Player: &model.PlayerPreferencesDTO{PlaybackRate: &v},
+		})
+		if dst.Player.PlaybackRate == nil || *dst.Player.PlaybackRate != 1.5 {
+			t.Fatalf("expected non-finite playback_rate %v ignored, got %+v", bad, dst.Player.PlaybackRate)
+		}
 	}
 }
 

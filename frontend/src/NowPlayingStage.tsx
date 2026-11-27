@@ -33,11 +33,16 @@ import {
 } from "lucide-react";
 import { Button, Cover } from "./components";
 import { type LyricLine } from "./lyrics";
-import { PlaybackTimeline, SyncedLyrics } from "./PlaybackWidgets";
+import {
+  PlaybackRateControl,
+  PlaybackTimeline,
+  SyncedLyrics,
+} from "./PlaybackWidgets";
 import {
   DEFAULT_LYRICS_ALIGN,
   DEFAULT_LYRICS_FONT_SIZE,
   DEFAULT_LYRICS_INACTIVE_OPACITY,
+  DEFAULT_PLAYBACK_RATE,
   LARGE_LYRICS_FONT_SIZE,
   LYRICS_ACTIVE_COLOR_PRESETS,
   LYRICS_FONT_SIZE_MAX,
@@ -93,6 +98,7 @@ export function NowPlayingStage({
   queueManaging,
   queueSaving,
   volumeControl,
+  playbackRate = DEFAULT_PLAYBACK_RATE,
   queueListContent,
   onBack,
   onTogglePlay,
@@ -100,6 +106,7 @@ export function NowPlayingStage({
   onStep,
   onToggleShuffle,
   onToggleRepeat,
+  onChangePlaybackRate,
   onFavorite,
   onDownload,
   onAddToQueue,
@@ -144,6 +151,7 @@ export function NowPlayingStage({
   queueManaging: boolean;
   queueSaving: boolean;
   volumeControl: ReactNode;
+  playbackRate?: number;
   queueListContent: ReactNode;
   onBack: () => void;
   onTogglePlay: () => void;
@@ -151,6 +159,7 @@ export function NowPlayingStage({
   onStep: (direction: number) => void;
   onToggleShuffle: () => void;
   onToggleRepeat: () => void;
+  onChangePlaybackRate?: (nextRate: number) => void;
   onFavorite: () => void;
   onDownload: () => void;
   onAddToQueue: () => void;
@@ -979,7 +988,13 @@ export function NowPlayingStage({
                 </Button>
               </div>
 
-              <div className="np-deck-right">{volumeControl}</div>
+              <div className="np-deck-right">
+                <PlaybackRateControl
+                  rate={playbackRate}
+                  onChange={(r) => onChangePlaybackRate?.(r)}
+                />
+                {volumeControl}
+              </div>
             </div>
           </footer>
         </>

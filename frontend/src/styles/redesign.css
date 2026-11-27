@@ -1096,6 +1096,263 @@
   color: var(--accent);
 }
 
+/* 播放倍速控件与毛玻璃弹出浮层 */
+.playback-rate-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.playback-rate-trigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line-soft);
+  background: var(--subtle);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.playback-rate-trigger.compact {
+  min-width: 44px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.playback-rate-trigger:hover:not(:disabled),
+.playback-rate-trigger.is-open:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: var(--line-soft);
+}
+
+.playback-rate-trigger.active {
+  background: var(--soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.playback-rate-trigger.active:hover:not(:disabled),
+.playback-rate-trigger.active.is-open:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.playback-rate-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.playback-rate-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 40;
+  width: min(280px, calc(100vw - 24px));
+  padding: 13px 14px;
+  display: grid;
+  gap: 11px;
+  border-radius: 16px;
+  background: var(--glass-heavy);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--card-highlight), var(--shadow);
+  transform-origin: bottom right;
+  animation: modal-pop-in 170ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-theme="dark"] .playback-rate-popover {
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+}
+
+.playback-rate-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.playback-rate-popover-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.playback-rate-popover-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback-rate-current {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.playback-rate-reset {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.playback-rate-reset:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.playback-rate-slider-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.playback-rate-popover input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  border: 0;
+  padding: 0;
+  outline: none;
+  border-radius: 999px;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--progress, 20%),
+    var(--line) var(--progress, 20%),
+    var(--line) 100%
+  );
+}
+
+.playback-rate-popover input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+  transition: transform 120ms ease;
+}
+
+.playback-rate-popover input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.playback-rate-popover input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+}
+
+.playback-rate-ticks {
+  position: relative;
+  height: 14px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.playback-rate-ticks span {
+  position: absolute;
+  top: 0;
+  line-height: 1;
+}
+
+.playback-rate-ticks span:nth-child(1) {
+  left: 0;
+}
+
+.playback-rate-ticks span:nth-child(2) {
+  left: 20%;
+  transform: translateX(-50%);
+}
+
+.playback-rate-ticks span:nth-child(3) {
+  left: 60%;
+  transform: translateX(-50%);
+}
+
+.playback-rate-ticks span:nth-child(4) {
+  right: 0;
+}
+
+.playback-rate-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.playback-rate-preset {
+  flex: 1 0 auto;
+  min-width: 34px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  background: var(--subtle);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.playback-rate-preset:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.playback-rate-preset.active {
+  background: var(--soft);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playback-rate-popover {
+    animation: none;
+  }
+}
+
 /* 8. 右侧滑出式毛玻璃歌词与待播抽屉 */
 @keyframes studio-drawer-in-right {
   from {
@@ -1934,6 +2191,7 @@
 
 /* 底部一体式 Hi-Fi 操控舱 */
 .np-stage .studio-deck {
+  position: relative;
   margin: 0;
   padding: 10px 18px 12px;
   border-radius: 18px;
@@ -2060,6 +2318,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -2083,6 +2342,21 @@
   display: inline;
   min-width: 36px;
   text-align: right;
+}
+
+@media (max-width: 960px) and (min-width: 801px) {
+  .np-stage .studio-deck .np-deck-right {
+    gap: 6px;
+  }
+
+  .np-stage .studio-deck .player-extras input[type="range"] {
+    width: 64px;
+    min-width: 56px;
+  }
+
+  .np-stage .studio-deck .volume-value {
+    display: none;
+  }
 }
 
 @media (min-width: 1120px) {
@@ -4421,7 +4695,20 @@
   }
   .np-stage .studio-deck .np-deck-right {
     width: 100%;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .np-stage .studio-deck .playback-rate-control {
+    position: static;
+  }
+  .np-stage .studio-deck .playback-rate-popover {
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px);
+    margin-inline: auto;
+    width: min(280px, 100%);
+    transform-origin: bottom center;
   }
   .np-stage .studio-deck .player-extras {
     width: 100%;
@@ -4660,5 +4947,13 @@
   }
   .global-mini-volume-panel {
     right: -46px;
+  }
+  .global-mini-player.player-dock .playback-rate-control {
+    position: static;
+  }
+  .global-mini-player.player-dock .playback-rate-popover {
+    right: 0;
+    bottom: calc(100% + 10px);
+    width: min(280px, 100%);
   }
 }

@@ -26,6 +26,12 @@ export const LYRICS_INACTIVE_OPACITY_MAX = 0.9;
 export const DEFAULT_LYRICS_INACTIVE_OPACITY = 0.45;
 export const DEFAULT_LYRICS_ALIGN: LyricsAlign = "center";
 
+export const PLAYBACK_RATE_MIN = 0.5;
+export const PLAYBACK_RATE_MAX = 3;
+export const DEFAULT_PLAYBACK_RATE = 1;
+export const PLAYBACK_RATE_STEP = 0.05;
+export const PLAYBACK_RATE_PRESETS = [0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
+
 export const LYRICS_ACTIVE_COLOR_PRESETS = [
   { label: "跟随主题", color: "" },
   { label: "纯净白", color: "#FFFFFF" },
@@ -39,6 +45,7 @@ export interface PlayerPreferences {
   volume?: number;
   shuffle?: boolean;
   repeat?: boolean;
+  playback_rate?: number;
   follow_lyrics?: boolean;
   large_lyrics?: boolean;
   lyrics_font_size?: number;
@@ -67,6 +74,7 @@ export interface LocalPlayerState {
   volume: number;
   shuffle: boolean;
   repeat: boolean;
+  playbackRate: number;
   follow: boolean;
   largeLyrics: boolean;
   lyricsFontSize: number;
@@ -81,6 +89,7 @@ export const DEFAULT_PLAYER_PREFS: LocalPlayerState = {
   volume: 0.65,
   shuffle: false,
   repeat: true,
+  playbackRate: DEFAULT_PLAYBACK_RATE,
   follow: true,
   largeLyrics: false,
   lyricsFontSize: DEFAULT_LYRICS_FONT_SIZE,
@@ -135,6 +144,32 @@ export function sanitizeLyricsAlign(
   return value === "center" || value === "left" ? value : fallback;
 }
 
+export function sanitizePlaybackRate(
+  value: unknown,
+  fallback: number = DEFAULT_PLAYBACK_RATE,
+): number {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "boolean" ||
+    typeof value === "object"
+  ) {
+    return fallback;
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    return fallback;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const clamped = Math.min(PLAYBACK_RATE_MAX, Math.max(PLAYBACK_RATE_MIN, n));
+  return Math.round(clamped * 100) / 100;
+}
+
+export function formatPlaybackRate(rate: number): string {
+  const clean = sanitizePlaybackRate(rate);
+  return `${clean.toFixed(2).replace(/\.?0+$/, "")}x`;
+}
+
 export function normalizePlayerPrefs(
   raw: Partial<LocalPlayerState> | null | undefined,
   fallback: LocalPlayerState = DEFAULT_PLAYER_PREFS,
@@ -177,6 +212,7 @@ export function normalizePlayerPrefs(
         : fallback.volume,
     shuffle: typeof raw.shuffle === "boolean" ? raw.shuffle : fallback.shuffle,
     repeat: typeof raw.repeat === "boolean" ? raw.repeat : fallback.repeat,
+    playbackRate: sanitizePlaybackRate(raw.playbackRate, fallback.playbackRate),
     follow: typeof raw.follow === "boolean" ? raw.follow : fallback.follow,
     largeLyrics,
     lyricsFontSize,
@@ -202,6 +238,7 @@ export function parsePlayerPreferences(
       volume: dto.volume,
       shuffle: dto.shuffle,
       repeat: dto.repeat,
+      playbackRate: dto.playback_rate,
       follow: dto.follow_lyrics,
       largeLyrics: dto.large_lyrics,
       lyricsFontSize: dto.lyrics_font_size,
@@ -221,6 +258,7 @@ export function toPlayerPreferences(
     volume: clean.volume,
     shuffle: clean.shuffle,
     repeat: clean.repeat,
+    playback_rate: clean.playbackRate,
     follow_lyrics: clean.follow,
     large_lyrics: clean.largeLyrics,
     lyrics_font_size: clean.lyricsFontSize,

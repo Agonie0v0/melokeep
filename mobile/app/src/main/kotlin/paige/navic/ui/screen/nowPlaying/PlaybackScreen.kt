@@ -53,7 +53,7 @@ fun PlaybackSpeedScreen() {
 
 	val selectedSpeed = playerState.playbackSpeed
 	val playbackSpeeds = remember {
-		listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+		listOf(1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
 	}
 
 	Column(
@@ -138,7 +138,7 @@ fun PlaybackSpeedScreen() {
 							val snappedValue = round(newValue * 100) / 100f
 							player.setPlaybackSpeed(snappedValue)
 						},
-						valueRange = 0.5f..2.0f,
+						valueRange = 0.5f..3.0f,
 						modifier = Modifier.fillMaxWidth(),
 						colors = SliderDefaults.colors(
 							thumbColor = MaterialTheme.colorScheme.primary,
@@ -165,6 +165,11 @@ fun PlaybackSpeedScreen() {
 						)
 						Text(
 							text = "2.0x",
+							style = MaterialTheme.typography.labelSmall.tabularNums(),
+							color = MaterialTheme.colorScheme.onSurfaceVariant
+						)
+						Text(
+							text = "3.0x",
 							style = MaterialTheme.typography.labelSmall.tabularNums(),
 							color = MaterialTheme.colorScheme.onSurfaceVariant
 						)

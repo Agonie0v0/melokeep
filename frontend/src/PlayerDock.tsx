@@ -20,9 +20,13 @@ import {
   X,
 } from "lucide-react";
 import { Button, Cover } from "./components";
-import { PlaybackTimeline, SyncedLyrics } from "./PlaybackWidgets";
+import {
+  PlaybackRateControl,
+  PlaybackTimeline,
+  SyncedLyrics,
+} from "./PlaybackWidgets";
 import type { LyricLine } from "./lyrics";
-import type { LyricsAlign } from "./preferences";
+import { DEFAULT_PLAYBACK_RATE, type LyricsAlign } from "./preferences";
 import type { Track } from "./types";
 
 function useMediaMatches(query: string): boolean {
@@ -66,6 +70,8 @@ export function PlayerDock({
   ambientGlow,
   volume,
   volumeControl,
+  playbackRate = DEFAULT_PLAYBACK_RATE,
+  onChangePlaybackRate,
   lines,
   lyricText,
   follow,
@@ -111,6 +117,8 @@ export function PlayerDock({
   ambientGlow: boolean;
   volume: number;
   volumeControl: ReactNode;
+  playbackRate?: number;
+  onChangePlaybackRate?: (nextRate: number) => void;
   lines: LyricLine[];
   lyricText: string;
   follow: boolean;
@@ -366,6 +374,11 @@ export function PlayerDock({
                     {drawerOpen ? <PanelRightClose /> : <PanelRightOpen />}
                   </button>
                 )}
+                <PlaybackRateControl
+                  rate={playbackRate}
+                  onChange={(r) => onChangePlaybackRate?.(r)}
+                  compact
+                />
                 <details
                   ref={volumeWrapRef}
                   className="global-mini-volume"
