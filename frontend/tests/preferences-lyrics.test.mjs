@@ -7,7 +7,6 @@ import {
   LYRICS_ACTIVE_COLOR_PRESETS,
   PLAYBACK_RATE_MAX,
   PLAYBACK_RATE_MIN,
-  PLAYBACK_RATE_PRESETS,
   PLAYBACK_RATE_STEP,
   formatPlaybackRate,
   loadInitialPlayerPrefs,
@@ -32,7 +31,6 @@ test("player preferences defaults and lyric color presets match specification", 
   assert.equal(PLAYBACK_RATE_MIN, 0.5);
   assert.equal(PLAYBACK_RATE_MAX, 3);
   assert.equal(PLAYBACK_RATE_STEP, 0.05);
-  assert.deepEqual([...PLAYBACK_RATE_PRESETS], [0.75, 1, 1.25, 1.5, 2, 2.5, 3]);
   assert.deepEqual(
     LYRICS_ACTIVE_COLOR_PRESETS.map((p) => p.color),
     ["", "#FFFFFF", "#F59E0B", "#38BDF8", "#34D399", "#FB7185"],

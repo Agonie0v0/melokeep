@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -97,7 +96,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1466,9 +1464,15 @@ private fun NowPlayingFullScreenSheet(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						TextButton(onClick = { showSpeedSheet = true }) {
-							Icon(Icons.Rounded.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+							val speedActive = abs(playerState.playbackSpeed - 1.0f) > 0.005f
+							val speedTint = if (speedActive) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.onSurfaceVariant
+							}
+							Icon(Icons.Rounded.Speed, contentDescription = null, tint = speedTint, modifier = Modifier.size(18.dp))
 							Spacer(Modifier.width(4.dp))
-							Text("${playerState.playbackSpeed}x", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge.tabularNums())
+							Text("${playerState.playbackSpeed}x", color = speedTint, style = MaterialTheme.typography.labelLarge.tabularNums())
 						}
 						TextButton(onClick = { showSleepSheet = true }) {
 							val timerActive = playerState.sleepTimer.active
@@ -1878,12 +1882,35 @@ private fun IosSpeedModalSheet(
 							verticalAlignment = Alignment.CenterVertically,
 						) {
 							Text("当前倍速", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-							Text(
-								text = "${playbackSpeed}x",
-								style = MaterialTheme.typography.labelLarge.tabularNums(),
-								fontWeight = FontWeight.SemiBold,
-								color = MaterialTheme.colorScheme.primary,
-							)
+							Row(
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								Text(
+									text = "${playbackSpeed}x",
+									style = MaterialTheme.typography.labelLarge.tabularNums(),
+									fontWeight = FontWeight.SemiBold,
+									color = MaterialTheme.colorScheme.primary,
+								)
+								if (abs(playbackSpeed - 1.0f) > 0.005f) {
+									Surface(
+										modifier = Modifier
+											.clip(CircleShape)
+											.clickable { onSetSpeed(1.0f) },
+										shape = CircleShape,
+										color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+										border = BorderStroke(IosHairlineWidth, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
+									) {
+										Text(
+											text = "恢复 1.0x",
+											style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold).tabularNums(),
+											color = MaterialTheme.colorScheme.primary,
+											maxLines = 1,
+											modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+										)
+									}
+								}
+							}
 						}
 						Slider(
 							value = playbackSpeed,
@@ -1893,13 +1920,17 @@ private fun IosSpeedModalSheet(
 							},
 							valueRange = 0.5f..3.0f,
 						)
-						FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-							listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f).forEach { spd ->
-								FilterChip(
-									selected = abs(playbackSpeed - spd) < 0.01f,
-									onClick = { onSetSpeed(spd) },
-									shape = CircleShape,
-									label = { Text("${spd}x") },
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 4.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							listOf("0.5x", "1.0x", "2.0x", "3.0x").forEach { label ->
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelSmall.tabularNums(),
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
 								)
 							}
 						}

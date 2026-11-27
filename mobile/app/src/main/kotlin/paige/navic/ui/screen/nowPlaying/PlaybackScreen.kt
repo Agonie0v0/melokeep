@@ -9,7 +9,6 @@ package paige.navic.ui.screen.nowPlaying
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,18 +27,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
 import paige.navic.R
 import paige.navic.melokeep.MeloGroupedCard
-import paige.navic.melokeep.MeloHairlineDivider
 import paige.navic.melokeep.MeloHairlineWidth
 import paige.navic.playback.MediaPlayer
 import paige.navic.ui.theme.tabularNums
@@ -52,9 +48,6 @@ fun PlaybackSpeedScreen() {
 	val playerState by player.uiState.collectAsStateWithLifecycle()
 
 	val selectedSpeed = playerState.playbackSpeed
-	val playbackSpeeds = remember {
-		listOf(1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
-	}
 
 	Column(
 		modifier = Modifier
@@ -125,107 +118,53 @@ fun PlaybackSpeedScreen() {
 		}
 
 		MeloGroupedCard {
-			Column(modifier = Modifier.fillMaxWidth()) {
-				Column(
-					modifier = Modifier
-						.fillMaxWidth()
-						.padding(horizontal = 14.dp, vertical = 12.dp),
-					verticalArrangement = Arrangement.spacedBy(4.dp)
-				) {
-					Slider(
-						value = selectedSpeed,
-						onValueChange = { newValue ->
-							val snappedValue = round(newValue * 100) / 100f
-							player.setPlaybackSpeed(snappedValue)
-						},
-						valueRange = 0.5f..3.0f,
-						modifier = Modifier.fillMaxWidth(),
-						colors = SliderDefaults.colors(
-							thumbColor = MaterialTheme.colorScheme.primary,
-							activeTrackColor = MaterialTheme.colorScheme.primary,
-							inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-						)
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 14.dp, vertical = 12.dp),
+				verticalArrangement = Arrangement.spacedBy(4.dp)
+			) {
+				Slider(
+					value = selectedSpeed,
+					onValueChange = { newValue ->
+						val snappedValue = round(newValue * 100) / 100f
+						player.setPlaybackSpeed(snappedValue)
+					},
+					valueRange = 0.5f..3.0f,
+					modifier = Modifier.fillMaxWidth(),
+					colors = SliderDefaults.colors(
+						thumbColor = MaterialTheme.colorScheme.primary,
+						activeTrackColor = MaterialTheme.colorScheme.primary,
+						inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
 					)
-
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 4.dp),
-						horizontalArrangement = Arrangement.SpaceBetween
-					) {
-						Text(
-							text = "0.5x",
-							style = MaterialTheme.typography.labelSmall.tabularNums(),
-							color = MaterialTheme.colorScheme.onSurfaceVariant
-						)
-						Text(
-							text = "1.0x",
-							style = MaterialTheme.typography.labelSmall.tabularNums(),
-							color = MaterialTheme.colorScheme.onSurfaceVariant
-						)
-						Text(
-							text = "2.0x",
-							style = MaterialTheme.typography.labelSmall.tabularNums(),
-							color = MaterialTheme.colorScheme.onSurfaceVariant
-						)
-						Text(
-							text = "3.0x",
-							style = MaterialTheme.typography.labelSmall.tabularNums(),
-							color = MaterialTheme.colorScheme.onSurfaceVariant
-						)
-					}
-				}
-
-				MeloHairlineDivider(startIndent = 14.dp)
+				)
 
 				Row(
 					modifier = Modifier
 						.fillMaxWidth()
-						.padding(horizontal = 12.dp, vertical = 12.dp),
-					horizontalArrangement = Arrangement.spacedBy(6.dp),
-					verticalAlignment = Alignment.CenterVertically
+						.padding(horizontal = 4.dp),
+					horizontalArrangement = Arrangement.SpaceBetween
 				) {
-					playbackSpeeds.forEach { speed ->
-						val isSelected = abs(selectedSpeed - speed) < 0.005f
-						Surface(
-							onClick = { player.setPlaybackSpeed(speed) },
-							modifier = Modifier.weight(1f),
-							shape = CircleShape,
-							color = if (isSelected) {
-								MaterialTheme.colorScheme.primary
-							} else {
-								MaterialTheme.colorScheme.surfaceContainerHigh
-							},
-							border = if (isSelected) {
-								null
-							} else {
-								BorderStroke(
-									width = MeloHairlineWidth,
-									color = MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)
-								)
-							}
-						) {
-							Box(
-								modifier = Modifier.padding(vertical = 8.dp),
-								contentAlignment = Alignment.Center
-							) {
-								Text(
-									text = "${speed}x",
-									style = MaterialTheme.typography.labelSmall.copy(
-										fontSize = 11.sp,
-										fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
-									).tabularNums(),
-									color = if (isSelected) {
-										MaterialTheme.colorScheme.onPrimary
-									} else {
-										MaterialTheme.colorScheme.onSurface
-									},
-									maxLines = 1,
-									softWrap = false
-								)
-							}
-						}
-					}
+					Text(
+						text = "0.5x",
+						style = MaterialTheme.typography.labelSmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
+					Text(
+						text = "1.0x",
+						style = MaterialTheme.typography.labelSmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
+					Text(
+						text = "2.0x",
+						style = MaterialTheme.typography.labelSmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
+					Text(
+						text = "3.0x",
+						style = MaterialTheme.typography.labelSmall.tabularNums(),
+						color = MaterialTheme.colorScheme.onSurfaceVariant
+					)
 				}
 			}
 		}

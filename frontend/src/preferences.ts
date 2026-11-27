@@ -30,7 +30,6 @@ export const PLAYBACK_RATE_MIN = 0.5;
 export const PLAYBACK_RATE_MAX = 3;
 export const DEFAULT_PLAYBACK_RATE = 1;
 export const PLAYBACK_RATE_STEP = 0.05;
-export const PLAYBACK_RATE_PRESETS = [0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
 
 export const LYRICS_ACTIVE_COLOR_PRESETS = [
   { label: "跟随主题", color: "" },

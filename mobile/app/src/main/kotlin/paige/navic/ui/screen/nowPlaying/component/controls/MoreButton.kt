@@ -135,11 +135,6 @@ fun NowPlayingMoreButton(
 				onSleepTimer = {
 					expanded = false
 					sleepTimerSheetShown = true
-				},
-				showPlaybackSpeed = true,
-				onPlaybackSpeed = {
-					expanded = false
-					backStack.add(Screen.PlaybackSpeed)
 				}
 			)
 		}

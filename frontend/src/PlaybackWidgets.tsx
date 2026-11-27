@@ -12,7 +12,6 @@ import {
   DEFAULT_PLAYBACK_RATE,
   PLAYBACK_RATE_MAX,
   PLAYBACK_RATE_MIN,
-  PLAYBACK_RATE_PRESETS,
   PLAYBACK_RATE_STEP,
   formatPlaybackRate,
   sanitizePlaybackRate,
@@ -127,27 +126,6 @@ export function PlaybackRateControl({
               <span>2x</span>
               <span>3x</span>
             </div>
-          </div>
-          <div
-            className="playback-rate-presets"
-            role="group"
-            aria-label="常用倍速预设"
-          >
-            {PLAYBACK_RATE_PRESETS.map((preset) => {
-              const selected = Math.abs(cleanRate - preset) < 0.001;
-              const presetLabel = formatPlaybackRate(preset);
-              return (
-                <button
-                  key={preset}
-                  type="button"
-                  className={`playback-rate-preset ${selected ? "active" : ""}`}
-                  aria-pressed={selected}
-                  onClick={() => onChange(preset)}
-                >
-                  {presetLabel}
-                </button>
-              );
-            })}
           </div>
         </div>
       )}

@@ -1167,10 +1167,10 @@
   right: 0;
   bottom: calc(100% + 10px);
   z-index: 40;
-  width: min(280px, calc(100vw - 24px));
+  width: min(252px, calc(100vw - 24px));
   padding: 13px 14px;
   display: grid;
-  gap: 11px;
+  gap: 10px;
   border-radius: 16px;
   background: var(--glass-heavy);
   backdrop-filter: blur(24px) saturate(165%);
@@ -1308,43 +1308,6 @@
 
 .playback-rate-ticks span:nth-child(4) {
   right: 0;
-}
-
-.playback-rate-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.playback-rate-preset {
-  flex: 1 0 auto;
-  min-width: 34px;
-  height: 28px;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid var(--line-soft);
-  background: var(--subtle);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition:
-    background 140ms ease,
-    color 140ms ease,
-    border-color 140ms ease;
-}
-
-.playback-rate-preset:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.playback-rate-preset.active {
-  background: var(--soft);
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
-  font-weight: 700;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4954,6 +4917,6 @@
   .global-mini-player.player-dock .playback-rate-popover {
     right: 0;
     bottom: calc(100% + 10px);
-    width: min(280px, 100%);
+    width: min(252px, 100%);
   }
 }

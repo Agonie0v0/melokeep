@@ -86,8 +86,6 @@ import paige.navic.di.LocalNavStack
 import paige.navic.di.LocalSheetState
 import paige.navic.di.LocalSizeClass
 import paige.navic.di.LocalSnackBarState
-import paige.navic.domain.manager.playback.SleepTimerManager
-import paige.navic.domain.manager.playback.SleepTimerMode
 import paige.navic.domain.manager.runtime.PreferenceManager
 import paige.navic.domain.model.DomainSong
 import paige.navic.domain.model.lyrics.LyricsResult
@@ -100,18 +98,17 @@ import paige.navic.ui.component.common.BlendBackground
 import paige.navic.ui.component.common.ErrorBox
 import paige.navic.ui.component.layout.SheetScaffold
 import paige.navic.ui.component.layout.TopBarButton
-import paige.navic.ui.component.sheet.SleepTimerSheet
 import paige.navic.ui.component.toolbar.SheetActionButton
 import paige.navic.ui.core.UiState
 import paige.navic.ui.icons.Icons
 import paige.navic.ui.icons.filled.SkipNext
 import paige.navic.ui.icons.filled.SkipPrevious
-import paige.navic.ui.icons.outlined.Bedtime
 import paige.navic.ui.icons.outlined.Check
 import paige.navic.ui.icons.outlined.Download
 import paige.navic.ui.icons.outlined.KeyboardArrowDown
 import paige.navic.ui.icons.outlined.List
 import paige.navic.ui.icons.outlined.MoreHoriz
+import paige.navic.ui.icons.outlined.Speed
 import paige.navic.ui.navigation.PersistentViewModelStoreOwner
 import paige.navic.ui.navigation.Screen
 import paige.navic.ui.screen.lyrics.component.LyricsScreenContent
@@ -130,6 +127,7 @@ import paige.navic.ui.theme.meloSubtleBorder
 import paige.navic.ui.theme.positive
 import paige.navic.ui.theme.tabularNums
 import paige.navic.ui.util.playPauseIconPainter
+import kotlin.math.abs
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -141,6 +139,7 @@ private enum class NowPlayingStageMode {
 private data class NowPlayingUiSlice(
 	val currentSong: DomainSong?,
 	val isPaused: Boolean,
+	val playbackSpeed: Float,
 	val playbackMimeType: String?,
 	val playbackBitDepth: Int?,
 	val playbackSampleRate: Int?,
@@ -152,7 +151,6 @@ private data class NowPlayingUiSlice(
 fun NowPlayingScreen() {
 	val preferenceManager = koinInject<PreferenceManager>()
 	val player = koinInject<MediaPlayer>()
-	val sleepTimerManager = koinInject<SleepTimerManager>()
 	val backStack = LocalNavStack.current
 
 	val currentScreen = backStack.lastOrNull()
@@ -167,6 +165,7 @@ fun NowPlayingScreen() {
 				NowPlayingUiSlice(
 					currentSong = state.currentSong,
 					isPaused = state.isPaused,
+					playbackSpeed = state.playbackSpeed,
 					playbackMimeType = state.playbackMimeType,
 					playbackBitDepth = state.playbackBitDepth,
 					playbackSampleRate = state.playbackSampleRate,
@@ -179,6 +178,7 @@ fun NowPlayingScreen() {
 			NowPlayingUiSlice(
 				currentSong = state.currentSong,
 				isPaused = state.isPaused,
+				playbackSpeed = state.playbackSpeed,
 				playbackMimeType = state.playbackMimeType,
 				playbackBitDepth = state.playbackBitDepth,
 				playbackSampleRate = state.playbackSampleRate,
@@ -187,7 +187,6 @@ fun NowPlayingScreen() {
 		}
 	)
 	val song = playerSlice.currentSong
-	val sleepTimerMode by sleepTimerManager.mode.collectAsStateWithLifecycle()
 
 	val viewModel = koinViewModel<NowPlayingViewModel> { parametersOf(player) }
 	val songIsStarred by viewModel.songIsStarred.collectAsStateWithLifecycle()
@@ -198,7 +197,6 @@ fun NowPlayingScreen() {
 	if (stageMode == NowPlayingStageMode.LYRICS && !lyricsMounted) {
 		lyricsMounted = true
 	}
-	var sleepTimerOpen by rememberSaveable { mutableStateOf(false) }
 	var lyricsStyleSheetOpen by rememberSaveable { mutableStateOf(false) }
 	val lyricsOffsetMs = preferenceManager.playerLyricsOffsetMs
 
@@ -227,12 +225,11 @@ fun NowPlayingScreen() {
 				modifier = Modifier.alpha(if (isPlayerCurrent) 1f else 0f),
 				windowInsets = windowInsets,
 				stageMode = stageMode,
-				sleepTimerMode = sleepTimerMode,
-				sleepTimerLabel = sleepTimerManager.timeLeft?.let { "${it.inWholeMinutes.coerceAtLeast(1)}m" },
+				playbackSpeed = playerSlice.playbackSpeed,
 				lyricsOffsetMs = lyricsOffsetMs,
 				onDismiss = animateToDismiss,
 				onSelectStage = { stageMode = it },
-				onOpenSleepTimer = { sleepTimerOpen = true },
+				onOpenPlaybackSpeed = dropUnlessResumed { backStack.add(Screen.PlaybackSpeed) },
 				onOpenQueue = dropUnlessResumed { backStack.add(Screen.Queue) },
 				onOpenFullLyrics = dropUnlessResumed { backStack.add(Screen.Lyrics) },
 				onOpenLyricsStyle = { lyricsStyleSheetOpen = true },
@@ -344,9 +341,6 @@ fun NowPlayingScreen() {
 		}
 	}
 
-	if (sleepTimerOpen) {
-		SleepTimerSheet(onDismissRequest = { sleepTimerOpen = false })
-	}
 	LyricsStyleBottomSheet(
 		presented = lyricsStyleSheetOpen,
 		onDismissRequest = { lyricsStyleSheetOpen = false }
@@ -357,12 +351,11 @@ fun NowPlayingScreen() {
 private fun NowPlayingStageToolbar(
 	windowInsets: WindowInsets,
 	stageMode: NowPlayingStageMode,
-	sleepTimerMode: SleepTimerMode,
-	sleepTimerLabel: String?,
+	playbackSpeed: Float,
 	lyricsOffsetMs: Int,
 	onDismiss: () -> Unit,
 	onSelectStage: (NowPlayingStageMode) -> Unit,
-	onOpenSleepTimer: () -> Unit,
+	onOpenPlaybackSpeed: () -> Unit,
 	onOpenQueue: () -> Unit,
 	onOpenFullLyrics: () -> Unit,
 	onOpenLyricsStyle: () -> Unit,
@@ -432,23 +425,23 @@ private fun NowPlayingStageToolbar(
 			}
 		}
 
-		// 右侧动作组：🌙 定时微透胶囊 + (歌词模式下 ⋯ 微调菜单) + 队列按钮
+		// 右侧动作组：倍速微透胶囊 + (歌词模式下 ⋯ 微调菜单) + 队列按钮
 		Row(
 			horizontalArrangement = Arrangement.spacedBy(6.dp),
 			verticalAlignment = Alignment.CenterVertically
 		) {
-			val timerActive = sleepTimerMode !is SleepTimerMode.Disabled
+			val speedActive = abs(playbackSpeed - 1.0f) > 0.005f
 			Surface(
-				onClick = onOpenSleepTimer,
+				onClick = onOpenPlaybackSpeed,
 				shape = CircleShape,
-				color = if (timerActive) {
+				color = if (speedActive) {
 					MaterialTheme.colorScheme.meloGoldContainer
 				} else {
 					MaterialTheme.colorScheme.meloGlassSurface
 				},
 				border = BorderStroke(
 					0.8.dp,
-					if (timerActive) {
+					if (speedActive) {
 						MaterialTheme.colorScheme.meloGoldBorder
 					} else {
 						MaterialTheme.colorScheme.meloSubtleBorder
@@ -461,25 +454,19 @@ private fun NowPlayingStageToolbar(
 					horizontalArrangement = Arrangement.spacedBy(4.dp)
 				) {
 					Icon(
-						imageVector = Icons.Outlined.Bedtime,
-						contentDescription = "睡眠定时",
-						tint = if (timerActive) {
+						imageVector = Icons.Outlined.Speed,
+						contentDescription = "播放倍速",
+						tint = if (speedActive) {
 							MaterialTheme.colorScheme.meloGoldText
 						} else {
 							MaterialTheme.colorScheme.onSurfaceVariant
 						},
 						modifier = Modifier.size(15.dp)
 					)
-					val timerText = when (sleepTimerMode) {
-						is SleepTimerMode.Time -> sleepTimerLabel ?: "定时"
-						is SleepTimerMode.Songs -> "${sleepTimerMode.remaining}首"
-						is SleepTimerMode.EndOfQueue -> "队尾"
-						SleepTimerMode.Disabled -> "定时"
-					}
 					Text(
-						text = timerText,
+						text = "${playbackSpeed}x",
 						style = MaterialTheme.typography.labelSmall.tabularNums(),
-						color = if (timerActive) {
+						color = if (speedActive) {
 							MaterialTheme.colorScheme.meloGoldText
 						} else {
 							MaterialTheme.colorScheme.onSurfaceVariant
